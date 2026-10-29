@@ -1,0 +1,126 @@
+<link rel="stylesheet" href="wse-plugins/server/url-overlay/css/url-overlay.css?v=1.3.0">
+<div class="uo-plugin" id="uo-root" data-theme="light">
+
+  <div class="appbar">
+    <div class="brand"><div class="glyph" aria-hidden="true"></div><div><h2>URL Overlay</h2><div class="muted small">Burn a web page, such as a scoreboard, into the streams viewers watch</div></div></div>
+    <label class="inline" for="uo-app">Application <select id="uo-app" data-app></select></label>
+    <button class="status-pill" type="button" data-view="uo-server" data-server-pill title="Server and Chrome"><span class="dot" data-server-dot></span><span data-server-text>Server and Chrome</span></button>
+    <button class="btn icon" type="button" data-act="shortcuts" aria-label="How it works and keyboard shortcuts" title="How it works and keyboard shortcuts (?)">?</button>
+    <button class="btn sm" type="button" data-act="theme">Dark</button>
+  </div>
+
+  <nav class="steps" aria-label="Steps">
+    <button class="step" type="button" data-view="uo-overlay"><span class="n">1</span><span><strong>Overlay</strong><span class="s" data-step-note="uo-overlay">The pages and where they sit</span></span></button>
+    <button class="step" type="button" data-view="uo-template"><span class="n">2</span><span><strong>Template</strong><span class="s" data-step-note="uo-template">Put it in a transcoder template</span></span></button>
+    <button class="step" type="button" data-view="uo-streams"><span class="n">3</span><span><strong>Streams</strong><span class="s" data-step-note="uo-streams">Use the template on streams</span></span></button>
+    <button class="step" type="button" data-view="uo-live"><span class="n">4</span><span><strong>Live</strong><span class="s" data-step-note="uo-live">What viewers see now</span></span></button>
+  </nav>
+
+  <div class="banners" aria-live="polite"></div>
+
+  <!-- 1 OVERLAY -->
+  <section class="view" id="uo-overlay" aria-label="Overlay editor">
+    <div data-ov-empty class="empty" hidden><h3>No overlay yet</h3><p>An overlay holds the pages to burn in, for example the scoring vendor's clock and score.</p><button class="btn primary" type="button" data-act="new-overlay">New overlay</button></div>
+    <div class="ws" data-ov-editor hidden>
+      <div class="ws-head">
+        <label class="inline" for="uo-ov">Overlay <select id="uo-ov" data-ov></select></label>
+        <button class="btn sm" type="button" data-act="new-overlay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New overlay</button>
+        <span class="spacer"></span>
+        <div class="chips" data-ov-chips aria-label="Used by"></div>
+        <div class="menu">
+          <button class="btn icon" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for this overlay" data-menu="ov">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          <div class="menu-list" role="menu" data-menu-list="ov" hidden>
+            <button type="button" role="menuitem" data-act="duplicate-overlay">Duplicate</button>
+            <hr>
+            <button type="button" role="menuitem" class="danger" data-act="delete-overlay">Delete overlay...</button>
+          </div>
+        </div>
+      </div>
+      <div class="panes">
+        <div class="pane">
+          <div class="pane-h"><span class="lbl-caps">Pages</span><button class="btn ghost sm" type="button" data-act="add-layer">+ Add page</button></div>
+          <div class="pages" data-layers></div>
+          <p class="hint">Top of the list draws on top. Drag or use the arrows to reorder.</p>
+          <div data-ov-settings></div>
+        </div>
+        <div class="pane">
+          <div class="stage-bar">
+            <label class="inline">Preview on <select data-preview aria-label="Preview stream"></select></label>
+            <span class="livebadge" data-live-badge hidden><i></i>LIVE</span>
+            <span class="spacer"></span>
+            <label class="inline"><input type="checkbox" data-guides> Safe area</label>
+          </div>
+          <div class="stage-wrap"><div data-stage></div></div>
+          <div class="row mt-s"><span class="coords" data-coords></span></div>
+          <p class="hint">Drag a page to move it, its corners to resize, arrow keys to nudge. Pages marked <strong>draft</strong> show unsaved settings; viewers see them after Save.</p>
+        </div>
+        <div class="pane" data-inspector></div>
+      </div>
+      <div class="actionbar" aria-live="polite" data-ov-bar></div>
+    </div>
+  </section>
+
+  <!-- 2 TEMPLATE -->
+  <section class="view" id="uo-template" aria-label="Templates">
+    <div class="ws">
+      <div class="ws-head">
+        <h2>Transcoder templates</h2><span class="spacer"></span>
+        <button class="btn sm" type="button" data-act="new-template"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New template</button>
+        <div class="menu">
+          <button class="btn icon" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for this template" data-menu="tpl">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+          <div class="menu-list" role="menu" data-menu-list="tpl" hidden>
+            <button type="button" role="menuitem" class="danger" data-act="delete-template" disabled>Delete template...</button>
+          </div>
+        </div>
+      </div>
+      <div class="panes two-pane">
+        <div class="pane">
+          <div data-tpl-list><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+          <p class="hint">Templates made here open in the builder. Any other can be given an overlay as a copy.</p>
+        </div>
+        <div class="pane" data-tpl-edit></div>
+      </div>
+      <div class="actionbar" aria-live="polite" data-tpl-bar></div>
+    </div>
+  </section>
+
+  <!-- 3 STREAMS -->
+  <section class="view" id="uo-streams" aria-label="Streams">
+    <div class="ws">
+      <div class="ws-head"><h2 data-st-title>Streams</h2><span class="spacer"></span><button class="btn sm" type="button" data-act="add-stream">+ Add a stream name</button></div>
+      <div class="pane">
+        <p class="hint mt-0">Using a template on a stream gives that stream its own copy, so other streams are not affected.</p>
+        <div data-st-table><div class="skel"></div><div class="skel"></div></div>
+        <div data-st-plan></div>
+        <div data-st-order></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 LIVE -->
+  <section class="view" id="uo-live" aria-label="Live">
+    <div class="ws">
+      <div class="ws-head"><h2>What viewers see</h2><span class="spacer"></span><label class="inline" for="uo-live-s">Stream <select id="uo-live-s" data-live-stream></select></label></div>
+      <div class="pane" data-live></div>
+    </div>
+  </section>
+
+  <!-- SERVER -->
+  <section class="view" id="uo-server" aria-label="Server and Chrome">
+    <div class="row mb-m"><button class="btn sm" type="button" data-back>Back to the steps</button></div>
+    <div class="two" data-server><div class="skel"></div></div>
+  </section>
+
+  <div class="toasts" aria-live="polite" data-toasts></div>
+</div>
+<script src="wse-plugins/server/url-overlay/vendor/hls.min.js?v=1.6.16"></script>
+<script src="wse-plugins/server/url-overlay/js/uo-core.js?v=1.3.0"></script>
+<script src="wse-plugins/server/url-overlay/js/uo-fields.js?v=1.3.0"></script>
+<script src="wse-plugins/server/url-overlay/js/uo-overlay.js?v=1.3.0"></script>
+<script src="wse-plugins/server/url-overlay/js/uo-template.js?v=1.3.0"></script>
+<script src="wse-plugins/server/url-overlay/js/uo-streams.js?v=1.3.0"></script>
+<script src="wse-plugins/server/url-overlay/js/uo-live.js?v=1.3.0"></script>
+<script src="wse-plugins/server/url-overlay/js/uo-server.js?v=1.3.0"></script>
+<script>window.UrlOverlay.init(document.getElementById('uo-root'));</script>

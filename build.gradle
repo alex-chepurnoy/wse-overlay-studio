@@ -1,0 +1,19 @@
+allprojects {
+    group = 'com.wowza.wms.plugin.urloverlay'
+    version = rootProject.version
+}
+
+subprojects {
+    apply plugin: 'java-library'
+
+    repositories {
+        mavenCentral()
+    }
+
+    // Java 17 bytecode for the module and the installer; the capture service and the bridge set 21. Compiled with the
+    // JDK that runs Gradle (21 or newer), so no toolchain download is needed.
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 17
+        options.encoding = 'UTF-8'
+    }
+}

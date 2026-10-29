@@ -1,0 +1,107 @@
+// The module compiles and tests against the jars of a Wowza Streaming Engine 4.11.1 or later install's lib/ folder:
+// wms-server.jar and the rest of com.wowza.wms, Restlet (org.restlet) and Jackson (com.fasterxml.jackson), all provided
+// by WSE at run time and never packaged. Wowza does not publish them to a Maven repository, so a builder outside Wowza
+// installs WSE (a trial or developer license is enough) and points the build at it, in this order:
+//   -PwseLibDir=<WSE install>/lib       (command line, or wseLibDir in ~/.gradle/gradle.properties)
+//   WSE_HOME=<WSE install>               (environment variable; its lib/ folder is used)
+//   /usr/local/WowzaStreamingEngine/lib  (the Linux default)
+//   the single install under C:\Program Files\Wowza Media Systems (several there, and no override, is an error)
+// The folder is looked up only when a task needs the module's classpath (compile, test, jar, and so the installer's
+// payload), so the capture service, the bridge and the shared code build without WSE.
+def resolveWseLib = {
+    if (project.hasProperty('wseLibDir')) {
+        return file(project.property('wseLibDir'))
+    }
+    def home = System.getenv('WSE_HOME')
+    if (home) {
+        return file("${home}/lib")
+    }
+    def linux = file('/usr/local/WowzaStreamingEngine/lib')
+    if (linux.isDirectory()) {
+        return linux
+    }
+    def windowsRoot = file('C:/Program Files/Wowza Media Systems')
+    def installs = windowsRoot.isDirectory()
+            ? windowsRoot.listFiles().findAll { it.name.startsWith('Wowza Streaming Engine') && new File(it, 'lib').isDirectory() }
+            : []
+    if (installs.size() == 1) {
+        return new File(installs[0], 'lib')
+    }
+    if (installs.size() > 1) {
+        throw new GradleException("Several WSE installs found, pass -PwseLibDir=<install>/lib or set WSE_HOME:\n  " + installs.join('\n  '))
+    }
+    throw new GradleException('The URL Overlay module compiles against a Wowza Streaming Engine install, and none was found. '
+            + 'Pass -PwseLibDir=<WSE install>/lib or set WSE_HOME=<WSE install>.')
+}
+def wseLibDir = providers.provider {
+    def dir = resolveWseLib()
+    if (!dir.isDirectory()) {
+        throw new GradleException("WSE lib directory not found: ${dir}. Pass -PwseLibDir=<WSE install>/lib or set WSE_HOME=<WSE install>.")
+    }
+    logger.info("Compiling against WSE lib: ${dir}")
+    dir
+}
+// resolved when a task needs the classpath, not when Gradle configures the build
+def wseJars = files(wseLibDir.map { dir -> fileTree(dir: dir, include: '*.jar') })
+
+dependencies {
+    // Provided by WSE at run time; never packaged.
+    compileOnly wseJars
+
+    testImplementation wseJars
+    testImplementation platform('org.junit:junit-bom:5.10.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def generatedDir = layout.buildDirectory.dir('generated/java')
+
+tasks.register('generateReleaseInfo') {
+    group = 'build'
+    def ver = project.version
+    outputs.dir generatedDir
+    inputs.property('version', ver)
+    doLast {
+        def dir = generatedDir.get().dir('com/wowza/wms/plugin/urloverlay').asFile
+        dir.mkdirs()
+        new File(dir, 'ReleaseInfo.java').text =
+                """|package com.wowza.wms.plugin.urloverlay;
+                   |public class ReleaseInfo {
+                   |    public static String getProject() { return "wse-plugin-url-overlay"; }
+                   |    public static String getVersion() { return "${ver}"; }
+                   |}
+                   |""".stripMargin()
+    }
+}
+
+sourceSets.main.java.srcDir generatedDir
+compileJava.dependsOn generateReleaseInfo
+
+tasks.named('jar') {
+    archiveBaseName = 'wse-plugin-url-overlay'
+    manifest {
+        attributes(
+                'Name': 'wse-plugin-url-overlay',
+                'Build-Version': project.version,
+                'Created-By': "${System.properties['java.version']} (${System.properties['java.vendor']})",
+                'Gradle-Version': "Gradle ${gradle.gradleVersion}"
+        )
+    }
+    metaInf {
+        from rootProject.file('LICENSE.txt')
+    }
+}
+
+test {
+    useJUnitPlatform()
+    // The coexistence test inspects the built jar.
+    dependsOn jar
+    systemProperty 'urloverlay.jar', jar.archiveFile.get().asFile.absolutePath
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
+}
+
+// the byte-preserving config edits the installer uses, for adding the module to an application from the page
+sourceSets.main.java.srcDir(rootProject.file('shared/src/main/java'))

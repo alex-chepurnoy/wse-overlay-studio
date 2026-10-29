@@ -1,0 +1,46 @@
+<Root>
+	<Transcode>
+		<Description>Managed by URL Overlay: starter urloverlay-gpu-eva. NVIDIA decode, scale and encode through EVA, 720p, with URL overlays.</Description>
+		<Decode>
+			<Video>
+				<Implementation>NVCUVID_EVA</Implementation>
+				<Deinterlace>false</Deinterlace>
+				<!-- Required for URL overlays. Turns off zero-copy GPU paths in this transcoder: frames pass through system memory. -->
+				<EnableDynamicOverlays>true</EnableDynamicOverlays>
+			</Video>
+		</Decode>
+		<Scale>
+			<Implementation>CUDA_EVA</Implementation>
+		</Scale>
+		<Encodes>
+			<Encode>
+				<Name>720p</Name>
+				<Enable>true</Enable>
+				<Description>1280 x 720 with the overlay</Description>
+				<StreamName>${SourceStreamName}_720p</StreamName>
+				<Video>
+					<Codec>H.264</Codec>
+					<Implementation>NVENC_EVA</Implementation>
+					<GPUID>-1</GPUID>
+					<Profile>main</Profile>
+					<Bitrate>2500000</Bitrate>
+					<KeyFrameInterval>
+						<FollowSource>false</FollowSource>
+						<Interval>60</Interval>
+					</KeyFrameInterval>
+					<FrameSize>
+						<FitMode>fit-height</FitMode>
+						<Width>0</Width>
+						<Height>720</Height>
+						<Crop>0,0,0,0</Crop>
+						<SourceRectangle></SourceRectangle>
+					</FrameSize>
+				</Video>
+				<Audio>
+					<Codec>AAC</Codec>
+					<Bitrate>96000</Bitrate>
+				</Audio>
+			</Encode>
+		</Encodes>
+	</Transcode>
+</Root>

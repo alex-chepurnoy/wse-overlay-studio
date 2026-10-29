@@ -1,0 +1,98 @@
+// The capture service: Chrome under its own unprivileged account, outside WSE, serving frames to the module over a
+// Unix domain socket. Runs on its own Java 21 runtime with Selenium beside it; it needs no WSE classes.
+
+def payloadLib = layout.buildDirectory.dir('payload/lib')
+
+// Selenium and the libraries it needs at run time, from Maven Central. Each is taken without its own dependencies: the
+// service uses chromedriver only, so the rest of Selenium's tree (other browsers, OpenTelemetry, Netty) stays out.
+def runtimeLibs = [
+        'org.seleniumhq.selenium:selenium-api:4.21.0',
+        'org.seleniumhq.selenium:selenium-chrome-driver:4.21.0',
+        'org.seleniumhq.selenium:selenium-chromium-driver:4.21.0',
+        'org.seleniumhq.selenium:selenium-http:4.21.0',
+        'org.seleniumhq.selenium:selenium-java:4.21.0',
+        'org.seleniumhq.selenium:selenium-json:4.21.0',
+        'org.seleniumhq.selenium:selenium-manager:4.21.0',
+        'org.seleniumhq.selenium:selenium-os:4.21.0',
+        'org.seleniumhq.selenium:selenium-remote-driver:4.21.0',
+        'org.seleniumhq.selenium:selenium-support:4.21.0',
+        'com.google.guava:guava:33.2.0-jre',
+        'dev.failsafe:failsafe:3.3.2',
+        'org.apache.commons:commons-exec:1.4.0',
+]
+
+dependencies {
+    runtimeLibs.each { implementation(it) { transitive = false } }
+
+    testImplementation platform('org.junit:junit-bom:5.10.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+}
+
+// the protocol, the egress rules and the browser pool are shared with the module
+sourceSets.main.java.srcDir(rootProject.file('shared/src/main/java'))
+
+def generatedDir = layout.buildDirectory.dir('generated/java')
+
+tasks.register('generateCaptureVersion') {
+    group = 'build'
+    def ver = project.version
+    outputs.dir generatedDir
+    inputs.property('version', ver)
+    doLast {
+        def dir = generatedDir.get().dir('com/wowza/wms/plugin/urloverlay/capture').asFile
+        dir.mkdirs()
+        new File(dir, 'CaptureVersion.java').text =
+                """|package com.wowza.wms.plugin.urloverlay.capture;
+                   |public final class CaptureVersion {
+                   |    public static final String VERSION = "${ver}";
+                   |    private CaptureVersion() {}
+                   |}
+                   |""".stripMargin()
+    }
+}
+
+sourceSets.main.java.srcDir generatedDir
+compileJava.dependsOn generateCaptureVersion
+
+def runtimeJars = configurations.runtimeClasspath
+
+tasks.named('jar') {
+    archiveBaseName = 'wse-url-overlay-capture'
+    inputs.files(runtimeJars)
+    manifest {
+        attributes(
+                'Main-Class': 'com.wowza.wms.plugin.urloverlay.capture.CaptureServiceMain',
+                'Build-Version': project.version
+        )
+    }
+    // the libraries' names are known once the configuration resolves, so the Class-Path is set when the jar is built
+    doFirst {
+        manifest.attributes('Class-Path': runtimeJars.files.collect { 'lib/' + it.name }.sort().join(' '))
+    }
+    metaInf {
+        from rootProject.file('LICENSE.txt')
+    }
+}
+
+// The installer's input: the service jar in build/libs, its libraries in build/payload/lib. The jar's Class-Path names
+// them as lib/<file>, so the program folder holds the jar with a lib folder beside it.
+tasks.register('capturePayload', Copy) {
+    group = 'build'
+    description = 'Builds the capture service jar and copies its runtime libraries to build/payload/lib.'
+    dependsOn tasks.named('jar')
+    from runtimeJars
+    into payloadLib
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
+}

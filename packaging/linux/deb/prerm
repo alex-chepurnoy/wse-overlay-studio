@@ -1,0 +1,17 @@
+#!/bin/sh
+# Takes the module out of Wowza Streaming Engine before the package's files go. Skipped on upgrade, where the new
+# package's postinst installs over it. A running WSE (exit 3) stops the removal, so the uninstaller is still there once
+# WSE is stopped; any other failure is reported and the removal goes on.
+set -u
+if [ "${1:-}" = "remove" ]; then
+	/opt/wse-url-overlay/uninstall.sh --yes
+	code=$?
+	if [ "$code" -eq 3 ]; then
+		echo "Stop Wowza Streaming Engine (sudo systemctl stop WowzaStreamingEngine), then remove the package again."
+		exit 1
+	fi
+	if [ "$code" -ne 0 ]; then
+		echo "URL Overlay could not be taken out of WSE; run the installer jar's Uninstall by hand (README)."
+	fi
+fi
+exit 0

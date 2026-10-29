@@ -1,0 +1,89 @@
+// The installer: plain JDK, no WSE classes, so it runs on the WSE-bundled JRE before WSE knows about the module.
+// Its jar carries the payload: the module jar, the plugin page, the starter templates, the Manager bridge's class files
+// (bridge/, which go into <manager>/temp) and the capture service with its libraries (capture/). Selenium belongs to the
+// capture service and never goes into WSE's lib/.
+// Java 17 bytecode and the repositories come from the root build.
+
+base {
+    archivesName = 'wse-plugin-url-overlay-installer'
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def payloadDir = layout.buildDirectory.dir('payload')
+
+evaluationDependsOn(':capture')
+def captureProject = project(':capture')
+def captureJarName = "wse-url-overlay-capture-${project.version}.jar"
+
+// Fills build/payload/payload/** and writes payload/index.txt, one path per line, because a jar's resources cannot be
+// listed reliably at run time.
+tasks.register('payload') {
+    group = 'build'
+    def moduleJar = project(':module').tasks.named('jar')
+    def bridgeClasses = project(':bridge').tasks.named('compileJava')
+    def bridgeOut = project(':bridge').layout.buildDirectory.dir('classes/java/main')
+    dependsOn moduleJar, bridgeClasses, ':capture:capturePayload'
+    inputs.files(moduleJar)
+    inputs.files(bridgeClasses)
+    inputs.files(captureProject.tasks.named('jar'))
+    inputs.files(captureProject.tasks.named('capturePayload'))
+    inputs.dir(rootProject.file('ui'))
+    inputs.dir(rootProject.file('module/src/main/resources/starters'))
+    outputs.dir payloadDir
+    doLast {
+        def root = payloadDir.get().dir('payload').asFile
+        project.delete(root)
+        project.copy { from moduleJar; into new File(root, 'lib') }
+        project.copy { from rootProject.file('ui'); into new File(root, 'ui') }
+        // the page loads its own css and js with ?v=<version>, so a browser never runs a cached script from an older install
+        def index = new File(root, 'ui/index.html')
+        index.text = index.text.replaceAll(/(wse-plugins\/server\/url-overlay\/(?:css|js)\/[^"?]+)\?v=[^"]*/, '$1?v=' + project.version)
+        project.copy { from rootProject.file('module/src/main/resources/starters'); include '*.xml'; into new File(root, 'templates') }
+        project.copy { from bridgeOut; include 'com/wowza/wms/webapp/urloverlay/*.class'; into new File(root, 'bridge') }
+        def capture = new File(root, 'capture')
+        project.copy { from captureProject.layout.buildDirectory.file("libs/${captureJarName}"); into capture }
+        project.copy { from captureProject.layout.buildDirectory.dir('payload/lib'); include '*.jar'; into new File(capture, 'lib') }
+        if (!new File(capture, captureJarName).isFile()) {
+            throw new GradleException("capture/build/libs/${captureJarName} is missing after :capture:capturePayload")
+        }
+        def files = []
+        root.eachFileRecurse(groovy.io.FileType.FILES) { files << root.toPath().relativize(it.toPath()).toString().replace(File.separator, '/') }
+        new File(root, 'index.txt').text = files.sort().join('\n') + '\n'
+        new File(root, 'version.txt').text = project.version.toString() + '\n'
+    }
+}
+
+sourceSets.main.resources.srcDir(payloadDir)
+tasks.named('processResources') { dependsOn 'payload' }
+
+jar {
+    manifest {
+        attributes('Main-Class': 'com.wowza.wms.plugin.urloverlay.install.Main',
+                'Implementation-Title': 'wse-plugin-url-overlay-installer',
+                'Implementation-Version': project.version)
+    }
+}
+
+test {
+    useJUnitPlatform()
+    // copied WSE conf trees used by the installer tests
+    systemProperty 'urloverlay.fixtures', rootProject.file('tests/fixtures/installer').absolutePath
+}
+
+sourceSets.main.java.srcDir(rootProject.file('shared/src/main/java'))
+
+// Paints the setup window's screens to docs/images/setup-*.png with sample data. A documentation tool from the test
+// sources; nothing of it goes into the installer jar.
+tasks.register('setupScreenshots', JavaExec) {
+    group = 'documentation'
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.wowza.wms.plugin.urloverlay.install.SetupScreenshots'
+    args rootProject.file('docs/images').absolutePath
+    systemProperty 'urloverlay.fixtures', rootProject.file('tests/fixtures/installer').absolutePath
+}

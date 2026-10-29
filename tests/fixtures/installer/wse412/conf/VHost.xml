@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Root version="2">
+	<VHost>
+		<Description></Description>
+		<HostPortList>
+			<HostPort>
+				<Name>Default Streaming</Name>
+				<Type>Streaming</Type>
+				<ProcessorCount>${com.wowza.wms.TuningAuto}</ProcessorCount>
+				<IpAddress>*</IpAddress>
+				<Port>1935</Port>
+				<HTTPIdent2Response></HTTPIdent2Response>
+				<HTTPProviders>
+					<HTTPProvider>
+						<BaseClass>com.wowza.wms.http.HTTPCrossdomain</BaseClass>
+						<RequestFilters>*crossdomain.xml</RequestFilters>
+						<AuthenticationMethod>none</AuthenticationMethod>
+						<PasswordEncodingScheme>none</PasswordEncodingScheme>
+					</HTTPProvider>
+					<HTTPProvider>
+						<BaseClass>com.wowza.wms.http.HTTPServerVersion</BaseClass>
+						<RequestFilters>*ServerVersion</RequestFilters>
+						<AuthenticationMethod>none</AuthenticationMethod>
+						<PasswordEncodingScheme>none</PasswordEncodingScheme>
+					</HTTPProvider>
+				</HTTPProviders>
+			</HostPort>
+			<HostPort>
+				<Name>Default Admin</Name>
+				<Type>Admin</Type>
+				<ProcessorCount>${com.wowza.wms.TuningAuto}</ProcessorCount>
+				<IpAddress>*</IpAddress>
+				<Port>8086</Port>
+				<HTTPProviders>
+					<HTTPProvider>
+						<BaseClass>com.wowza.wms.http.HTTPServerInfoXML</BaseClass>
+						<RequestFilters>serverinfo*</RequestFilters>
+						<AuthenticationMethod>admin-digest</AuthenticationMethod>
+						<PasswordEncodingScheme>bcrypt</PasswordEncodingScheme>
+					</HTTPProvider>
+				</HTTPProviders>
+			</HostPort>
+			<!-- an added 443 host port with SSL; key store details shortened, no password -->
+			<HostPort>
+				<Name>localhost.localhost</Name>
+				<Type>Streaming</Type>
+				<ProcessorCount>${com.wowza.wms.TuningAuto}</ProcessorCount>
+				<IpAddress>*</IpAddress>
+				<Port>443</Port>
+				<HTTPProviders>
+					<HTTPProvider>
+						<BaseClass>com.wowza.wms.http.HTTPCrossdomain</BaseClass>
+						<RequestFilters>*crossdomain.xml</RequestFilters>
+						<AuthenticationMethod>none</AuthenticationMethod>
+						<PasswordEncodingScheme>none</PasswordEncodingScheme>
+					</HTTPProvider>
+				</HTTPProviders>
+				<SSLConfig>
+					<KeyStorePath>${com.wowza.wms.context.VHostConfigHome}/conf/localhost.localhost.jks</KeyStorePath>
+					<KeyStoreType>JKS</KeyStoreType>
+				</SSLConfig>
+			</HostPort>
+		</HostPortList>
+	</VHost>
+</Root>

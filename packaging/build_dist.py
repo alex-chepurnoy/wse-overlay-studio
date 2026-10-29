@@ -1,0 +1,299 @@
+"""Builds dist/wse-url-overlay-<version>/: the Windows setup program, the Windows zip, the Linux .deb and tarball,
+the docs, and SHA256SUMS over all of them.
+
+    python packaging/build_dist.py [--skip-tests] [--skip-exe] [--maintainer NAME]
+
+Needs JDK 21 (jpackage) on the PATH and WiX 3.14.1 in tools/wix/3.14.1 for the setup program. The .deb is assembled
+here (ar, tar), so dpkg-deb is not needed. Archive entries carry a fixed time, so the zip, tarball and .deb come out
+byte for byte the same from the same inputs; the setup program does not.
+"""
+import argparse
+import glob
+import gzip
+import hashlib
+import io
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import zipfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PKG = os.path.join(ROOT, 'packaging')
+FIXED_TIME = 1767225600  # 2026-01-01 00:00 UTC
+APP_NAME = 'Wowza URL Overlay'
+# java.net.http fetches Chrome for Testing over TLS, whose handshakes need jdk.crypto.ec on Java 21; without it
+# every download fails with handshake_failure. java.desktop is Swing, for
+# the setup window.
+RUNTIME_MODULES = 'java.base,java.desktop,java.net.http,jdk.crypto.ec'
+# The same runtime is copied next to the capture service on Windows, so it also carries every module the service and
+# its libraries (Selenium) need, as jdeps lists them from the payload the installer jar was built with.
+CAPTURE_PAYLOAD = os.path.join(ROOT, 'installer', 'build', 'payload', 'payload', 'capture')
+UPGRADE_UUID = '6f0b6b8e-3c1e-4c55-9f0e-2a7d6b1f4e21'  # stays the same across versions, so a new setup program upgrades
+DEB_NAME = 'wse-url-overlay'
+DEB_PREFIX = 'opt/wse-url-overlay'
+# Maintainer field of the .deb (--maintainer). The package is assembled here, not by dpkg-deb, so nothing requires an
+# address in it; Debian policy and lintian expect "Name <address>".
+DEB_MAINTAINER = 'Wowza Media Systems'
+# Chrome stable's Depends (Google's apt index, 156.0.8078.73-1) without the ones a server has or Chrome for Testing
+# does not use; libasound2 was renamed libasound2t64 on newer Debian and Ubuntu
+DEB_RECOMMENDS = ('ca-certificates, fontconfig, fonts-liberation, libasound2 | libasound2t64, libatk-bridge2.0-0, '
+                  'libatk1.0-0, libatspi2.0-0, libcairo2, libcups2, libdbus-1-3, libexpat1, libgbm1, libglib2.0-0, '
+                  'libgtk-3-0 | libgtk-4-1, libnspr4, libnss3, libpango-1.0-0, libudev1, libvulkan1, libx11-6, '
+                  'libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, libxrandr2')
+
+
+def run(cmd, **kw):
+    print('>', ' '.join(cmd), flush=True)
+    subprocess.run(cmd, cwd=ROOT, check=True, **kw)
+
+
+def remove(path):
+    """Deletes a tree, including the read-only files a linked Java runtime has."""
+    def retry(func, p, _exc):
+        os.chmod(p, 0o700)
+        func(p)
+    if os.path.exists(path):
+        shutil.rmtree(path, onexc=retry)
+
+
+def version():
+    for line in open(os.path.join(ROOT, 'gradle.properties'), encoding='utf-8'):
+        if line.strip().startswith('version'):
+            return line.split('=', 1)[1].strip()
+    raise SystemExit('No version in gradle.properties')
+
+
+def crlf(data):
+    return data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+
+
+def lf(data):
+    return data.replace(b'\r\n', b'\n')
+
+
+def read(path):
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+# The documents README.md links to, which every package carries at the same paths
+DOCS = ['docs/BUILD.md', 'docs/USAGE.md', 'docs/DESIGN.md']
+
+
+def docs():
+    """Files every package carries, as (archive path, bytes). Fails when a document README.md links to is missing."""
+    missing = [d for d in DOCS + ['docs/images'] if not os.path.exists(os.path.join(ROOT, d))]
+    if missing:
+        raise SystemExit('Missing release documents (README.md links to them): ' + ', '.join(missing))
+    images = os.path.join(ROOT, 'docs', 'images')
+    out = [(d, read(os.path.join(ROOT, d))) for d in DOCS]
+    for name in sorted(os.listdir(images)):
+        if os.path.isfile(os.path.join(images, name)):
+            out.append(('docs/images/' + name, read(os.path.join(images, name))))
+    out += [('README.md', read(os.path.join(ROOT, 'README.md'))),
+           ('THIRD-PARTY-NOTICES.md', read(os.path.join(ROOT, 'THIRD-PARTY-NOTICES.md'))),
+           ('LICENSE.txt', read(os.path.join(ROOT, 'LICENSE.txt'))),
+           ('licenses/apache-2.0.txt', read(os.path.join(PKG, 'licenses', 'apache-2.0.txt')))]
+    return out
+
+
+def write_zip(path, entries):
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        for name, data, _mode in entries:
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, data)
+
+
+def tar_bytes(entries, dirs=()):
+    """A gzipped tar of (path, bytes, mode), with the given directories first; root:root, fixed time."""
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode='wb', mtime=FIXED_TIME) as gz:
+        with tarfile.open(fileobj=gz, mode='w', format=tarfile.GNU_FORMAT) as t:
+            for d in dirs:
+                ti = tarfile.TarInfo(d)
+                ti.type, ti.mode, ti.mtime, ti.uname, ti.gname = tarfile.DIRTYPE, 0o755, FIXED_TIME, 'root', 'root'
+                t.addfile(ti)
+            for name, data, mode in entries:
+                ti = tarfile.TarInfo(name)
+                ti.size, ti.mode, ti.mtime, ti.uname, ti.gname = len(data), mode, FIXED_TIME, 'root', 'root'
+                t.addfile(ti, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def parents(paths):
+    out = []
+    for p in paths:
+        parts = p.strip('./').split('/')[:-1]
+        for k in range(1, len(parts) + 1):
+            d = './' + '/'.join(parts[:k]) + '/'
+            if d not in out:
+                out.append(d)
+    return sorted(out)
+
+
+def ar(path, members):
+    """A Debian package is an ar archive: debian-binary, control.tar.gz, data.tar.gz, in that order."""
+    with open(path, 'wb') as f:
+        f.write(b'!<arch>\n')
+        for name, data in members:
+            header = (name.ljust(16) + str(FIXED_TIME).ljust(12) + '0'.ljust(6) + '0'.ljust(6) + '100644'.ljust(8)
+                      + str(len(data)).ljust(10) + '`\n')
+            f.write(header.encode('ascii'))
+            f.write(data)
+            if len(data) % 2:
+                f.write(b'\n')
+
+
+def linux_files(jar_name, jar):
+    lx = os.path.join(PKG, 'linux')
+    return [(jar_name, jar, 0o644),
+            ('install.sh', lf(read(os.path.join(lx, 'install.sh'))), 0o755),
+            ('uninstall.sh', lf(read(os.path.join(lx, 'uninstall.sh'))), 0o755),
+            ('update-chrome.sh', lf(read(os.path.join(lx, 'update-chrome.sh'))), 0o755),
+            ('find-java.sh', lf(read(os.path.join(lx, 'find-java.sh'))), 0o644)] + \
+           [(n, lf(d) if n.endswith(('.md', '.txt')) else d, 0o644) for n, d in docs()]
+
+
+def build_deb(path, ver, jar_name, jar, maintainer):
+    data_entries = [('./' + DEB_PREFIX + '/' + n, d, m) for n, d, m in linux_files(jar_name, jar)]
+    data_entries.append(('./usr/share/doc/' + DEB_NAME + '/copyright',
+                         lf(read(os.path.join(ROOT, 'THIRD-PARTY-NOTICES.md'))), 0o644))
+    data = tar_bytes(data_entries, parents([e[0] for e in data_entries]))
+    size_kb = sum(len(d) for _n, d, _m in data_entries) // 1024 + 1
+    md5 = ''.join('%s  %s\n' % (hashlib.md5(d).hexdigest(), n[2:]) for n, d, _m in data_entries).encode('utf-8')
+    control = ('Package: %s\nVersion: %s\nArchitecture: all\nMaintainer: %s\nInstalled-Size: %d\nSection: video\n'
+               'Priority: optional\nRecommends: %s\nDescription: URL Overlay for Wowza Streaming Engine\n'
+               ' Captures a web page with headless Chrome and composites it onto live streams in the\n'
+               ' Wowza Streaming Engine transcoder. Adds the module to /usr/local/WowzaStreamingEngine and\n'
+               ' sets up the capture service WowzaURLOverlayCapture (system user wse-url-overlay, Chrome for\n'
+               ' Testing downloaded during the install into /opt/wse-url-overlay).\n'
+               % (DEB_NAME, ver, maintainer, size_kb, DEB_RECOMMENDS)).encode('utf-8')
+    deb = os.path.join(PKG, 'linux', 'deb')
+    ctrl = tar_bytes([('./control', control, 0o644), ('./md5sums', md5, 0o644),
+                      ('./postinst', lf(read(os.path.join(deb, 'postinst'))), 0o755),
+                      ('./prerm', lf(read(os.path.join(deb, 'prerm'))), 0o755)], ['./'])
+    ar(path, [('debian-binary', b'2.0\n'), ('control.tar.gz', ctrl), ('data.tar.gz', data)])
+
+
+def capture_modules():
+    """The JDK modules the capture service and its libraries use, from jdeps."""
+    jars = sorted(glob.glob(os.path.join(CAPTURE_PAYLOAD, '*.jar')))
+    libs = sorted(glob.glob(os.path.join(CAPTURE_PAYLOAD, 'lib', '*.jar')))
+    if not jars:
+        raise SystemExit('The installer payload has no capture service in ' + CAPTURE_PAYLOAD)
+    r = subprocess.run(['jdeps', '--print-module-deps', '--ignore-missing-deps', '--multi-release', '21',
+                        '--class-path', os.pathsep.join(libs)] + jars + libs, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit('jdeps could not list the modules the capture service needs:\n' + r.stdout + r.stderr)
+    # jdeps prints split-package warnings first; the module list is its last line
+    lines = [l for l in r.stdout.splitlines() if l.strip() and not l.startswith('Warning:')]
+    if not lines:
+        raise SystemExit('jdeps printed no module list for the capture service')
+    return {m for m in lines[-1].strip().split(',') if m}
+
+
+def runtime_modules():
+    return ','.join(sorted(set(RUNTIME_MODULES.split(',')) | capture_modules()))
+
+
+def check_runtime(runtime, modules):
+    """Fails the build when the linked runtime lacks a module the installer needs."""
+    java = os.path.join(runtime, 'bin', 'java.exe')
+    listed = subprocess.run([java, '--list-modules'], capture_output=True, text=True, check=True).stdout
+    have = {line.split('@')[0] for line in listed.split()}
+    missing = set(modules.split(',')) - have
+    if missing:
+        raise SystemExit('The setup program runtime lacks ' + ', '.join(sorted(missing)))
+    print('runtime modules:', ', '.join(sorted(have)))
+
+
+def build_exe(out_dir, ver, jar_path):
+    stage = os.path.join(ROOT, 'build', 'pkg')
+    modules = runtime_modules()
+    for d in ('input', 'temp', 'out'):
+        remove(os.path.join(stage, d))
+    os.makedirs(os.path.join(stage, 'input'))
+    shutil.copy2(jar_path, os.path.join(stage, 'input'))
+    # three launchers: the setup window (the Start menu entry, and what the setup program opens when it finishes), the
+    # removal window, and a console one for scripts and for the setup program's own removal step (main.wxs)
+    launchers = {'Uninstall URL Overlay': 'arguments=Uninstall --gui\nwin-console=false\nwin-menu=true\n',
+                 'urloverlay-cli': 'win-console=true\nwin-menu=false\n'}
+    extra = []
+    for name, text in launchers.items():
+        props = os.path.join(stage, name.replace(' ', '-') + '.properties')
+        with open(props, 'w', encoding='utf-8') as f:
+            f.write(text)
+        extra += ['--add-launcher', name + '=' + props]
+    wix = os.path.join(ROOT, 'tools', 'wix', '3.14.1')
+    if not os.path.isfile(os.path.join(wix, 'candle.exe')):
+        raise SystemExit('WiX 3.14.1 is missing from ' + wix + ' (wix314-binaries.zip from the wix3141rtm release)')
+    env = dict(os.environ, PATH=wix + os.pathsep + os.environ.get('PATH', ''))
+    run(['jpackage', '--type', 'exe', '--name', APP_NAME, '--app-version', ver,
+         '--vendor', 'Wowza Media Systems, LLC', '--description', 'URL Overlay for Wowza Streaming Engine',
+         '--input', os.path.join(stage, 'input'), '--main-jar', os.path.basename(jar_path),
+         '--main-class', 'com.wowza.wms.plugin.urloverlay.install.Main',
+         '--add-modules', modules, '--jlink-options', '--strip-debug --no-man-pages --no-header-files',
+         '--arguments', '--gui', '--win-menu', '--win-menu-group', APP_NAME] + extra + ['--win-upgrade-uuid', UPGRADE_UUID,
+         '--resource-dir', os.path.join(PKG, 'windows', 'resources'),
+         '--temp', os.path.join(stage, 'temp'), '--dest', os.path.join(stage, 'out')], env=env)
+    check_runtime(os.path.join(stage, 'temp', 'images', 'win-msi.image', APP_NAME, 'runtime'), modules)
+    exe = '%s-%s.exe' % (APP_NAME, ver)
+    shutil.copy2(os.path.join(stage, 'out', exe), os.path.join(out_dir, exe))
+    return exe
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--skip-tests', action='store_true', help='build without running the installer and module tests')
+    ap.add_argument('--skip-exe', action='store_true', help='no Windows setup program (no jpackage or WiX needed)')
+    ap.add_argument('--maintainer', default=DEB_MAINTAINER, help='Maintainer field of the .deb (default: %(default)s)')
+    a = ap.parse_args()
+    ver = version()
+    gradlew = os.path.join(ROOT, 'gradlew.bat' if os.name == 'nt' else 'gradlew')
+    run([gradlew, '--no-daemon', '-q', ':installer:jar'] + ([] if a.skip_tests else [':module:test', ':installer:test', ':capture:test', ':bridge:test']))
+    jar_name = 'wse-plugin-url-overlay-installer-%s.jar' % ver
+    jar_path = os.path.join(ROOT, 'installer', 'build', 'libs', jar_name)
+    jar = read(jar_path)
+
+    out = os.path.join(ROOT, 'dist', 'wse-url-overlay-' + ver)
+    remove(out)
+    os.makedirs(out)
+    made = []
+    if not a.skip_exe:
+        made.append(build_exe(out, ver, jar_path))
+
+    win = os.path.join(PKG, 'windows')
+    win_entries = [(jar_name, jar, 0o644)] + \
+                  [(n, crlf(read(os.path.join(win, n))), 0o644) for n in ('install.cmd', 'uninstall.cmd', 'update-chrome.cmd', 'find-java.cmd')] + \
+                  [(n, d, 0o644) for n, d in docs()]
+    top = 'wse-url-overlay-%s/' % ver
+    name = 'wse-url-overlay-%s-windows.zip' % ver
+    write_zip(os.path.join(out, name), [(top + n, d, m) for n, d, m in win_entries])
+    made.append(name)
+
+    name = 'wse-url-overlay-%s-linux.tar.gz' % ver
+    files = [(top + n, d, m) for n, d, m in linux_files(jar_name, jar)]
+    with open(os.path.join(out, name), 'wb') as f:
+        f.write(tar_bytes(files, [top] + sorted({top + 'licenses/', top + 'docs/', top + 'docs/images/'})))
+    made.append(name)
+
+    name = '%s_%s_all.deb' % (DEB_NAME, ver)
+    build_deb(os.path.join(out, name), ver, jar_name, jar, a.maintainer)
+    made.append(name)
+
+    for n in ('README.md', 'THIRD-PARTY-NOTICES.md'):
+        shutil.copy2(os.path.join(ROOT, n), os.path.join(out, n))
+        made.append(n)
+
+    sums = ''.join('%s *%s\n' % (hashlib.sha256(read(os.path.join(out, n))).hexdigest(), n) for n in sorted(made))
+    with open(os.path.join(out, 'SHA256SUMS'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(sums)
+    print(sums, end='')
+    print('Built', out)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

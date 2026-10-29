@@ -1,0 +1,61 @@
+<Root>
+	<Transcode>
+		<Description>Managed by URL Overlay: starter urloverlay-passthrough. The original passed through untouched, plus one overlay encode at source size.</Description>
+		<Decode>
+			<Video>
+				<Implementation>default</Implementation>
+				<Deinterlace>false</Deinterlace>
+				<!-- Required for URL overlays. -->
+				<EnableDynamicOverlays>true</EnableDynamicOverlays>
+			</Video>
+		</Decode>
+		<Scale>
+			<Implementation>default</Implementation>
+		</Scale>
+		<Encodes>
+			<Encode>
+				<!-- A passthrough encode cannot carry an overlay: drawing needs decode and encode. -->
+				<Name>source</Name>
+				<Enable>true</Enable>
+				<Description>The original, unchanged</Description>
+				<StreamName>${SourceStreamName}_source</StreamName>
+				<Video>
+					<Codec>PassThru</Codec>
+					<Bitrate>${SourceVideoBitrate}</Bitrate>
+				</Video>
+				<Audio>
+					<Codec>PassThru</Codec>
+					<Bitrate>${SourceAudioBitrate}</Bitrate>
+				</Audio>
+			</Encode>
+			<Encode>
+				<Name>overlay</Name>
+				<Enable>true</Enable>
+				<Description>Source size with the overlay</Description>
+				<StreamName>${SourceStreamName}_overlay</StreamName>
+				<Video>
+					<Codec>H.264</Codec>
+					<Implementation>default</Implementation>
+					<GPUID>-1</GPUID>
+					<Profile>main</Profile>
+					<Bitrate>4000000</Bitrate>
+					<KeyFrameInterval>
+						<FollowSource>false</FollowSource>
+						<Interval>60</Interval>
+					</KeyFrameInterval>
+					<FrameSize>
+						<FitMode>match-source</FitMode>
+						<Width>0</Width>
+						<Height>0</Height>
+						<Crop>0,0,0,0</Crop>
+						<SourceRectangle></SourceRectangle>
+					</FrameSize>
+				</Video>
+				<Audio>
+					<Codec>PassThru</Codec>
+					<Bitrate>${SourceAudioBitrate}</Bitrate>
+				</Audio>
+			</Encode>
+		</Encodes>
+	</Transcode>
+</Root>
