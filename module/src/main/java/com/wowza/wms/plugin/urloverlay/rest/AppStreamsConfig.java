@@ -59,7 +59,35 @@ public class AppStreamsConfig extends VHostResourceBase
 		return ai != null && ai.getMediaCasterStreams() != null && ai.getMediaCasterStreams().getMediaCaster(stream) != null;
 	}
 
-	private static IApplicationInstance instance(String vhostName, String appName)
+	/**
+	 * How a live stream reaches WSE, which decides how it can be restarted (UrlOverlayModule.restartStream): "pulled",
+	 * "rtmp" or "rtp" restart on their own; "server" is published inside WSE with no client, such as by a server listener,
+	 * and only an application restart starts it again.
+	 */
+	static String arrives(String vhostName, String appName, String stream)
+	{
+		IApplicationInstance ai = instance(vhostName, appName);
+		if(ai == null)
+		{
+			return null;
+		}
+		if(ai.getMediaCasterStreams() != null && ai.getMediaCasterStreams().getMediaCaster(stream) != null)
+		{
+			return "pulled";
+		}
+		com.wowza.wms.stream.IMediaStream ms = ai.getStreams().getStream(stream);
+		if(ms == null)
+		{
+			return null;
+		}
+		if(ms.getClient() != null)
+		{
+			return "rtmp";
+		}
+		return ms.getRTPStream() != null && ms.getRTPStream().getSession() != null ? "rtp" : "server";
+	}
+
+	static IApplicationInstance instance(String vhostName, String appName)
 	{
 		IVHost vhost = VHostSingleton.getInstance(vhostName);
 		if(vhost == null || !vhost.isApplicationLoaded(appName))
@@ -113,6 +141,7 @@ public class AppStreamsConfig extends VHostResourceBase
 			r.put("name", s);
 			r.put("publishing", live.contains(s));
 			r.put("pulled", live.contains(s) && pulled(vhost, appName, s));
+			r.put("arrives", live.contains(s) ? arrives(vhost, appName, s) : null);
 			// its template now builds other outputs, or another file is picked for it: shown after a restart
 			r.put("restartNeeded", live.contains(s) && com.wowza.wms.plugin.urloverlay.UrlOverlayModule.outputsChanged(vhost, appName, s));
 			String t = TemplateLists.resolve(list, s, n -> Files.isRegularFile(dir.resolve(n)));

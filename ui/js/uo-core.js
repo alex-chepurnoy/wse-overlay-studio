@@ -1,6 +1,6 @@
-/* URL Overlay core: REST through the Manager bridge, polling, live state, banners, toasts, dialogs, menus, keyboard and
-   helpers. The page never reads the Manager's password: the bridge forwards each call with the signed-in user's
-   credentials, server-side. */
+/* URL Overlay core: REST through the Manager bridge, timers and shutdown, banners, toasts, dialogs, menus, the save
+   bar, players, the page version and session checks, and read-only. The page never reads the Manager's password: the
+   bridge forwards each call with the signed-in user's credentials, server-side. */
 (function () {
   'use strict';
   var U = window.UrlOverlay = window.UrlOverlay || {};
@@ -8,6 +8,7 @@
   var V2 = '/v2/servers/_defaultServer_/vhosts/_defaultVHost_';
   U.VHOST = '_defaultVHost_';
   U.INSTANCE = '_definst_';
+  U.screens = U.screens || {};
 
   /* ---------- the Manager bridge: /enginemanager/urloverlay-api, same origin as this page ---------- */
   var API = '/enginemanager/urloverlay-api';
@@ -107,12 +108,48 @@
     del: function (p) { return request('DELETE', MODULE + p); },
     v2del: function (p) { return request('DELETE', V2 + p); }
   };
+  U.streamPath = function (app, stream) {
+    return '/vhosts/' + enc(U.VHOST) + '/applications/' + enc(app) + '/instances/' + enc(U.INSTANCE) + '/streams/' + enc(stream);
+  };
+  U.vhostPath = function () { return '/vhosts/' + enc(U.VHOST); };
+  U.appPath = function (app) { return U.vhostPath() + '/applications/' + enc(app || U.app); };
+
   /* ---------- restarting a stream: overlay changes show at once, output changes wait for a restart ---------- */
-  // what a restart does to viewers, for every dialog that offers one
-  U.RESTART_GAP = 'Restarting disconnects a pushed stream\'s encoder, which reconnects by itself if set to, and resets a pulled one. Viewers see a short gap.';
-  U.restartStream = function (stream, confirmed) {
+  // viewers come from WSE's per-stream counts and only count this server; null when the module does not send them
+  U.viewers = function (row) { return row && typeof row.viewers === 'number' ? row.viewers : null; };
+  U.viewersText = function (n) { return n + ' viewer' + (n === 1 ? '' : 's') + ' on this server'; };
+  // what a restart does to one stream's viewers, for every dialog that disconnects them
+  U.restartLines = function (row) {
+    var n = U.viewers(row), s = esc(row.name);
+    return '<p>' + (n != null ? '<b>' + U.viewersText(n) + '</b> ' + (n === 1 ? 'sees' : 'see') + ' a gap of a few seconds.' : 'Viewers see a gap of a few seconds.') + '</p>' +
+      '<p>' + (row.pulled ? s + ' is pulled by WSE, so it resets and is pulled again.' : row.arrives === 'server' ? s + ' is published inside WSE and restarts with its application.' : s + ' is pushed by an encoder, which reconnects by itself within seconds if it is set to.') + '</p>';
+  };
+  U.arrivalText = function (r) { return r.pulled ? 'pulled: resets' : r.arrives === 'server' ? 'published inside WSE: restarts with the application' : 'pushed: the encoder reconnects within seconds'; };
+  U.FINAL = '<p class="dlg-final">This cannot be undone once viewers are disconnected.</p>';
+  // a stream published inside WSE, by a server listener for example, has no publisher to disconnect: only restarting
+  // its application starts it again, and that reconnects every stream in the application
+  U.restartApp = function (why, confirmed) {
+    var live = U.live(), app = U.app;
+    return (confirmed ? Promise.resolve(true) : U.confirm('Restart the application ' + app + '?',
+      (why ? '<p>' + why + '</p>' : '') + '<div class="dlg-streams">' + live.map(function (r) {
+        var n = U.viewers(r);
+        return '<span class="chip"><span class="dot live"></span>' + esc(r.name) + (n != null ? '<span class="faint">' + U.icon('eye') + n + '</span>' : '') + '</span>';
+      }).join('') + '</div><p class="small muted">Each stops for a few seconds. Streams published inside WSE come back with the application; encoders reconnect if set to.</p>',
+      'Restart ' + app, true)).then(function (ok) {
+        if (!ok) return null;
+        return request('PUT', V2 + '/applications/' + enc(app) + '/actions/restart').then(function () {
+          U.toast('Restarted ' + app + '. Its streams start again in a few seconds.');
+          return U.refreshState(true);
+        }, function (e) { U.banner('restart', 'bad', app + ' was not restarted.', e.message); });
+      });
+  };
+  U.restartStream = function (stream, confirmed, why) {
+    var row = U.streamRow(stream) || { name: stream };
+    if (row.arrives === 'server') {
+      return U.restartApp('<b>' + esc(stream) + '</b> is published inside WSE and restarts only with ' + esc(U.app) + '.', confirmed);
+    }
     var ask = confirmed ? Promise.resolve(true) : U.confirm('Restart ' + stream + '?',
-      '<p>' + esc(stream) + ' is rebuilt from its template.</p><p>' + U.RESTART_GAP + '</p>', 'Restart ' + stream);
+      U.restartLines(row) + '<p>' + (why || esc(stream) + ' is rebuilt from its template, so pending output changes take effect.') + '</p>' + U.FINAL, 'Restart ' + stream);
     return ask.then(function (ok) {
       if (!ok) return null;
       return U.api.post(U.streamPath(U.app, stream) + '/restart', {}).then(function (r) {
@@ -126,20 +163,20 @@
     live = (live || []).filter(function (x) { return x.application === U.app; });
     if (!live.length) return Promise.resolve();
     var now = live.map(function (x) { return x.stream; }), later = live.filter(function (x) { return x.outputsChanged; }).map(function (x) { return x.stream; });
-    U.toast('Shown now on ' + now.join(', ') + (later.length ? '; outputs change after a restart.' : '.'));
+    U.toast('Live now on ' + now.join(', ') + (later.length ? '; outputs change after a restart.' : '.'));
     if (!later.length) return Promise.resolve();
-    return U.choose('Restart ' + later.join(', ') + ' to change the outputs?', '<p>' + esc(now.join(', ')) + (now.length > 1 ? ' show' : ' shows') + ' the template\'s overlay already. New sizes, bitrates or outputs start only when ' +
-      (later.length > 1 ? 'these streams restart' : 'the stream restarts') + ': Wowza builds a stream\'s transcoder when it starts.</p>' +
-      '<p>' + U.RESTART_GAP + '</p>',
+    var rows = later.map(function (s) { return U.streamRow(s) || { name: s }; });
+    return U.choose('Restart ' + later.join(', ') + ' to change the outputs?',
+      '<p>The overlay is live already. New sizes, bitrates or outputs start only when ' + (later.length > 1 ? 'these streams restart' : 'the stream restarts') +
+      ': WSE builds a stream\'s transcoder when it starts.</p><ul>' + rows.map(function (r) {
+        var n = U.viewers(r);
+        return '<li><b>' + esc(r.name) + '</b>' + (n != null ? ', ' + U.viewersText(n) : '') + ', ' + U.arrivalText(r) + '</li>';
+      }).join('') + '</ul>' + U.FINAL,
       [{ label: 'Later', value: null }, { label: 'Restart now', value: 'go', kind: 'primary' }]).then(function (v) {
         if (v !== 'go') return null;
         return later.reduce(function (p, s) { return p.then(function () { return U.restartStream(s, true); }); }, Promise.resolve());
       });
   };
-  U.streamPath = function (app, stream) {
-    return '/vhosts/' + enc(U.VHOST) + '/applications/' + enc(app) + '/instances/' + enc(U.INSTANCE) + '/streams/' + enc(stream);
-  };
-  U.vhostPath = function () { return '/vhosts/' + enc(U.VHOST); };
   // HLS straight from WSE's streaming port at the host name this page was loaded from; an https page needs an SSL port
   U.hls = function (url) {
     if (!url) return null;
@@ -166,7 +203,7 @@
   var COPY = /copy of ([A-Za-z0-9._-]+) for stream /;
   U.copyBase = function (x) { var m = COPY.exec((x && x.description) || ''); return m ? m[1] : null; };
 
-  /* ---------- lifecycle: stop timers and players once the Manager replaces the fragment ---------- */
+  /* ---------- lifecycle: timers and listeners stop once the Manager replaces the fragment ---------- */
   var timers = [];
   var cleanups = [];
   U.alive = function () { return !!(U.root && document.body.contains(U.root)); };
@@ -189,6 +226,11 @@
     return t;
   };
   U.onShutdown = function (fn) { cleanups.push(fn); };
+  // a listener on document or window, removed at shutdown so a remount never stacks a second one
+  U.listen = function (target, type, fn, opts) {
+    target.addEventListener(type, fn, opts);
+    U.onShutdown(function () { target.removeEventListener(type, fn, opts); });
+  };
   U.shutdown = function () {
     timers.forEach(function (t) { t.stop(); });
     timers = [];
@@ -196,17 +238,19 @@
     cleanups = [];
   };
 
-  /* ---------- banners ---------- */
-  U.banner = function (id, level, title, detail) {
+  /* ---------- banners: problems with the page or the server; results go to toasts ---------- */
+  U.banner = function (id, level, title, detail, action) {
     if (!U.root) return;
     var box = U.root.querySelector('.banners');
     if (!box) return;
     var el = box.querySelector('[data-banner="' + id + '"]');
     if (!el) { el = document.createElement('div'); el.setAttribute('data-banner', id); box.appendChild(el); }
-    el.className = 'notice ' + level;
+    el.className = 'banner ' + level;
     el.innerHTML = '<div><strong>' + esc(title) + '</strong>' + (detail ? ' ' + esc(detail) : '') + '</div>' +
+      (action ? '<button type="button" class="btn primary sm" data-a="act">' + esc(action.label) + '</button>' : '') +
       '<button type="button" class="x" aria-label="Dismiss">&times;</button>';
     el.querySelector('.x').onclick = function () { el.remove(); };
+    if (action) el.querySelector('[data-a=act]').onclick = action.run;
   };
   U.clearBanner = function (id) {
     var el = U.root && U.root.querySelector('.banners [data-banner="' + id + '"]');
@@ -233,14 +277,15 @@
     x.onclick = function () { t.remove(); };
     t.appendChild(x);
     box.appendChild(t);
-    while (box.children.length > 4) box.firstChild.remove();
+    while (box.children.length > 3) box.firstChild.remove();
     // a message stays while the pointer is on it, so it never closes under a click
     var ms = opts.undo ? 10000 : 5000, timer = setTimeout(function () { t.remove(); }, ms);
     t.addEventListener('mouseenter', function () { clearTimeout(timer); });
     t.addEventListener('mouseleave', function () { timer = setTimeout(function () { t.remove(); }, 3000); });
   };
 
-  /* ---------- dialogs ---------- */
+  /* ---------- dialogs: only the confirms the design names; Cancel has the first focus ---------- */
+  U.dialogOpen = function () { return !!(U.root && U.root.querySelector('.modal')); };
   // keeps Tab inside the dialog
   function trapTab(m, e) {
     if (e.key !== 'Tab') return;
@@ -256,16 +301,18 @@
       var back = document.activeElement;
       var m = document.createElement('div');
       m.className = 'modal';
-      m.innerHTML = '<div class="box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3><div>' + bodyHtml + '</div>' +
-        '<div class="row end mt-l">' + buttons.map(function (b, i) {
+      m.innerHTML = '<div class="box" role="alertdialog" aria-modal="true" aria-labelledby="uo-dlg-h"><div class="pnl-h"><h3 id="uo-dlg-h">' + esc(title) + '</h3></div>' +
+        '<div class="pnl-b">' + bodyHtml + '</div><div class="foot">' + buttons.map(function (b, i) {
           return '<button type="button" class="btn' + (b.kind ? ' ' + b.kind : '') + '" data-i="' + i + '">' + esc(b.label) + '</button>'; }).join('') + '</div></div>';
       U.root.appendChild(m);
-      function done(v) { m.remove(); document.removeEventListener('keydown', key, true); if (back && back.focus) back.focus(); resolve(v); }
+      function done(v) { m.remove(); document.removeEventListener('keydown', key, true); if (back && back.focus && document.body.contains(back)) back.focus(); resolve(v); }
       function key(e) { if (e.key === 'Escape') { e.stopPropagation(); done(null); } else trapTab(m, e); }
       document.addEventListener('keydown', key, true);
+      U.onShutdown(function () { document.removeEventListener('keydown', key, true); });
       m.querySelectorAll('[data-i]').forEach(function (b) { b.onclick = function () { done(buttons[+b.getAttribute('data-i')].value); }; });
       m.addEventListener('click', function (e) { if (e.target === m) done(null); });
-      var focus = m.querySelector('.btn.primary') || m.querySelector('[data-i]');
+      var cancel = buttons.map(function (b, i) { return b.value == null || b.value === false ? i : -1; }).filter(function (i) { return i >= 0; })[0];
+      var focus = m.querySelector('[data-i="' + (cancel != null ? cancel : 0) + '"]');
       if (focus) focus.focus();
     });
   };
@@ -273,38 +320,9 @@
     return U.choose(title, bodyHtml, [{ label: 'Cancel', value: false }, { label: okLabel || 'OK', value: true, kind: danger ? 'danger' : 'primary' }])
       .then(function (v) { return !!v; });
   };
-  // read(modal) returns a text to show as the error and keep the dialog open, or any other value to close it with
-  U.prompt = function (title, fieldsHtml, okLabel, read) {
-    return new Promise(function (resolve) {
-      var back = document.activeElement;
-      var m = document.createElement('div');
-      m.className = 'modal';
-      m.innerHTML = '<div class="box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3>' + fieldsHtml +
-        '<div class="err" data-err role="alert"></div>' +
-        '<div class="row end mt-l"><button type="button" class="btn" data-a="no">Cancel</button>' +
-        '<button type="button" class="btn primary" data-a="yes">' + esc(okLabel || 'OK') + '</button></div></div>';
-      U.root.appendChild(m);
-      var first = m.querySelector('input,select');
-      if (first) first.focus();
-      function close(v) { m.remove(); document.removeEventListener('keydown', key, true); if (back && back.focus) back.focus(); resolve(v); }
-      function ok() {
-        var v = read(m);
-        if (typeof v === 'string') { m.querySelector('[data-err]').textContent = v; return; }
-        close(v);
-      }
-      function key(e) {
-        if (e.key === 'Escape') { e.stopPropagation(); close(null); }
-        else if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); e.stopPropagation(); ok(); }
-        else trapTab(m, e);
-      }
-      document.addEventListener('keydown', key, true);
-      m.querySelector('[data-a=no]').onclick = function () { close(null); };
-      m.querySelector('[data-a=yes]').onclick = ok;
-    });
-  };
 
   /* ---------- menus: a [data-menu=x] button opens its [data-menu-list=x]; outside clicks and Escape close it ---------- */
-  function closeMenus(except) {
+  U.closeMenus = function (except) {
     if (!U.root) return;
     U.root.querySelectorAll('[data-menu-list]').forEach(function (l) {
       if (l === except) return;
@@ -312,53 +330,62 @@
       var b = U.root.querySelector('[data-menu="' + l.getAttribute('data-menu-list') + '"]');
       if (b) b.setAttribute('aria-expanded', 'false');
     });
-  }
-  function bindMenus(root) {
-    root.querySelectorAll('[data-menu]').forEach(function (b) {
+  };
+  // binds the menus inside box; call again after the box is re-rendered
+  U.bindMenus = function (box) {
+    box.querySelectorAll('[data-menu]').forEach(function (b) {
       b.onclick = function (e) {
         e.stopPropagation();
-        var l = root.querySelector('[data-menu-list="' + b.getAttribute('data-menu') + '"]');
+        var l = box.querySelector('[data-menu-list="' + b.getAttribute('data-menu') + '"]');
         var open = l.hidden;
-        closeMenus(l);
+        U.closeMenus(l);
         l.hidden = !open;
         b.setAttribute('aria-expanded', String(open));
-        if (open) { var first = l.querySelector('button'); if (first) first.focus(); }
+        if (open) { var first = l.querySelector('button:not(:disabled)'); if (first) first.focus(); }
       };
     });
-    root.querySelectorAll('[data-menu-list] button').forEach(function (i) { i.addEventListener('click', function () { closeMenus(); }); });
-    document.addEventListener('click', onDocClick);
-    U.onShutdown(function () { document.removeEventListener('click', onDocClick); });
-  }
-  function onDocClick(e) { if (!e.target.closest || !e.target.closest('.menu')) closeMenus(); }
+    box.querySelectorAll('[data-menu-list] button').forEach(function (i) { i.addEventListener('click', function () { U.closeMenus(); }); });
+  };
+  U.menuHtml = function (id, label, items) {
+    return '<div class="menu" data-write><button class="btn sm icon" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="' + esc(label) + '" data-menu="' + id + '">' + U.icon('more') + '</button>' +
+      '<div class="menu-list" role="menu" data-menu-list="' + id + '" hidden>' + items.map(function (i) {
+        return i === '-' ? '<hr>' : '<button type="button" role="menuitem" data-mi="' + i[0] + '"' + (i[2] ? ' class="danger"' : '') + (i[3] ? ' disabled' : '') + '>' + esc(i[1]) + '</button>';
+      }).join('') + '</div></div>';
+  };
 
-  /* ---------- the editors' action bar: status on the left, Discard and Save on the right ---------- */
-  // o: { changes, conflict, saving, saveLabel, onSave, onDiscard, onTheirs, onMine, note }
-  U.actionBar = function (bar, o) {
-    var msg, cls = 'msg';
-    if (o.conflict) {
-      cls += ' conflict';
-      msg = 'Changed in another session. <button type="button" class="btn sm" data-a="theirs">Load theirs</button> <button type="button" class="btn sm" data-a="mine">Keep mine</button>';
-    } else if (o.saving) {
-      msg = 'Saving...';
-    } else if (o.changes) {
-      cls += ' dirty';
-      msg = o.changes + ' unsaved change' + (o.changes > 1 ? 's' : '');
-    } else {
-      msg = o.note || 'All changes saved';
+  /* ---------- the save bar: one per screen, covering only the object on that screen ---------- */
+  // o: { changes: [text], impact, saving, problem, conflict, saveLabel, saved, onSave, onDiscard, onTheirs, onMine }
+  U.saveBar = function (bar, o) {
+    if (!bar) return;
+    var n = (o.changes || []).length;
+    if (U.readOnly || (!n && !o.saved && !o.conflict)) { bar.hidden = true; bar.innerHTML = ''; return; }
+    bar.hidden = false;
+    bar.className = 'savebar' + (n || o.conflict ? '' : ' saved');
+    bar.setAttribute('role', 'region');
+    bar.setAttribute('aria-label', n ? 'Unsaved changes' : 'Last save');
+    if (!n && !o.conflict) {
+      bar.innerHTML = '<span class="dot on"></span><div class="what"><b>' + esc(o.saved.title) + '</b><span>' + esc(o.saved.detail || '') + '</span></div>';
+      return;
     }
-    bar.innerHTML = '<span class="' + cls + '">' + msg + '</span><span class="spacer"></span>' +
-      '<span class="hint m0"><span class="kbd">Ctrl</span>+<span class="kbd">S</span></span>' +
-      '<button type="button" class="btn" data-a="discard"' + (o.changes && !o.saving ? '' : ' disabled') + '>Discard</button>' +
-      '<button type="button" class="btn primary" data-a="save"' + (o.changes && !o.saving && !U.readOnly ? '' : ' disabled') + (U.readOnly ? ' title="' + esc(U.readOnly) + '"' : '') + '>' + esc(o.changes ? o.saveLabel || 'Save' : 'Save') + '</button>';
+    var what = o.changes.join(', ');
+    var sub = o.conflict ? '<span class="err">Changed in another session since you started. Load theirs, or keep yours and Save over it.</span>'
+      : o.problem ? '<span class="err">' + esc(o.problem) + '</span>' : '<span title="' + esc(o.impact || '') + '">' + esc(o.impact || '') + '</span>';
+    bar.innerHTML = '<span class="chip-draft">Unsaved</span><div class="what"><b title="' + esc(what) + '">' + esc(what || 'No changes') + '</b>' + sub + '</div><div class="acts">' +
+      (o.conflict ? '<button type="button" class="btn" data-a="theirs">Load theirs</button><button type="button" class="btn" data-a="mine">Keep mine</button>' : '') +
+      '<span class="hint"><span class="kbd">Ctrl</span>+<span class="kbd">S</span></span>' +
+      '<button type="button" class="btn" data-a="discard"' + (o.saving || !n ? ' disabled' : '') + '>Discard</button>' +
+      '<button type="button" class="btn primary" data-a="save"' + (o.saving || o.problem || o.conflict || !n ? ' disabled' : '') + '>' + esc(o.saving ? 'Saving...' : o.saveLabel || 'Save') + '</button></div>';
     bar.querySelector('[data-a=save]').onclick = o.onSave;
     bar.querySelector('[data-a=discard]').onclick = o.onDiscard;
     var t = bar.querySelector('[data-a=theirs]'), m = bar.querySelector('[data-a=mine]');
     if (t) t.onclick = o.onTheirs;
     if (m) m.onclick = o.onMine;
   };
-  // "Save", or what Save does to streams on air
-  U.saveLabel = function (live) {
-    return live && live.length ? 'Save and update ' + live.length + ' live stream' + (live.length > 1 ? 's' : '') : 'Save';
+  U.hhmm = function (d) { d = d || new Date(); return (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes(); };
+  // one line pointing at another screen's unsaved work: shown and linked, never saved or discarded from here
+  U.scopeLine = function (text, label, go) {
+    return '<div class="scope-line"><span class="chip-draft">Unsaved</span><span>' + text + ' Not part of this Save.</span><span class="spacer"></span>' +
+      '<button type="button" class="btn sm" data-go="' + esc(go) + '">' + esc(label) + '</button></div>';
   };
 
   /* ---------- helpers ---------- */
@@ -375,9 +402,38 @@
     return s < 60 ? s.toFixed(1) + ' s ago' : Math.round(s / 60) + ' min ago';
   };
   U.mb = function (bytes) { return bytes == null ? 'n/a' : Math.round(bytes / 1048576) + ' MB'; };
+  U.names = function (list) { return list.join(', '); };
   U.store = {
     get: function (k) { try { return window.localStorage.getItem('urloverlay.' + k); } catch (e) { return null; } },
     set: function (k, v) { try { window.localStorage.setItem('urloverlay.' + k, v); } catch (e) { /* storage unavailable */ } }
+  };
+  var ICONS = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    close: '<path d="M6 6l12 12M18 6L6 18"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    overlay: '<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="8" width="6" height="4" rx="1"/>',
+    play: '<path d="M7 5l12 7-12 7z"/>',
+    grid: '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
+    up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+    trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+    panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
+    audio: '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>',
+    input: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3"/>',
+    outputs: '<path d="M4 6h16M4 12h11M4 18h7"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
+  };
+  // help that the eye can skip: a small "?" that shows the text on hover or focus, and reads it to a screen reader
+  U.tip = function (text) { return '<button type="button" class="tip" aria-label="' + esc(text) + '" data-tip="' + esc(text) + '">?</button>'; };
+  U.icon = function (name) {
+    if (name === 'more') return '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
   };
 
   /* ---------- players ---------- */
@@ -428,262 +484,32 @@
     return p;
   };
 
-  /* ---------- views and theme ---------- */
-  U.init = function (root) {
-    U.shutdown();
-    U.root = root;
-    // the operating system's theme until the producer picks one
-    var stored = U.store.get('theme');
-    var theme = stored === 'dark' || stored === 'light' ? stored :
-      (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    root.setAttribute('data-theme', theme);
-    var tb = root.querySelector('[data-act=theme]');
-    tb.textContent = theme === 'dark' ? 'Light' : 'Dark';
-    tb.onclick = function () {
-      var dark = root.getAttribute('data-theme') !== 'dark';
-      root.setAttribute('data-theme', dark ? 'dark' : 'light');
-      tb.textContent = dark ? 'Light' : 'Dark';
-      U.store.set('theme', dark ? 'dark' : 'light');
-    };
-    // WSE setting names under the fields, off unless the producer turns them on in the ? dialog
-    if (U.store.get('keys') === 'on') root.setAttribute('data-keys', 'on');
-    var nav = root.querySelectorAll('[data-view]');
-    function show(id) {
-      nav.forEach(function (b) {
-        var on = b.getAttribute('data-view') === id;
-        if (b.classList.contains('step')) b.setAttribute('aria-current', String(on));
-      });
-      root.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('on', v.id === id); });
-      if (id !== 'uo-server') U.store.set('view', id);
-      var was = U.views[U.current];
-      if (U.current !== id && was && was.hide) was.hide();
-      U.current = id;
-      // banners belong to the view that raised them; REST reachability and the application's module state stay
-      Array.prototype.forEach.call(root.querySelectorAll('.banners [data-banner]'), function (b) {
-        var k = b.getAttribute('data-banner');
-        if (['auth', 'network', 'notadded', 'notrecorded', 'stale', 'ipblocked', 'signedout'].indexOf(k) < 0) b.remove();
-      });
-      if (U.views[id]) U.views[id].show();
-    }
-    // leaving a view with unsaved changes asks first (each editor's leave() resolves true to go on)
-    function go(id) {
-      var cur = U.views[U.current];
-      if (!cur || !cur.leave || id === U.current) { show(id); return; }
-      cur.leave().then(function (ok) { if (ok) show(id); });
-    }
-    nav.forEach(function (b) { b.onclick = function () { go(b.getAttribute('data-view')); }; });
-    root.querySelector('[data-back]').onclick = function () { show(U.store.get('view') || 'uo-overlay'); };
-    U.go = go;
-    root.querySelector('[data-act=shortcuts]').onclick = shortcuts;
-    bindMenus(root);
-    document.addEventListener('keydown', onKey);
-    U.onShutdown(function () { document.removeEventListener('keydown', onKey); });
-    Object.keys(U.views).forEach(function (k) { U.views[k].init(root.querySelector('#' + k)); });
-    U.discover().then(function () { startServerPill(root); });
-    pageCheck();
-
-    // one application for every step; the steps are about its streams
-    var appSel = root.querySelector('[data-app]');
-    appSel.onchange = function () {
-      var want = appSel.value, cur = U.views[U.current];
-      (cur && cur.leave ? cur.leave() : Promise.resolve(true)).then(function (ok) { if (ok) setApp(want); else appSel.value = U.app; });
-    };
-    function setApp(name) {
-      U.app = name || null;
-      U.store.set('app', U.app || '');
-      U.state = null; U.overlays = []; U.appStreams = []; U.templates = [];
-      Object.keys(U.views).forEach(function (k) { if (U.views[k].app) U.views[k].app(U.app); });
-      U.refreshState(true).then(function () { if (U.views[U.current]) U.views[U.current].show(); });
-      startStatePoll();
-      moduleNotice();
-    }
-    // live applications, those with the module first; the others can have it added from here
-    function loadApps(want) {
-      return U.api.get(U.vhostPath() + '/applications').then(function (r) {
-        U.apps = ((r && r.applications) || []).filter(function (a) { return !a.error && /^live/.test(a.streamType || ''); });
-        if (!U.apps.length) {
-          appSel.innerHTML = '<option value="">none</option>';
-          U.banner('noapp', 'slow', 'This server has no live application.', 'Make one in WSE Manager, then reload this page.');
-          return null;
-        }
-        var with_ = U.apps.filter(function (a) { return a.installed; }), without = U.apps.filter(function (a) { return !a.installed; });
-        if (!U.apps.some(function (a) { return a.name === want; })) want = (with_[0] || U.apps[0]).name;
-        function opts(list) { return list.map(function (a) { return '<option value="' + U.esc(a.name) + '"' + (a.name === want ? ' selected' : '') + '>' + U.esc(a.name) + '</option>'; }).join(''); }
-        appSel.innerHTML = (with_.length ? '<optgroup label="With URL Overlay">' + opts(with_) + '</optgroup>' : '') +
-          (without.length ? '<optgroup label="Without it, can be added">' + opts(without) + '</optgroup>' : '');
-        return want;
-      });
-    }
-
-    // an application without the module: everything can be prepared, but nothing draws until it is added and restarted
-    function moduleNotice() {
-      U.clearBanner('notadded');
-      var a = (U.apps || []).filter(function (x) { return x.name === U.app; })[0];
-      if (!a || a.installed) return;
-      var box = root.querySelector('.banners'), n = document.createElement('div');
-      n.setAttribute('data-banner', 'notadded');
-      n.className = 'notice slow';
-      n.innerHTML = '<div><strong>URL Overlay is not added to ' + U.esc(a.name) + ' yet.</strong> Overlays and templates can be prepared here, ' +
-        'but streams in ' + U.esc(a.name) + ' show nothing until the module is added and the application restarts.</div>' +
-        '<button type="button" class="btn primary sm" data-act="add-module">Add to ' + U.esc(a.name) + '...</button>';
-      box.insertBefore(n, box.firstChild);
-      n.querySelector('[data-act=add-module]').onclick = function () { addModule(a.name); };
-    }
-    function addModule(app) {
-      var live = (U.appStreams || []).filter(function (s) { return s.publishing; }).map(function (s) { return s.name; });
-      U.choose('Add URL Overlay to ' + app + '?',
-        '<p>The URL Overlay module is added to <code>conf/' + U.esc(app) + '/Application.xml</code>, which is backed up first. Uninstalling URL Overlay takes it out again.</p>' +
-        '<p>WSE loads modules when an application starts, so ' + U.esc(app) + ' has to restart. ' +
-        (live.length ? '<strong>' + live.length + ' stream' + (live.length > 1 ? 's are' : ' is') + ' publishing to it now (' + U.esc(live.join(', ')) + ').</strong> A restart disconnects ' +
-          (live.length > 1 ? 'them' : 'it') + ' for a few seconds; encoders reconnect if they are set to.' : 'Nothing is publishing to it now, so a restart affects no stream.') + '</p>',
-        [{ label: 'Cancel', value: null }, { label: 'Add, restart later', value: 'later' }, { label: 'Add and restart now', value: 'now', kind: 'primary' }]).then(function (v) {
-          if (!v) return;
-          U.api.post(U.vhostPath() + '/applications/' + U.enc(app) + '/module', { restart: v === 'now' }).then(function (r) {
-            U.toast(r.added ? 'Added URL Overlay to ' + app + (v === 'now' ? ', restarting it now.' : '. Restart ' + app + ' to load it.') : 'URL Overlay was already in ' + app + '.');
-            if (r.added && r.recorded === false) U.banner('notrecorded', 'slow', 'The change to ' + app + ' is not in an install record.', 'URL Overlay was installed without the installer, so uninstalling will not take it out of ' + app + '.');
-            return loadApps(app).then(function () { moduleNotice(); U.refreshState(true); });
-          }, function (e) { U.banner('notadded-err', 'bad', 'URL Overlay was not added to ' + app + '.', e.message); });
-        });
-    }
-
-    function start() {
-      return U.discover().then(function () {
-        // who may change things decides the page's state before anything is drawn
-        return U.api.get('/info').then(function (i) { U.serverInfo = i; U.applyAccess(i); }, function () { /* the server pill retries */ });
-      }).then(function () { return loadApps(U.store.get('app')); }).then(function (want) {
-        if (!want) return;
-        var last = U.store.get('view');
-        U.current = U.views[last] && last !== 'uo-server' ? last : 'uo-overlay';
-        show(U.current);
-        setApp(want);
-      }, function () { /* banner shown by the REST layer */ });
-    }
-    start();
-  };
-
-  /* ---------- live state: one request per poll, every view renders from it ---------- */
-  var statePoll = null, pending = null;
-  // force: ask for everything, not "unchanged since"; resolves after every view has seen a change
-  U.refreshState = function (force) {
-    if (!U.app || !U.root) return Promise.resolve();
-    if (pending && !force) return pending;
-    var app = U.app;
-    var q = !force && U.state && U.state.revision ? '?rev=' + U.enc(U.state.revision) : '';
-    pending = U.api.get(U.vhostPath() + '/applications/' + U.enc(app) + '/state' + q).then(function (st) {
-      pending = null;
-      if (U.app !== app || !st || st.unchanged) return;
-      var before = U.state;
-      U.state = st;
-      U.overlays = st.overlays || [];
-      U.appStreams = st.streams || [];
-      U.templates = st.templates || [];
-      notes();
-      Object.keys(U.views).forEach(function (k) {
-        if (U.views[k].state) { try { U.views[k].state(st, before); } catch (e) { if (window.console) console.error(e); } }
-      });
-    }, function () { pending = null; });
-    return pending;
-  };
-  function startStatePoll() {
-    if (statePoll) statePoll.stop();
-    statePoll = U.every(function () { return U.current === 'uo-live' ? 6000 : 2000; }, function () {
-      // a hidden tab asks nothing; it catches up on the first poll after it is shown again
-      if (document.visibilityState === 'hidden' || U.current === 'uo-server') return null;
-      return U.refreshState(false);
-    });
-  }
-
-  function notes() {
-    if (!U.root) return;
-    var ovs = U.overlays, streams = U.appStreams;
-    var withTpl = ovs.filter(function (o) { return (o.templates || []).length; });
-    var onStreams = streams.filter(function (s) { return s.overlay; });
-    var live = onStreams.filter(function (s) { return s.publishing; });
-    note('uo-overlay', ovs.length, ovs.length ? ovs.map(function (o) { return o.name; }).join(', ') : 'No overlay yet');
-    note('uo-template', withTpl.length, withTpl.length ? withTpl.length + ' overlay(s) in a template' : 'No template carries an overlay yet');
-    note('uo-streams', onStreams.length, onStreams.length ? onStreams.map(function (s) { return s.name; }).join(', ') + ' use one' : 'Not used by any stream yet');
-    note('uo-live', live.length, live.length ? live.length + ' publishing with an overlay' : 'Nothing publishing with an overlay');
-  }
-  function note(view, done, text) {
-    var el = U.root.querySelector('[data-step-note="' + view + '"]');
-    if (el) el.textContent = text;
-    var b = U.root.querySelector('.step[data-view="' + view + '"]');
-    if (b) b.classList.toggle('done', !!done);
-  }
-  // streams publishing now that show an overlay; what Save changes on air
-  U.liveShowing = function (overlay) {
-    return (U.appStreams || []).filter(function (s) { return s.publishing && s.overlay === overlay; }).map(function (s) { return s.name; });
-  };
-
-  /* ---------- keyboard: Ctrl+S saves the editor in view, ? lists shortcuts, the rest goes to the view ---------- */
-  function onKey(e) {
-    if (!U.alive() || !U.root.querySelector('.view.on') || U.root.querySelector('.modal')) return;
-    var typing = /^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '');
-    var view = U.views[U.current];
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
-      if (view && view.save) { e.preventDefault(); view.save(); }
-      return;
-    }
-    if (e.key === 'Escape') closeMenus();
-    if (!typing && e.key === '?') { e.preventDefault(); shortcuts(); return; }
-    if (view && view.key) view.key(e, typing);
-  }
-  function shortcuts() {
-    var rows = [['Ctrl+S', 'Save the overlay or template in view'], ['Ctrl+Z', 'Undo an unsaved edit'], ['Ctrl+Shift+Z', 'Redo'],
-      ['Delete', 'Remove the selected page (Undo in the message)'], ['Arrow keys', 'Nudge the selected page by 1 px'],
-      ['Shift+Arrow keys', 'Nudge by 10 px'], ['Escape', 'Deselect, close a menu or dialog'], ['?', 'This list']];
-    U.choose('How URL Overlay works', '<p>A camera publishes a stream to a Wowza application. The application\'s transcoder loads a ' +
-      '<strong>transcoder template</strong> for the stream, which decodes it, draws the overlay and makes the outputs viewers watch, ' +
-      'for example <code>stream_720p</code>. So: make an overlay (1), put it in a template (2), use the template on streams (3), ' +
-      'and check what viewers get (4).</p><h4>Keyboard shortcuts</h4><div class="shortcuts">' + rows.map(function (r) {
-      return '<span>' + r[0].split('+').map(function (k) { return '<span class="kbd">' + esc(k) + '</span>'; }).join('+') + '</span><span>' + esc(r[1]) + '</span>';
-    }).join('') + '</div><p class="hint">Shortcuts other than Ctrl+S work when the cursor is not in a text field.</p>' +
-      '<label class="check"><input type="checkbox" data-keys-toggle' + (U.root.getAttribute('data-keys') === 'on' ? ' checked' : '') + '>Show WSE setting names under the fields</label>',
-      [{ label: 'Close', value: true, kind: 'primary' }]);
-    var t = U.root.querySelector('[data-keys-toggle]');
-    if (t) t.onchange = function () {
-      if (t.checked) U.root.setAttribute('data-keys', 'on'); else U.root.removeAttribute('data-keys');
-      U.store.set('keys', t.checked ? 'on' : 'off');
-    };
-  }
-
   /* ---------- a page left open across an upgrade runs the old scripts until it is reloaded ---------- */
   function pageVersion() {
     var s = document.querySelector('script[src*="url-overlay/js/uo-core.js"]');
     var m = s && /[?&]v=([^&]+)/.exec(s.getAttribute('src'));
     return m ? m[1] : null;
   }
-  function staleCheck(serverVersion) {
+  U.staleCheck = function (serverVersion) {
     var mine = pageVersion();
     if (!serverVersion || !mine || mine === serverVersion || U.root.querySelector('[data-banner=stale]')) return;
-    var n = document.createElement('div');
-    n.setAttribute('data-banner', 'stale');
-    n.className = 'notice slow';
-    n.innerHTML = '<div><strong>URL Overlay was updated on the server to ' + esc(serverVersion) + '.</strong> This page is still ' + esc(mine) + '; reload it to use the new version.</div>' +
-      '<button type="button" class="btn primary sm" data-act="reload">Reload</button>';
-    U.root.querySelector('.banners').prepend(n);
-    n.querySelector('[data-act=reload]').onclick = function () { window.location.reload(); };
-  }
+    U.banner('stale', 'slow', 'URL Overlay was updated on the server to ' + serverVersion + '.', 'This page is still ' + mine + '; reload it to use the new version.',
+      { label: 'Reload', run: function () { window.location.reload(); } });
+  };
   // the page's own index.html from the Manager: a new script version means the page is stale, a sign-in page that the session ended
-  function pageCheck() {
+  U.pageCheck = function () {
     U.every(30000, function () {
-      if (document.visibilityState === 'hidden') return null;
       return fetch('wse-plugins/server/url-overlay/index.html', { cache: 'no-store' }).then(function (r) {
         return r.text().then(function (html) {
           var m = /uo-core\.js\?v=([^"'&]+)/.exec(html);
-          if (m) { U.clearBanner('signedout'); staleCheck(m[1]); return; }
+          if (m) { U.clearBanner('signedout'); U.staleCheck(m[1]); return; }
           if (U.root.querySelector('[data-banner=signedout]')) return;
-          var n = document.createElement('div');
-          n.setAttribute('data-banner', 'signedout');
-          n.className = 'notice bad';
-          n.innerHTML = '<div><strong>The Manager session ended.</strong> WSE Manager was restarted or signed you out, so this page cannot reach WSE. Sign in again, then open URL Overlay.</div>' +
-            '<button type="button" class="btn primary sm" data-act="relogin">Sign in</button>';
-          U.root.querySelector('.banners').prepend(n);
-          n.querySelector('[data-act=relogin]').onclick = function () { window.location.reload(); };
+          U.banner('signedout', 'bad', 'The Manager session ended.', 'WSE Manager was restarted or signed you out, so this page cannot reach WSE. Sign in again, then open URL Overlay.',
+            { label: 'Sign in', run: function () { window.location.reload(); } });
         });
       }, function () { /* the Manager itself is down; the REST banners say so */ });
     });
-  }
+  };
 
   /* ---------- read only: the module accepts changes from WSE administrators only ---------- */
   U.readOnly = null;
@@ -693,37 +519,12 @@
     if (ro === U.readOnly) return;
     U.readOnly = ro;
     if (!U.root) return;
-    if (ro) {
-      U.root.setAttribute('data-readonly', '');
-      U.banner('readonly', 'slow', 'Read only.', ro.replace(/^Read only: /, '') + ' You can look around; Save and other changes are off.');
-    } else {
-      U.root.removeAttribute('data-readonly');
-      U.clearBanner('readonly');
-    }
-    Object.keys(U.views).forEach(function (k) { if (U.views[k].access) { try { U.views[k].access(ro); } catch (e) { /* view not ready */ } } });
+    if (ro) U.root.setAttribute('data-readonly', ''); else U.root.removeAttribute('data-readonly');
+    var chip = U.root.querySelector('[data-ro-chip]');
+    if (chip) { chip.hidden = !ro; chip.title = ro || ''; }
+    Object.keys(U.screens).forEach(function (k) { if (U.screens[k].access) { try { U.screens[k].access(ro); } catch (e) { /* screen not ready */ } } });
+    if (U.shell) U.shell.refresh();
   };
-
-  /* ---------- server status in the header, from /info ---------- */
-  function startServerPill(root) {
-    var dot = root.querySelector('[data-server-dot]'), text = root.querySelector('[data-server-text]');
-    var pill = root.querySelector('[data-server-pill]');
-    if (pill) pill.title = 'Server and Chrome. WSE REST reached through ' + (U.via || 'the Manager');
-    U.every(15000, function () {
-      if (document.visibilityState === 'hidden') return null;
-      return U.api.get('/info').then(function (i) {
-        U.serverInfo = i;
-        U.applyAccess(i);
-        // one banner on every view while pages cannot be captured; streams keep their last picture
-        if (i.service && i.service.running === false) U.banner('captureservice', 'bad', 'The capture service is not running.', i.service.message || '');
-        else U.clearBanner('captureservice');
-        var c = i.chrome || {}, d = i.chromedriver || {}, cap = i.captures || {};
-        var ready = i.service && i.service.running && c.found && d.found && d.matchesChrome !== false;
-        dot.className = 'dot ' + (ready ? 'ok' : 'bad');
-        staleCheck(i.version);
-        text.textContent = ready ? 'Chrome ' + String(c.version || '').split('.')[0] + ' ready, ' + (cap.active || 0) + ' of ' + (cap.limit || 0) + ' pages open'
-                                 : i.service && i.service.running === false ? 'Capture service not running' : 'Chrome not ready';
-      }, function () { dot.className = 'dot bad'; text.textContent = 'Server not reachable'; });
-    });
-  }
-  U.views = U.views || {};
+  // one line per section of a read-only screen
+  U.roNote = function () { return U.readOnly ? '<p class="ro-note">Changes need a WSE administrator.</p>' : ''; };
 })();

@@ -20,6 +20,7 @@ import com.wowza.wms.plugin.urloverlay.CaptureClient;
 import com.wowza.wms.plugin.urloverlay.egress.AddressRules;
 import com.wowza.wms.plugin.urloverlay.ReleaseInfo;
 import com.wowza.wms.plugin.urloverlay.UrlOverlayServer;
+import com.wowza.wms.plugin.urloverlay.WebPageCapture;
 import com.wowza.wms.rest.ConfigBase;
 import com.wowza.wms.rest.WMSConfig;
 
@@ -140,6 +141,20 @@ public class InfoConfig extends ConfigBase
 		captures.put("active", running ? svc.get("active") : 0);
 		captures.put("limit", running ? svc.get("limit") : 0);
 		captures.put("maxBrowserMemoryMB", svc.get("maxBrowserMemoryMB"));
+		// pages in use by a stream, for the header: how many have a picture, how many cannot get one
+		int capturing = 0, failing = 0;
+		for(WebPageCapture c: WebPageCapture.POOL.all())
+		{
+			if (WebPageCapture.POOL.users(c) == 0)
+				continue;
+			Object state = c.status().get("state");
+			if ("running".equals(state) && c.lastCaptureAt() != null)
+				capturing++;
+			else if ("blocked".equals(state) || "error".equals(state) || WebPageCapture.SERVICE_NOT_RUNNING.equals(state))
+				failing++;
+		}
+		captures.put("pagesCapturing", capturing);
+		captures.put("pagesFailing", failing);
 		body.put("captures", captures);
 		AddressRules rules = CaptureClient.get().rules();
 		Map<String, Object> egress = new LinkedHashMap<>();

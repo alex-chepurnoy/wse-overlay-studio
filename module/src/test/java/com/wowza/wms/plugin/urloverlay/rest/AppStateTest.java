@@ -46,7 +46,12 @@ class AppStateTest
 
 	private String rev(List<String> publishing, String showing) throws Exception
 	{
-		return AppStateConfig.revision(vhost, "live", publishing, showing);
+		return rev(publishing, showing, Map.of());
+	}
+
+	private String rev(List<String> publishing, String showing, Map<String, Integer> viewers) throws Exception
+	{
+		return AppStateConfig.revision(vhost, "live", publishing, showing, viewers);
 	}
 
 	private static void touch(Path p, long ms) throws Exception
@@ -88,6 +93,33 @@ class AppStateTest
 		String r0 = rev(List.of(), "Scoreboard=[]");
 		assertNotEquals(r0, rev(List.of("cam1"), "Scoreboard=[]"), "a stream started publishing");
 		assertNotEquals(r0, rev(List.of(), "Scoreboard=[cam1]"), "a transcoder started drawing the overlay");
+	}
+
+	@Test
+	void aViewerCountChangesItAndNothingElseAboutViewersDoes() throws Exception
+	{
+		List<String> live = List.of("cam1", "cam2");
+		String r0 = rev(live, "", Map.of("cam1", 3, "cam2", 0));
+		assertEquals(r0, rev(live, "", Map.of("cam1", 3, "cam2", 0)), "the same counts");
+		// map order is not a change
+		java.util.Map<String, Integer> reversed = new java.util.LinkedHashMap<>();
+		reversed.put("cam2", 0);
+		reversed.put("cam1", 3);
+		assertEquals(r0, rev(live, "", reversed), "the same counts in another order");
+		assertNotEquals(r0, rev(live, "", Map.of("cam1", 4, "cam2", 0)), "a viewer joined");
+		assertNotEquals(r0, rev(live, "", Map.of("cam1", 3, "cam2", 1)), "a viewer joined another stream");
+		assertNotEquals(r0, rev(live, "", Map.of("cam1", 2, "cam2", 0)), "a viewer left");
+	}
+
+	@Test
+	void everyStreamRowGetsItsViewers()
+	{
+		java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
+		rows.add(new java.util.LinkedHashMap<>(Map.of("name", "cam1", "publishing", true)));
+		rows.add(new java.util.LinkedHashMap<>(Map.of("name", "cam9", "publishing", false)));
+		AppStateConfig.addViewers(rows, Map.of("cam1", 7));
+		assertEquals(7, rows.get(0).get("viewers"));
+		assertEquals(0, rows.get(1).get("viewers"), "a stream not publishing has no viewers");
 	}
 
 	@Test

@@ -1,0 +1,62 @@
+/* URL Overlay home, On air: the application's streams as rows, filtered from the list column. Until the module
+   measures what each output draws, rows show what the template is configured to do, labeled "configured", and no
+   snapshot (the fallback layout of the design). */
+(function () {
+  'use strict';
+  var U = window.UrlOverlay;
+  var box = null;
+  var TITLES = { all: 'On air in ', attention: 'Needs attention in ', healthy: 'Healthy in ', off: 'Not publishing in ' };
+
+  function outsHtml(s) {
+    var outs = U.outputsOf(U.templateOfStream(s));
+    if (!s.template) return '<span class="small faint">Not transcoded</span>';
+    if (!outs.length) return '<span class="small faint">' + U.esc(s.template) + '</span>';
+    return outs.map(function (o) {
+      return '<span class="ochip" title="' + U.esc(U.configuredText(o)) + ', configured"><b>' + U.esc(o.name) + '</b>' + (o.carries ? 'overlay' : o.passthrough ? 'passthrough' : o.audio ? 'audio' : 'no overlay') + '</span>';
+    }).join('') + '<span class="small faint">configured</span>';
+  }
+  // one chip per stream, the most important fact; broken beats attention. At most three amber marks on a screen.
+  var amber = 0;
+  function chip(s) {
+    if (s.overlay && !U.overlayEntry(s.overlay)) return '<span class="bdg bad">Overlay missing</span>';
+    if (s.restartNeeded) return '<span class="bdg' + (amber++ < 3 ? ' warn' : '') + '">Restart pending</span>';
+    if (s.publishing && !s.overlay) return '<span class="bdg">No overlay</span>';
+    return '';
+  }
+  function row(s) {
+    var n = U.viewers(s);
+    return '<button type="button" class="srow" data-go="stream:' + U.esc(s.name) + '" aria-label="' + U.esc(s.name) + ', open stream">' +
+      '<span class="dot ' + (s.publishing ? 'live' : '') + '"></span><span class="nm">' + U.esc(s.name) + '</span>' +
+      '<span class="ov">' + (s.overlay ? U.esc(s.overlay) : '') + ' ' + chip(s) + '</span>' +
+      '<span class="outs">' + outsHtml(s) + '</span>' +
+      '<span class="vw" ' + (n != null ? 'title="Viewers on this server"' : '') + '>' + (s.publishing && n != null ? n + ' viewer' + (n === 1 ? '' : 's') : '') + '</span></button>';
+  }
+
+  function render() {
+    if (!box) return;
+    amber = 0;
+    var f = U.view.filter || 'all', live = U.live(), off = U.streams().filter(function (s) { return !s.publishing; });
+    var list = f === 'attention' ? live.filter(U.attention) : f === 'healthy' ? live.filter(function (s) { return !U.attention(s); }) : f === 'off' ? off : live;
+    var anyViewers = live.some(function (s) { return U.viewers(s) != null; });
+    var h = '<div class="home-h"><h2>' + TITLES[f] + U.esc(U.app) + '</h2><span class="small faint">What each template is configured to draw' + (anyViewers ? '; viewers on this server' : '') + '</span></div>';
+    h += '<div class="pnl">' + (list.length ? '<div class="srow-h"><span></span><span>Stream</span><span class="c3">Overlay</span><span class="c4">Outputs</span><span>' + (anyViewers ? 'Viewers' : '') + '</span></div>' + list.map(row).join('')
+      : '<p class="empty-sm">' + (f === 'all' ? 'No stream is publishing to ' + U.esc(U.app) + ' now. Streams show here while they publish.' : 'Nothing here.') + '</p>') + '</div>';
+    if (f === 'all' && off.length) h += '<div class="offrow"><span class="small muted">Not publishing:</span>' + off.map(function (s) {
+      return '<button type="button" class="chip" data-go="stream:' + U.esc(s.name) + '"><span class="dot"></span>' + U.esc(s.name) + (s.overlay ? '<span class="k">' + U.esc(s.overlay) + ' when it starts</span>' : '') + '</button>';
+    }).join('') + '</div>';
+    if (!(U.overlays || []).length) h += '<div class="note" style="margin-top:16px"><span class="dot"></span><div><b>No overlay in ' + U.esc(U.app) + ' yet.</b> An overlay holds the pages to burn in, for example the scoring vendor\'s clock and score. ' +
+      'Make one, put it in a template, then use the template on a stream.<div class="hrow" style="margin-top:8px"><button type="button" class="btn sm primary" data-write data-go="new-overlay:">New overlay</button></div></div></div>';
+    var blocks = ((U.serverInfo && U.serverInfo.egress && U.serverInfo.egress.recentBlocks) || []).slice(-3).reverse();
+    if (blocks.length) h += '<div class="pnl" style="margin-top:16px"><div class="pnl-h"><h3>Recent page blocks</h3><span class="small faint">Since WSE started</span><span class="spacer"></span>' +
+      '<button type="button" class="btn sm" data-status-open="network">Network rules</button></div><ul class="loglist">' + blocks.map(function (b) {
+        return '<li><span class="dot bad"></span><span class="faint">' + U.esc(U.hhmm(new Date(b.at))) + '</span><span>' + U.esc(b.host) + ' blocked: ' + U.esc(b.rule) + (b.capture ? ' (' + U.esc(b.capture) + ')' : '') + '</span></li>';
+      }).join('') + '</ul></div>';
+    box.innerHTML = h;
+  }
+
+  U.screens.home = {
+    init: function (b) { box = b; },
+    show: function () { render(); },
+    state: function () { if (U.current() === 'home') render(); }
+  };
+})();
