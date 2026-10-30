@@ -95,12 +95,15 @@ missing. Uninstall: Windows Settings, Apps (setup program), `uninstall.cmd` (zip
 
 ## Quick start
 
-Open WSE Manager, choose **URL Overlay** in the top bar, pick an application, and follow the four steps:
+Open WSE Manager, choose **URL Overlay** in the top bar, pick an application, and press **Create a new overlay** on
+On air. Four steps follow:
 
-1. **Overlay.** Name it, give it a page URL, place it on a live preview, Save.
-2. **Template.** Build a transcoder template from outputs and choose which outputs show the overlay.
-3. **Streams.** Use the template on a stream; restart the stream if its outputs changed.
-4. **Live.** Watch an output with the overlay, with checks that say what is missing.
+1. **Overlay.** Paste a page URL; it is captured once and placed on a live stream.
+2. **Template.** Pick the renditions that carry the overlay.
+3. **Stream.** Pick a publishing stream, or name one that has not started; a dry run says what changes first.
+4. **Preview.** Watch each output with the overlay.
+
+The Overlays, Templates and Streams tabs edit each part on its own afterwards.
 
 Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). How it works:
 [docs/DESIGN.md](docs/DESIGN.md). Building from source: [docs/BUILD.md](docs/BUILD.md).
@@ -112,7 +115,7 @@ Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). 
 - **What is exposed.** Nothing new. A remote browser needs only the Manager port (8088, over HTTPS or an SSH tunnel)
   and the streaming port (1935) for previews. WSE REST stays on 127.0.0.1; the installer never edits `RESTInterface`.
   The page never sees the REST password: the bridge forwards its calls server side with the signed-in user's
-  credentials, only for URL Overlay's own REST paths and template deletes.
+  credentials, only for URL Overlay's own REST paths, template deletes and application restarts.
 - **Where Chrome runs.** Never inside WSE. The capture service runs Chrome under its own account (Linux system user
   `wse-url-overlay` under systemd, with an AppArmor profile where Ubuntu restricts user namespaces; Windows virtual
   account `NT SERVICE\WowzaURLOverlayCapture` under nssm). Chrome's sandbox is always on, with no setting to turn it
