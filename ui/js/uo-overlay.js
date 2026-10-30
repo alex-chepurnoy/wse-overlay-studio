@@ -634,9 +634,11 @@
       if (body) h += '<section>' + body + '</section>';
     }
     var sd = S.saved || {};
-    if (!o || S.inspTab === 'all') h += '<section>' + (o ? '' : '<div class="sec-h">Overlay, every page</div>') + fieldHtml('refreshRate', d.refreshRate, { saved: sd.refreshRate }) + fieldHtml('evenCoords', !!d.even_coords, { saved: !!sd.even_coords }) +
+    if (!o || S.inspTab === 'all') h += '<section>' + (o ? '' : '<div class="sec-h">Overlay, every page</div>') + U.speedHtml(+d.refreshRate, 'data-ospeed', ro()) + fieldHtml('refreshRate', d.refreshRate, { saved: sd.refreshRate }) + fieldHtml('evenCoords', !!d.even_coords, { saved: !!sd.even_coords }) +
       fieldHtml('threadDrawing', d.threadDrawing !== false, { saved: sd.threadDrawing !== false }) + fieldHtml('maxDrawingTime', d.maxDrawingTime || F.maxDrawingTime.def, { saved: sd.maxDrawingTime || F.maxDrawingTime.def }) + U.roNote() + '</section>';
     el.insp.innerHTML = h;
+    // a named speed fills in the exact value below it, so the draft, Save and Revert treat it as that field
+    U.bindSpeed(el.insp, 'data-ospeed', function (v) { var i = el.insp.querySelector('[data-f=refreshRate]'); if (i) { i.value = v; i.dispatchEvent(new Event('input')); } });
     el.insp.querySelectorAll('[data-itab]').forEach(function (b) {
       b.onclick = function () { S.inspTab = b.getAttribute('data-itab'); renderInspector(); var t = el.insp.querySelector('[data-itab="' + S.inspTab + '"]'); if (t) t.focus(); if (S.inspTab === 'look' && o) captureSoon(o.id); };
       b.onkeydown = function (e) {

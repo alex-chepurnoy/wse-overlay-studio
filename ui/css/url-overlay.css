@@ -240,14 +240,14 @@
 
 /* ---------- home ---------- */
 .uo-plugin .home-h { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-3); flex-wrap: wrap; }
-.uo-plugin .srow { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto; gap: var(--s-3); align-items: center; width: 100%; padding: var(--s-3) var(--s-4); border: 0; border-bottom: 1px solid var(--gray-100); background: none; text-align: left; cursor: pointer; color: var(--text); }
+.uo-plugin .srow { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto auto; gap: var(--s-3); align-items: center; width: 100%; padding: var(--s-3) var(--s-4); border: 0; border-bottom: 1px solid var(--gray-100); background: none; text-align: left; cursor: pointer; color: var(--text); }
 .uo-plugin .srow:last-child { border-bottom: 0; }
 .uo-plugin .srow:hover { background: var(--surface-2); }
 .uo-plugin .srow .nm { font-weight: 600; overflow-wrap: anywhere; }
 .uo-plugin .srow .ov { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
 .uo-plugin .srow .outs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .uo-plugin .srow .vw { font-size: 13px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
-.uo-plugin .srow-h { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text-3); }
+.uo-plugin .srow-h { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto auto; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text-3); }
 .uo-plugin .ochip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .uo-plugin .ochip b { color: var(--text); font-weight: 600; }
 .uo-plugin .offrow { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-4); font-size: 13px; color: var(--text-2); }
@@ -598,7 +598,125 @@
   .uo-plugin .uo-left { position: static; height: auto; max-height: none; }
   .uo-plugin .ltabs { display: none; }
   .uo-plugin .ltab-select { display: block; }
-  .uo-plugin .srow, .uo-plugin .srow-h { grid-template-columns: 8px minmax(0, 1fr) auto; }
+  .uo-plugin .srow, .uo-plugin .srow-h { grid-template-columns: 8px minmax(0, 1fr) auto auto; }
   .uo-plugin .srow .ov, .uo-plugin .srow .outs, .uo-plugin .srow-h .c3, .uo-plugin .srow-h .c4 { display: none; }
   .uo-plugin .startcards, .uo-plugin .grid2 { grid-template-columns: 1fr; }
+}
+
+/* ---------- On air: row actions, the page changed in place, first visit ---------- */
+.uo-plugin .srow .nm.linkbtn { text-align: left; font-weight: 600; color: var(--text); }
+.uo-plugin .srow .acts { text-align: right; }
+.uo-plugin .srow.editing { background: color-mix(in srgb, var(--focus) 7%, var(--surface)); }
+.uo-plugin .srow-edit { padding: var(--s-2) var(--s-4) var(--s-3); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--focus) 7%, var(--surface)); display: flex; flex-direction: column; gap: 6px; }
+.uo-plugin .srow-edit .row { display: flex; gap: 8px; align-items: center; }
+.uo-plugin .srow-edit input { flex: 1; }
+.uo-plugin .firstrun { display: grid; place-items: center; gap: var(--s-3); padding: 64px var(--s-4); text-align: center; }
+.uo-plugin .firstrun h2 { margin: 0; }
+
+/* ---------- update speed ---------- */
+.uo-plugin .speed { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--s-3); }
+.uo-plugin .speed .seg button { display: inline-flex; flex-direction: column; align-items: center; gap: 0; padding: 4px 12px; line-height: 1.2; }
+.uo-plugin .speed .seg small { font-size: 11px; color: var(--text-3); font-weight: 400; }
+.uo-plugin .speed .seg button[aria-checked=true] { background: var(--ink); color: var(--ink-text); }
+.uo-plugin .speed .seg button[aria-checked=true] small { color: inherit; opacity: .8; }
+
+/* ---------- the task: put a page on a stream ---------- */
+.uo-plugin .task { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: var(--s-3); height: calc(100vh - 170px); min-height: 520px; }
+.uo-plugin ol.tsteps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.uo-plugin ol.tsteps li { min-width: 0; }
+.uo-plugin ol.tsteps button { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; cursor: pointer; color: var(--text); }
+.uo-plugin ol.tsteps button:disabled { cursor: default; opacity: .7; }
+.uo-plugin ol.tsteps .n { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; border: 1px solid var(--border-strong); color: var(--text-2); }
+.uo-plugin ol.tsteps .done .n { border-color: var(--green-line); color: var(--green-ink); background: var(--green-bg); }
+.uo-plugin ol.tsteps [aria-current=step] { background: color-mix(in srgb, var(--focus) 8%, var(--surface)); border-color: var(--focus); box-shadow: inset 0 3px 0 var(--focus); }
+.uo-plugin ol.tsteps [aria-current=step] .n { background: var(--focus); border-color: var(--focus); color: #fff; }
+.uo-plugin ol.tsteps .x { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.uo-plugin ol.tsteps .t { font-weight: 700; font-size: 14px; }
+.uo-plugin ol.tsteps .s { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.uo-plugin ol.tsteps .edit { font-size: 12px; color: var(--focus); }
+.uo-plugin .tbody { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 380px); gap: var(--s-3); }
+.uo-plugin .tbody.one { grid-template-columns: minmax(0, 1fr); }
+.uo-plugin .tbody.one .tsum { display: none; }
+.uo-plugin .tmain { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
+.uo-plugin .tmain:has(> .tpanel:nth-child(2)) { grid-template-columns: minmax(0, 1fr) clamp(280px, 24vw, 360px); }
+.uo-plugin .tbody:not(.one) .tmain:has(> .tpanel:nth-child(2)) { grid-template-columns: minmax(0, 1fr) clamp(240px, 20vw, 300px); }
+.uo-plugin .tpanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.uo-plugin .tpanel > .ph { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); min-height: 50px; flex-wrap: wrap; }
+.uo-plugin .tpanel > .ph h3 { margin: 0; font-size: 15px; }
+.uo-plugin .tpanel > .pb { padding: 14px; display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow: auto; overflow-x: hidden; }
+.uo-plugin .tpanel > .pb > * { min-width: 0; }
+.uo-plugin .tpanel > .pb.form > * { max-width: 820px; }
+.uo-plugin .tpanel > .pb.fill { display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.uo-plugin .tfoot { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 14px; }
+.uo-plugin .stagebox { min-height: 0; display: grid; place-items: center; container-type: size; }
+.uo-plugin .tstage { position: relative; width: min(100cqw, 100cqh * 16 / 9); max-height: 100cqh; border-radius: var(--r-lg); overflow: hidden; background: linear-gradient(160deg, #24384a, #3a5a74 55%, #22364a); }
+.uo-plugin .tstage.blank, .uo-plugin .tstage.dark { background: var(--stage); }
+.uo-plugin .tstage .lbl { position: absolute; left: 8px; bottom: 8px; background: rgba(0, 0, 0, .7); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: var(--r-sm); z-index: 3; }
+.uo-plugin .tstage .cta { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; padding: 6%; color: #fff; }
+.uo-plugin .tstage .cta h3 { margin: 0; font-size: 20px; color: #fff; }
+.uo-plugin .tstage .cta p { margin: 0; color: rgba(255, 255, 255, .75); }
+.uo-plugin .tstage .cta .row { display: flex; gap: 8px; }
+.uo-plugin .tstage .cta input { flex: 1; font-size: 15px; padding: 10px 12px; }
+.uo-plugin .tstage .cta .cap-state { font-size: 13px; }
+.uo-plugin .tstage .cta .cap-state.bad { color: #ffb4ae; }
+.uo-plugin .tpage { position: absolute; outline: 2px solid var(--layer); cursor: move; touch-action: none; }
+.uo-plugin .tpage img { width: 100%; height: 100%; display: block; pointer-events: none; }
+.uo-plugin .tpage .tag { position: absolute; top: -18px; left: -2px; background: var(--layer); color: #111; font-size: 10px; font-weight: 600; padding: 1px 5px; }
+.uo-plugin .tpage .grip { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; background: var(--layer); cursor: nwse-resize; }
+.uo-plugin .tstage video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
+.uo-plugin .tstage .wait { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255, 255, 255, .85); text-align: center; padding: 20px; font-size: 14px; }
+.uo-plugin .tstage .playbig { position: absolute; inset: 0; margin: auto; height: max-content; }
+.uo-plugin .tstage .stopw { position: absolute; right: 8px; bottom: 8px; z-index: 3; }
+.uo-plugin .tpanel form.row { display: flex; gap: 8px; }
+.uo-plugin .tpanel form.row input { flex: 1; min-width: 0; }
+.uo-plugin .radios { display: grid; gap: 8px; }
+.uo-plugin .radios.two { grid-template-columns: 1fr 1fr; }
+.uo-plugin .radios.three { grid-template-columns: repeat(3, 1fr); }
+.uo-plugin .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); font-weight: 600; }
+.uo-plugin .waitcard { display: flex; gap: 14px; align-items: center; padding: 18px; border: 1px dashed var(--border-strong); border-radius: var(--r-lg); max-width: 640px; }
+.uo-plugin .waitcard > svg { width: 32px; height: 32px; color: var(--text-3); flex: none; }
+.uo-plugin .waitcard > div { display: flex; flex-direction: column; gap: 4px; }
+.uo-plugin .bdg svg { width: 12px; height: 12px; margin-right: 4px; vertical-align: -2px; }
+.uo-plugin .srow.new { box-shadow: inset 3px 0 0 var(--focus); background: color-mix(in srgb, var(--focus) 6%, var(--surface)); }
+.uo-plugin .chip.new { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.uo-plugin .opt { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; cursor: pointer; background: var(--surface); }
+.uo-plugin .opt input { margin: 3px 0 0; accent-color: var(--focus); flex: none; }
+.uo-plugin .opt:has(input:checked) { border-color: var(--focus); background: color-mix(in srgb, var(--focus) 8%, var(--surface)); box-shadow: 0 0 0 1px var(--focus); }
+.uo-plugin .opt b { display: block; }
+.uo-plugin .opt .sub { display: block; font-size: 12px; color: var(--text-2); }
+.uo-plugin .opt.off { cursor: not-allowed; background: var(--surface-2); }
+.uo-plugin .task .ladder { display: flex; flex-direction: column; gap: 6px; }
+.uo-plugin .task .rung { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: var(--r-lg); padding: 6px 10px; }
+.uo-plugin .task .rung.in { border-style: dashed; }
+.uo-plugin .task .rung > div { display: flex; flex-direction: column; }
+.uo-plugin .task .res { width: 56px; height: 32px; }
+.uo-plugin .task .res svg { width: 18px; height: 18px; color: var(--text-2); }
+.uo-plugin .plan { border: 1px solid var(--border); border-radius: var(--r-lg); }
+.uo-plugin .plan > div { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; padding: 9px 10px; border-top: 1px solid var(--border); align-items: center; }
+.uo-plugin .plan > div:first-child { border-top: 0; }
+.uo-plugin .plan .blk { background: var(--amber-bg); }
+.uo-plugin .plan .ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--surface-2); color: var(--text-2); }
+.uo-plugin .plan .ic.on { background: var(--green-bg); color: var(--green-ink); }
+.uo-plugin .plan .ic.warn { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-line); }
+.uo-plugin .btn.warn { background: var(--amber-bg); border-color: var(--amber-line); color: var(--amber); }
+.uo-plugin .tsum .mini { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-md); background: linear-gradient(160deg, #24384a, #3a5a74 55%, #22364a); overflow: hidden; }
+.uo-plugin .tsum .mini img { position: absolute; outline: 1px solid var(--layer); }
+.uo-plugin .tsum dl { margin: 0; display: grid; grid-template-columns: 86px 1fr; gap: 6px 10px; font-size: 13px; }
+.uo-plugin .tsum dt { color: var(--text-3); }
+.uo-plugin .tsum dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.uo-plugin .tsum dd .no { color: var(--text-3); font-weight: 400; }
+.uo-plugin .task .outs { display: flex; gap: 6px; flex-wrap: wrap; }
+.uo-plugin .outbtn { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 4px 10px; background: var(--surface); cursor: pointer; color: var(--text); }
+.uo-plugin .outbtn[aria-pressed=true] { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); background: color-mix(in srgb, var(--focus) 8%, var(--surface)); }
+.uo-plugin .copyrow { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 6px 8px; }
+.uo-plugin .legend { display: flex; gap: 12px; font-size: 11px; color: var(--text-3); }
+.uo-plugin .bdg.cfg { background: none; border: 1px dashed var(--border-strong); color: var(--text-2); }
+.uo-plugin .task .big { font-size: 15px; padding: 9px 12px; }
+.uo-plugin .task details.adv summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--text-2); }
+.uo-plugin .task details.adv[open] summary { margin-bottom: 10px; }
+.uo-plugin .stack-3 { display: flex; flex-direction: column; gap: var(--s-3); }
+@media (max-width: 1100px) {
+  .uo-plugin .tbody, .uo-plugin .tmain:has(> .tpanel:nth-child(2)), .uo-plugin .tbody:not(.one) .tmain:has(> .tpanel:nth-child(2)) { grid-template-columns: minmax(0, 1fr); }
+  .uo-plugin .task { height: auto; }
+  .uo-plugin ol.tsteps .s { display: none; }
 }

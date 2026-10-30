@@ -66,6 +66,13 @@
     var outs = PRESETS[2][1]();
     return { isNew: true, name: '', overlay: overlay || '', hardware: 'cpu', deinterlace: false, gpuId: -1, minFrameRate: 0, outputs: outs, groups: defaultGroups(outs), images: [], preset: 2 };
   }
+  // for the task's step 2: a preset's outputs, and the spec of a new template carrying one overlay
+  U.presetOutputs = function (i) { return PRESETS[i][1](); };
+  U.templateSpecFor = function (name, overlay, preset) {
+    var d = blank(overlay);
+    d.name = name; d.outputs = PRESETS[preset][1](); d.groups = defaultGroups(d.outputs); d.preset = preset;
+    return spec(d);
+  };
   // what the editor shows for an existing template, from the validator's reading in the live state
   function fromTemplate(t) {
     var listed = t.overlayEncodes || [];
