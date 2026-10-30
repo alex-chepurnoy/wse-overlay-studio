@@ -57,11 +57,13 @@ public class UrlOverlayBridge
 	/** The module's own REST resources, for every method the page uses. */
 	static final Pattern MODULE = Pattern.compile("^/v1/server/plugin/urloverlay(" + SEGMENT + ")*$");
 	/**
-	 * The only WSE resource outside the module the page calls, and only with DELETE: removing a transcoder template
+	 * The two WSE resources outside the module the page calls, each with one method. DELETE removes a transcoder template
 	 * (ui/js/uo-core.js V2 = /v2/servers/_defaultServer_/vhosts/_defaultVHost_; U.api.v2del('/transcoder/templates/'
-	 * + name) in uo-streams.js and uo-template.js). The page's v2get and v2put helpers have no callers.
+	 * + name) in uo-stream.js and uo-template.js). PUT restarts an application, for a stream that cannot be restarted on
+	 * its own, such as one a server listener publishes (U.restartApp in uo-core.js). The page has no other v2 calls.
 	 */
 	static final Pattern TEMPLATE = Pattern.compile("^/v2/servers/_defaultServer_/vhosts/_defaultVHost_/transcoder/templates" + SEGMENT + "$");
+	static final Pattern APP_RESTART = Pattern.compile("^/v2/servers/_defaultServer_/vhosts/_defaultVHost_/applications" + SEGMENT + "/actions/restart$");
 	/** Request body types forwarded: the page's JSON, and raw image uploads. */
 	static final Set<String> TYPES = Set.of("application/json", "text/plain", "application/octet-stream", "image/png", "image/jpeg", "image/gif",
 			"image/webp");
@@ -238,7 +240,7 @@ public class UrlOverlayBridge
 		{
 			return true;
 		}
-		return TEMPLATE.matcher(path).matches() && method.equals("DELETE");
+		return TEMPLATE.matcher(path).matches() && method.equals("DELETE") || APP_RESTART.matcher(path).matches() && method.equals("PUT");
 	}
 
 	// no way out of the allowed prefix: no dot segments, no doubled or back slashes, no encoded dot, slash, backslash or NUL

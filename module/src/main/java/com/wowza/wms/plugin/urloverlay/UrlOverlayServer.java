@@ -32,6 +32,8 @@ import com.wowza.wms.plugin.urloverlay.rest.AppStreamsConfig;
 import com.wowza.wms.plugin.urloverlay.rest.TemplateSpecConfig;
 import com.wowza.wms.plugin.urloverlay.rest.TemplateUseConfig;
 import com.wowza.wms.plugin.urloverlay.rest.ImagesConfig;
+import com.wowza.wms.plugin.urloverlay.rest.SnapshotCache;
+import com.wowza.wms.plugin.urloverlay.rest.SnapshotConfig;
 import com.wowza.wms.plugin.urloverlay.rest.StreamRestartConfig;
 import com.wowza.wms.plugin.urloverlay.rest.TemplateOrderConfig;
 import com.wowza.wms.plugin.urloverlay.rest.TemplatesBuildConfig;
@@ -46,7 +48,7 @@ public class UrlOverlayServer implements IServerNotify2
 			TemplateStarterConfig.class, TemplateValidateConfig.class, TemplateAssignConfig.class, OverlaysConfig.class,
 			NamedOverlayConfig.class, NamedOverlayCaptureConfig.class, TemplateOverlayConfig.class, TemplateCopiesConfig.class, AppStreamsConfig.class,
 			AppStateConfig.class, NamedOverlayPreviewConfig.class, AppModuleConfig.class, TemplatesBuildConfig.class, TemplateSpecConfig.class,
-			TemplateUseConfig.class, ImagesConfig.class, StreamRestartConfig.class, TemplateOrderConfig.class };
+			TemplateUseConfig.class, ImagesConfig.class, StreamRestartConfig.class, TemplateOrderConfig.class, SnapshotConfig.class };
 
 	public static final Class<UrlOverlayServer> CLASS = UrlOverlayServer.class;
 	public static String MODULE_NAME = CLASS.getSimpleName();
@@ -74,6 +76,8 @@ public class UrlOverlayServer implements IServerNotify2
 		EgressRules egress = new EgressRules(props.getPropertyBoolean(EgressRules.PROP_ALLOW_PRIVATE, false),
 				props.getPropertyStr(EgressRules.PROP_ALLOW_HOSTS, null), props.getPropertyStr(EgressRules.PROP_BLOCK_HOSTS, null),
 				props.getPropertyBoolean(EgressRules.PROP_BLOCK_CHROME_SERVICES, true), props.getPropertyStr(EgressRules.PROP_ALLOW_PORTS, null));
+		SnapshotCache.configure(props.getPropertyInt(SnapshotCache.PROP_MAX_DECODES, SnapshotCache.DEFAULT_MAX_DECODES),
+				props.getPropertyLong(SnapshotCache.PROP_TIMEOUT, SnapshotCache.DEFAULT_TIMEOUT_MS));
 		CaptureClient client = CaptureClient.configure(props.getPropertyStr(CaptureClient.PROP_SOCKET, null), egress);
 		try
 		{

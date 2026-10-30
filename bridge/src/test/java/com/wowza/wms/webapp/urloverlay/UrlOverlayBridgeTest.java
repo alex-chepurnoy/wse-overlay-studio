@@ -134,6 +134,17 @@ class UrlOverlayBridgeTest
 		{
 			assertFalse(UrlOverlayBridge.allowed(m, TEMPLATES + "/live_overlay"), "the page only deletes templates: " + m);
 		}
+		String apps = "/v2/servers/_defaultServer_/vhosts/_defaultVHost_/applications";
+		assertTrue(UrlOverlayBridge.allowed("PUT", apps + "/live/actions/restart"));
+		for(String m: List.of("GET", "POST", "DELETE"))
+		{
+			assertFalse(UrlOverlayBridge.allowed(m, apps + "/live/actions/restart"), "the page only restarts applications: " + m);
+		}
+		for(String p: List.of(apps + "/live/actions/shutdown", apps + "/live/actions", apps + "/live/actions/restart/x", apps + "/../actions/restart",
+				apps + "/live/instances/_definst_/actions/restart", "/v2/servers/_defaultServer_/actions/restart"))
+		{
+			assertFalse(UrlOverlayBridge.allowed("PUT", p), p);
+		}
 		for(String p: List.of("/v1/server/plugin/urloverlayx", "/v1/server/plugin", "/v1/server/plugin/other", MODULE + "/../../users", MODULE + "/%2e%2e/users",
 				MODULE + "/%2E%2E/users", MODULE + "/a%2fb", MODULE + "/a%5cb", MODULE + "//x", MODULE + "/./x", MODULE + "/a%252e%252e", TEMPLATES,
 				TEMPLATES + "/a/b", TEMPLATES + "/..", "/v2/servers/_defaultServer_/vhosts/_defaultVHost_/applications/live",

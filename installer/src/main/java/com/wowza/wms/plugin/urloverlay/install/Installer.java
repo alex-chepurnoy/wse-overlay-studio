@@ -251,10 +251,22 @@ final class Installer
 			}
 		}
 
-		// the Manager plugin page: ours, so replaced when it differs
+		// the Manager plugin page: ours, so replaced when it differs, and a page file the new version no longer carries removed
+		java.util.Set<Path> pageFiles = new java.util.HashSet<>();
 		for(String p: payload.under("ui/"))
 		{
-			addIfChanged(ops, pluginDir.resolve(p.substring(3)), payload.bytes(p), "plugin page " + p.substring(3), added, true);
+			Path target = pluginDir.resolve(p.substring(3));
+			pageFiles.add(target.toAbsolutePath().normalize());
+			addIfChanged(ops, target, payload.bytes(p), "plugin page " + p.substring(3), added, true);
+		}
+		Path page = pluginDir.toAbsolutePath().normalize();
+		for(Map<String, Object> a: added)
+		{
+			Path p = abs(a.get("path")).toAbsolutePath().normalize();
+			if(p.startsWith(page) && !pageFiles.contains(p) && Files.isRegularFile(p) && ours(added, p))
+			{
+				ops.add(new Op("delete", p, null, null, "plugin page file no longer used " + page.relativize(p)));
+			}
 		}
 		return ops;
 	}

@@ -16,6 +16,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 import com.wowza.wms.plugin.urloverlay.UrlOverlayModule;
@@ -30,9 +31,10 @@ import com.wowza.wms.rest.WMSConfig;
 /**
  * Everything the plugin page shows for one application, with a revision. The revision is
  * computed on each call from the names, sizes and modification times of the application's files and the transcoder
- * templates, the application's settings file, the streams publishing, and which streams show each overlay; so an edit
- * from another browser, by REST or by hand changes it, with no file watcher. ?rev= with the current revision gets a
- * short "unchanged" answer.
+ * templates, the application's settings file, the streams publishing, which streams show each overlay, and each
+ * publishing stream's viewers on this server (Viewers); so an edit from another browser, by REST or by hand changes
+ * it, with no file watcher, and so does a viewer joining or leaving. ?rev= with the current revision gets a short
+ * "unchanged" answer.
  */
 @WMSConfig(restLocation = "/v1/{server}/plugin/urloverlay/vhosts/{vhostName}/applications/{appName}/state", restVerbs = "GET", xmlFilename = "")
 public class AppStateConfig extends VHostResourceBase
@@ -43,7 +45,8 @@ public class AppStateConfig extends VHostResourceBase
 		String vhost = path.get("vhostName"), app = path.get("appName");
 		Path vhostDir = vhostDir(vhost);
 		List<String> publishing = AppStreamsConfig.publishing(vhost, app);
-		String rev = revision(vhostDir, app, publishing, showing(vhostDir, vhost, app));
+		Map<String, Integer> viewers = viewers(vhost, app, publishing);
+		String rev = revision(vhostDir, app, publishing, showing(vhostDir, vhost, app), viewers);
 		Map<String, Object> m = new LinkedHashMap<>();
 		m.put("revision", rev);
 		if(rev.equals(query.get("rev")))
@@ -56,10 +59,34 @@ public class AppStateConfig extends VHostResourceBase
 		listedBy(templates, AppScanner.scan(vhostDir));
 		m.put("templates", templates);
 		Map<String, Object> streams = AppStreamsConfig.streams(path);
+		addViewers(streams.get("streams"), viewers);
 		m.put("streams", streams.get("streams"));
 		m.put("appTemplates", streams.get("templates"));
 		m.put("liveStreamTranscoder", streams.get("liveStreamTranscoder"));
 		return m;
+	}
+
+	/** Viewers on this server of each publishing stream of the default instance; empty when the application is not loaded. */
+	static Map<String, Integer> viewers(String vhost, String app, List<String> publishing)
+	{
+		com.wowza.wms.application.IApplicationInstance ai = AppStreamsConfig.instance(vhost, app);
+		return ai == null ? new TreeMap<>() : Viewers.count(publishing, Viewers.of(ai));
+	}
+
+	/** Puts viewers on each stream row: the count for a publishing stream, 0 for one that is not. */
+	@SuppressWarnings("unchecked")
+	static void addViewers(Object rows, Map<String, Integer> viewers)
+	{
+		if(rows instanceof List<?> list)
+		{
+			for(Object r: list)
+			{
+				if(r instanceof Map<?, ?> row)
+				{
+					((Map<String, Object>)row).put("viewers", viewers.getOrDefault(String.valueOf(row.get("name")), 0));
+				}
+			}
+		}
 	}
 
 	// which running streams show each overlay; changes when a transcoder starts or stops drawing one
@@ -74,7 +101,7 @@ public class AppStateConfig extends VHostResourceBase
 	}
 
 	/** The revision: a digest over what the page shows, cheap enough to compute on every poll. */
-	static String revision(Path vhostDir, String app, List<String> publishing, String showing) throws IOException
+	static String revision(Path vhostDir, String app, List<String> publishing, String showing, Map<String, Integer> viewers) throws IOException
 	{
 		MessageDigest d;
 		try
@@ -108,6 +135,8 @@ public class AppStateConfig extends VHostResourceBase
 		}
 		stamp(b, "application", vhostDir.resolve("conf").resolve(app).resolve("Application.xml"));
 		b.append("publishing:").append(publishing).append('\n').append("showing:").append(showing);
+		// the numbers only, sorted by stream, so the revision moves when a count changes and at no other time
+		b.append('\n').append("viewers:").append(new TreeMap<>(viewers));
 		return HexFormat.of().formatHex(d.digest(b.toString().getBytes(StandardCharsets.UTF_8))).substring(0, 16);
 	}
 

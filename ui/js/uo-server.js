@@ -1,9 +1,9 @@
-/* URL Overlay Server view: the capture engine and the network rules for captured pages, read-only, from /info.
-   Values come from Server.xml properties; each rule names the property behind it. */
+/* URL Overlay server status, for the status drawer: the capture service, Chrome, the browser sessions and the network
+   rules for captured pages, read-only, from /info. Values come from Server.xml properties; each rule names its
+   property, which a WSE administrator edits. */
 (function () {
   'use strict';
   var U = window.UrlOverlay;
-  var el, timer;
 
   // "today", "yesterday" or "N days ago", from an ISO time
   function daysAgo(iso) {
@@ -21,67 +21,58 @@
     var state = { current: 'up to date', updated: 'updated', installed: 'up to date', off: 'automatic updates off (autoUpdate=false)',
       own: 'chosen by hand, not updated', failed: 'update failed' }[u.result] || U.esc(u.result);
     var age = u.installed ? daysAgo(u.installed) : null;
-    return '<div class="muted"' + (age ? ' title="installed ' + U.esc(age) + '"' : '') + '>' + (checked ? 'checked ' + U.esc(checked) + ', ' : '') + state +
+    return '<div class="muted small"' + (age ? ' title="installed ' + U.esc(age) + '"' : '') + '>' + (checked ? 'checked ' + U.esc(checked) + ', ' : '') + state +
       (u.result === 'current' && u.latest && u.version && u.latest !== u.version ? ' (Stable is ' + U.esc(u.latest) + ')' : '') + '</div>' +
       (u.result === 'failed' && u.message ? '<div class="err">' + U.esc(u.message) + '</div>' : '');
   }
-
   function list(a) { return a && a.length ? a.map(function (x) { return '<code>' + U.esc(x) + '</code>'; }).join(' ') : 'none'; }
+  function ready(i) {
+    var c = i.chrome || {}, d = i.chromedriver || {};
+    return !!(i.service && i.service.running && c.found && d.found && d.matchesChrome !== false);
+  }
+  U.serverReady = ready;
 
-  function render(i) {
+  // sections of the status drawer, each with an id the header items open at
+  U.serverSections = function (i) {
+    if (!i) return [['capture', 'Capture service', U.infoError ? '<div class="note bad"><span class="dot bad"></span><div><b>Server information is not available.</b> ' + U.esc(U.infoError.message) + '</div></div>' : '<div class="skel"></div>']];
     var chrome = i.chrome || {}, drv = i.chromedriver || {}, cap = i.captures || {}, eg = i.egress || {}, svc = i.service || {};
-    var ready = svc.running && chrome.found && drv.found && drv.matchesChrome !== false;
     var pct = cap.limit ? Math.min(100, Math.round(100 * cap.active / cap.limit)) : 0;
     var blocks = (eg.recentBlocks || []).map(function (b) {
-      return '<tr><td>' + U.esc(new Date(b.at).toLocaleTimeString()) + '</td><td>' + U.esc(b.capture || '') + '</td><td><code>' + U.esc(b.host) +
-        '</code></td><td><code>' + U.esc(b.address || '') + '</code></td><td>' + U.esc(b.rule) + '</td></tr>';
+      return '<tr><td>' + U.esc(new Date(b.at).toLocaleTimeString()) + '</td><td><code>' + U.esc(b.host) + '</code>' + (b.address ? '<br><span class="mono faint">' + U.esc(b.address) + '</span>' : '') +
+        '</td><td>' + U.esc(b.rule) + (b.capture ? '<br><span class="faint">' + U.esc(b.capture) + '</span>' : '') + '</td></tr>';
     }).join('');
-    el.innerHTML =
-      '<div class="card"><div class="card-h"><h3>Capture service</h3><span class="tag ' + (ready ? 'ok">ready' : 'bad">not ready') + '</span></div>' +
-      (svc.running ? '' : '<div class="notice bad"><div><strong>The capture service is not running.</strong> ' + U.esc(svc.message || '') + '</div></div>') +
-      '<div class="kv">' +
-      '<div class="muted">Module</div><div>' + U.esc(i.version) + ' on WSE ' + U.esc(i.wseVersion) + ', ' + U.esc(i.os) + '</div>' +
-      '<div class="muted">REST access</div><div>' + U.esc(i.accessMode) + ' <span class="key">UrlOverlayServer</span></div>' +
-      '<div class="muted">Service</div><div><span class="dot ' + (svc.running ? 'ok' : 'bad') + '"></span>' +
-        (svc.running ? U.esc(svc.version || '') + ' as <code>' + U.esc(svc.user || '') + '</code>' : 'not running') +
-        ' on <code>' + U.esc(svc.socket || '') + '</code> <span class="key">UrlOverlayCaptureSocket</span></div>' +
+    var capture = (svc.running ? '' : '<div class="note bad"><span class="dot bad"></span><div><b class="err">The capture service is not running.</b> ' + U.esc(svc.message || '') +
+        ' Every overlay is frozen on its last picture, not missing. A WSE administrator starts the <span class="mono">WowzaURLOverlayCapture</span> service on the server.</div></div>') +
+      '<dl class="kv"' + (svc.running ? '' : ' style="margin-top:12px"') + '>' +
+      '<dt>State</dt><dd>' + (ready(i) ? '<span class="bdg on">Running</span>' : svc.running ? '<span class="bdg bad">Chrome not ready</span>' : '<span class="bdg bad">Stopped</span>') + '</dd>' +
+      '<dt>Module</dt><dd>' + U.esc(i.version) + ' on WSE ' + U.esc(i.wseVersion) + ', ' + U.esc(i.os) + '</dd>' +
+      '<dt>REST access</dt><dd>' + U.esc(i.accessMode) + ' <span class="key">UrlOverlayServer</span></dd>' +
+      '<dt>Service</dt><dd>' + (svc.running ? U.esc(svc.version || '') + ' as <code>' + U.esc(svc.user || '') + '</code>' : 'not running') +
+        ' on <code>' + U.esc(svc.socket || '') + '</code> <span class="key">UrlOverlayCaptureSocket</span></dd>' +
       (svc.running ?
-      '<div class="muted">Chrome</div><div><span class="dot ' + (chrome.found ? 'ok' : 'bad') + '"></span>' +
-        (chrome.found ? U.esc(chrome.version || 'version unknown') : 'not found') + ' <code>' + U.esc(chrome.path || '') + '</code>' + updateLine(i.chromeUpdate) + '</div>' +
-      '<div class="muted">chromedriver</div><div><span class="dot ' + (drv.found && drv.matchesChrome !== false ? 'ok' : 'bad') + '"></span>' +
-        (drv.found ? U.esc(drv.version || 'version unknown') + (drv.matchesChrome === false ? ', does not match Chrome' : ', matches Chrome') : 'not found') +
-        ' <code>' + U.esc(drv.path || '') + '</code></div>' +
-      '<div class="muted">Sandbox</div><div><span class="tag ok">always on</span>' + (i.sandboxProblem ? ' <span class="err">' + U.esc(i.sandboxProblem) + '</span>' : '') + '</div>' +
-      '<div class="muted">Browser sessions</div><div>' + U.esc(cap.active) + ' of ' + U.esc(cap.limit) +
-        '<div class="meter narrow"><i class="' + (pct >= 100 ? 'bad' : pct >= 80 ? 'slow' : '') + '" style="width:' + pct + '%"></i></div></div>' +
-      '<div class="muted">Memory per browser</div><div>restarted above ' + U.esc(cap.maxBrowserMemoryMB) + ' MB</div>' : '') +
-      '</div><p class="hint">Read-only here. Chrome runs in the URL Overlay capture service under its own account; its limits are in capture.properties, the network rules below in Server.xml.</p></div>' +
-      '<div class="card"><div class="card-h"><h3>Network rules for captured pages</h3></div><div class="kv">' +
-      '<div class="muted">Private networks</div><div><span class="tag ' + (eg.allowPrivate ? 'warn">allowed' : 'ok">blocked') + '</span> <span class="key">UrlOverlayAllowPrivateNetworks</span></div>' +
-      '<div class="muted">Always allowed</div><div>' + list(eg.allowHosts) + ' <span class="key">UrlOverlayAllowHosts</span></div>' +
-      '<div class="muted">Always blocked</div><div>' + list(eg.blockHosts) + ' <span class="key">UrlOverlayBlockHosts</span></div>' +
-      '<div class="muted">This server</div><div><span class="tag ok">blocked</span> loopback, link-local and this server\'s own addresses, unless allowed by exact address</div>' +
-      '<div class="muted">Cloud metadata</div><div><span class="tag ok">blocked</span> unless allowed by exact address</div>' +
-      '<div class="muted">Ports</div><div>' + list((eg.ports || []).map(String)) + ' <span class="key">UrlOverlayAllowPorts</span></div>' +
-      '<div class="muted">Chrome\'s own services</div><div><span class="tag ' + (eg.blockChromeServices ? 'ok">blocked' : 'warn">allowed') + '</span> ' +
-        U.esc(eg.chromeServiceBlocks || 0) + ' requests refused <span class="key">UrlOverlayBlockChromeServices</span></div>' +
-      '</div><h3 class="sub-h">Recent blocks</h3>' +
-      (blocks ? '<table class="list"><thead><tr><th>Time</th><th>Layer</th><th>Host</th><th>Address</th><th>Rule</th></tr></thead><tbody>' + blocks + '</tbody></table>'
-              : '<p class="muted small">No page requests blocked since WSE started.</p>') +
-      '</div>';
-  }
-
-  function load() {
-    return U.api.get('/info').then(render, function (e) {
-      el.innerHTML = '<div class="notice bad"><div><strong>Server information is not available.</strong> ' + U.esc(e.message) + '</div></div>';
-    });
-  }
-
-  U.views['uo-server'] = {
-    init: function (section) { el = section.querySelector('[data-server]'); timer = null; },
-    show: function () {
-      if (timer) timer.stop();
-      timer = U.every(5000, function () { return U.root.querySelector('#uo-server.on') ? load() : (timer.stop(), null); });
-    }
+      '<dt>Chrome</dt><dd><span class="dot ' + (chrome.found ? 'on' : 'bad') + '"></span> ' + (chrome.found ? U.esc(chrome.version || 'version unknown') : 'not found') +
+        ' <code>' + U.esc(chrome.path || '') + '</code>' + updateLine(i.chromeUpdate) + '</dd>' +
+      '<dt>chromedriver</dt><dd><span class="dot ' + (drv.found && drv.matchesChrome !== false ? 'on' : 'bad') + '"></span> ' +
+        (drv.found ? U.esc(drv.version || 'version unknown') + (drv.matchesChrome === false ? ', does not match Chrome' : ', matches Chrome') : 'not found') + ' <code>' + U.esc(drv.path || '') + '</code></dd>' +
+      '<dt>Sandbox</dt><dd>always on' + (i.sandboxProblem ? ' <span class="err">' + U.esc(i.sandboxProblem) + '</span>' : '') + '</dd>' : '') +
+      '</dl><p class="small faint" style="margin-top:8px">Chrome runs in the URL Overlay capture service under its own account; its limits are in capture.properties. If it stops, streams keep the last captured picture.</p>';
+    var browsers = '<dl class="kv"><dt>Open</dt><dd>' + U.esc(cap.active || 0) + ' of ' + U.esc(cap.limit || 0) + '. Identical pages share one browser.' +
+        '<div class="meter"><i class="' + (pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : '') + '" style="width:' + pct + '%"></i></div></dd>' +
+      '<dt>Memory</dt><dd>restarted above ' + U.esc(cap.maxBrowserMemoryMB) + ' MB per browser</dd></dl>';
+    var network = '<table class="tbl kvt"><tbody>' +
+      '<tr><td>Private networks</td><td><b>' + (eg.allowPrivate ? 'Allowed' : 'Blocked') + '</b><br><span class="mono faint">UrlOverlayAllowPrivateNetworks</span></td></tr>' +
+      '<tr><td>Always allowed</td><td>' + list(eg.allowHosts) + '<br><span class="mono faint">UrlOverlayAllowHosts</span></td></tr>' +
+      '<tr><td>Always blocked</td><td>' + list(eg.blockHosts) + '<br><span class="mono faint">UrlOverlayBlockHosts</span></td></tr>' +
+      '<tr><td>This server</td><td><b>Blocked</b>: loopback, link-local and this server\'s own addresses, unless allowed by exact address</td></tr>' +
+      '<tr><td>Cloud metadata</td><td><b>Blocked</b> unless allowed by exact address</td></tr>' +
+      '<tr><td>Ports</td><td>' + list((eg.ports || []).map(String)) + '<br><span class="mono faint">UrlOverlayAllowPorts</span></td></tr>' +
+      '<tr><td>Chrome\'s own services</td><td><b>' + (eg.blockChromeServices ? 'Blocked' : 'Allowed') + '</b>, ' + U.esc(eg.chromeServiceBlocks || 0) +
+        ' requests refused<br><span class="mono faint">UrlOverlayBlockChromeServices</span></td></tr></tbody></table>' +
+      '<div class="sec-h" style="margin-top:16px">Recent blocks</div>' +
+      (blocks ? '<table class="tbl"><thead><tr><th>Time</th><th>Host</th><th>Rule</th></tr></thead><tbody>' + blocks + '</tbody></table>'
+        : '<p class="small muted">No page requests blocked since WSE started.</p>') +
+      '<p class="small" style="margin-top:8px">To allow a blocked page, the narrow fix first: a WSE administrator adds that one host to <span class="mono">UrlOverlayAllowHosts</span> in Server.xml. ' +
+      'Broader, if many internal pages are needed: <span class="mono">UrlOverlayAllowPrivateNetworks</span> set to true. Either way WSE must restart, and every stream on this server reconnects.</p>';
+    return [['capture', 'Capture service', capture], ['browsers', 'Browsers', browsers], ['network', 'Network rules for captured pages', network]];
   };
 })();

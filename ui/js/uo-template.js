@@ -1,10 +1,16 @@
-/* URL Overlay step 2, Template: every transcoder template on the server. One made here opens in the builder; any other is
-   read-only, with "Use with an overlay" to make a copy or switch overlays on in place. Streams' own copies are not listed. */
+/* URL Overlay template editor: every transcoder template on the server. One made here opens in the builder (outputs,
+   overlay, hardware, image layers, adaptive groups); one switched on in place gets the overlay form; any other is
+   shown read-only with its verdict, "Use with an overlay" to make a copy or switch overlays on in place, and "New
+   template from this one". "Used by" lists the streams that load it and updates their own copies. Edits stay in a
+   draft kept in memory per template until Save. Streams' own copies are not listed. */
 (function () {
   'use strict';
   var U = window.UrlOverlay;
   var el = {};
-  var S = { sel: null, draft: null, base: null, known: null, theirs: null, conflict: false, saving: false, open: {} };
+  // drafts not in view, by template name ('' for a new one): { draft, form, base, known }
+  var mem = {};
+  var S = { sel: null, kind: null, draft: null, form: null, base: null, known: null, theirs: null, conflict: false, saving: false, open: {}, lib: null, libLoading: false,
+    advOpen: false, pick: false, use: null, savedNote: null };
   var IN_PLACE = 'overlays switched on in place';
   // heights and default bitrates: 720, 360, 234 and 160 from WSE's transcode.xml; 1080 and 540 are URL Overlay's choice
   var SIZES = [[1080, '1080p', 5000000, 'high'], [720, '720p', 3000000, 'high'], [540, '540p', 1500000, 'high'],
@@ -16,16 +22,14 @@
   function find(name) { return all().filter(function (t) { return t.name === name; })[0]; }
   function group(t) { return t.vif ? 'na' : (t.overlay || t.managed) ? 'mine' : 'other'; }
   function size(h) { return SIZES.filter(function (s) { return s[0] === h; })[0]; }
-  function streamsUsing(name) {
-    return (U.appStreams || []).filter(function (s) { return s.template === name + '.xml' || (s.own && U.copyBase(s) === name); });
-  }
   function carriers(t) { return (t.encodes || []).filter(function (e) { return e.canCarryOverlay; }); }
   function verdict(t) {
     if (!carriers(t).length) return { cls: '', text: 'Cannot carry an overlay', long: 'It has no enabled output that encodes video, so there is nothing to draw an overlay on.' };
     if (!t.dynamicOverlays) return { cls: 'warn', text: 'Needs overlays switched on', long: 'Dynamic overlays are off in this template, so a URL overlay cannot show on its streams yet.' };
-    return { cls: 'ok', text: 'Ready for an overlay', long: 'Dynamic overlays are on, and it has outputs an overlay can be drawn on.' };
+    return { cls: 'on', text: 'Ready for an overlay', long: 'Dynamic overlays are on, and it has outputs an overlay can be drawn on.' };
   }
   function num(v, d) { var n = parseInt(v, 10); return isNaN(n) ? d : n; }
+  function ro() { return !!U.readOnly; }
 
   /* ---------- the builder's model ---------- */
   // the whole template's hardware
@@ -62,7 +66,7 @@
     var outs = PRESETS[2][1]();
     return { isNew: true, name: '', overlay: overlay || '', hardware: 'cpu', deinterlace: false, gpuId: -1, minFrameRate: 0, outputs: outs, groups: defaultGroups(outs), images: [], preset: 2 };
   }
-  // what the Template step shows for an existing template, from the validator's reading in the live state
+  // what the editor shows for an existing template, from the validator's reading in the live state
   function fromTemplate(t) {
     var listed = t.overlayEncodes || [];
     var outs = (t.encodes || []).map(function (e) {
@@ -116,85 +120,148 @@
       }) };
   }
 
-  /* ---------- the list ---------- */
-  function load() {
-    var list = all();
-    if (S.sel && !S.draft && !find(S.sel)) { if (changes()) U.toast('Template ' + S.sel + ' was deleted in another session.', { level: 'bad' }); S.sel = null; S.known = null; S.base = null; }
-    if (!S.sel && !S.draft) {
-      var mine = list.filter(function (t) { return group(t) === 'mine'; });
-      var first = mine.filter(function (t) { return t.overlay; })[0] || mine[0] || list.filter(function (t) { return group(t) === 'other'; })[0];
-      if (first) { select(first.name); return; }
-      renderList(); renderEdit(); renderBar(); return;
-    }
-    var t = S.sel && find(S.sel);
-    if (t && S.known != null && t.modified !== S.known && !S.saving) {
-      if (changes()) { S.conflict = true; S.theirs = t.modified; }
-      else { S.known = t.modified; open(t); renderEdit(); }
-    }
-    renderList(); renderBar();
+  /* ---------- opening a template, and keeping a draft when another is shown ---------- */
+  function stash() {
+    var key = S.kind === 'new' ? '' : S.sel;
+    if (key == null || !S.kind) return;
+    if (changes()) mem[key] = { draft: S.draft, form: S.form, base: S.base, known: S.known };
+    else delete mem[key];
   }
   function select(name) {
-    var t = name && find(name);
-    S.sel = t ? name : null; S.conflict = false; S.draft = null; S.known = t ? t.modified : null;
-    open(t);
-    renderList(); renderEdit(); renderBar();
-  }
-  // a template made here, not changed in place, opens in the builder
-  function open(t) {
-    S.draft = t && group(t) === 'mine' && !inPlace(t) ? fromTemplate(t) : null;
-    S.base = S.draft ? JSON.stringify(spec(S.draft)) : null;
-    if (t && inPlace(t)) S.base = JSON.stringify(savedForm(t));
-  }
-  function startNew(draft) {
-    S.sel = null; S.known = null; S.conflict = false;
-    S.draft = draft || blank(((U.overlays || [])[0] || {}).name);
-    S.base = null;
-    renderList(); renderEdit(); renderBar();
-    var n = el.edit.querySelector('[data-d=name]');
-    if (n) n.focus();
-  }
-
-  function renderList() {
-    var list = all(), mine = list.filter(function (t) { return group(t) === 'mine'; }), other = list.filter(function (t) { return group(t) === 'other'; });
-    var na = list.filter(function (t) { return group(t) === 'na'; });
-    var h = '<div class="tpl-grp">With URL Overlay</div>' +
-      (S.draft && S.draft.isNew ? '<div class="tpl-row sel"><strong>' + U.esc(S.draft.name || 'New template') + '</strong><div class="sub">New, not saved yet</div></div>' : '') +
-      (mine.length ? mine.map(function (t) {
-        var users = streamsUsing(t.name).map(function (s) { return s.name + (s.publishing ? ' (live)' : ''); });
-        var on = carriers(t).filter(function (e) { return !(t.overlayEncodes || []).length || t.overlayEncodes.indexOf(e.name) >= 0; }).length;
-        return row(t, t.overlay ? U.esc(t.overlay) + ' on ' + on + ' of ' + (t.encodes || []).length + ' outputs' : 'No overlay yet',
-          users.length ? 'Used by ' + U.esc(users.join(', ')) : 'Not used by a stream yet');
-      }).join('') : (S.draft && S.draft.isNew ? '' : '<p class="hint tpl-none">None yet. Make one with New template, or give one of the templates below an overlay.</p>')) +
-      '<div class="tpl-grp">Other templates on this server</div>' +
-      (other.length ? other.map(function (t) { var v = verdict(t); return row(t, '<span class="tag ' + v.cls + '">' + v.text + '</span>', t.shipped ? 'Ships with WSE' : ''); }).join('')
-        : '<p class="hint tpl-none">None.</p>') +
-      (na.length ? '<details class="tpl-na"><summary>Not available here (' + na.length + ')</summary>' + na.map(function (t) {
-        return '<div class="tpl-row off"><strong>' + U.esc(t.name) + '</strong><div class="sub">A Video Intelligence template; a stream runs one or the other.</div></div>'; }).join('') + '</details>' : '');
-    el.list.innerHTML = h;
-    el.list.querySelectorAll('[data-t]').forEach(function (r) {
-      r.onclick = function () { var n = r.getAttribute('data-t'); if (n === S.sel && !(S.draft && S.draft.isNew)) return; leave().then(function (ok) { if (ok) select(n); }); };
-      r.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); r.onclick(); } };
-    });
-  }
-  function row(t, sub1, sub2) {
-    var sel = t.name === S.sel && !(S.draft && S.draft.isNew);
-    return '<div class="tpl-row' + (sel ? ' sel' : '') + '" data-t="' + U.esc(t.name) + '" tabindex="0" role="button" aria-pressed="' + sel + '"><strong>' + U.esc(t.name) + '</strong>' +
-      '<div class="sub">' + sub1 + '</div>' + (sub2 ? '<div class="sub">' + sub2 + '</div>' : '') + '</div>';
-  }
-
-  /* ---------- the editor ---------- */
-  function renderEdit() {
-    var t = S.sel && find(S.sel);
-    el.del.disabled = !(t && t.managed && !(S.draft && S.draft.isNew));
-    if (S.draft) { renderBuilder(); return; }
-    if (!t) {
-      el.edit.innerHTML = '<h3>Make a template</h3><p class="muted">Build one from outputs, or pick a template on the left to give it an overlay.</p>' +
-        '<button class="btn primary" type="button" data-act="new3">New template</button>';
-      el.edit.querySelector('[data-act=new3]').onclick = function () { startNew(); };
+    stash();
+    var t = name ? find(name) : null;
+    S.conflict = false; S.theirs = null; S.pick = false; S.use = null; S.savedNote = null;
+    if (!name) {
+      S.sel = null; S.kind = 'new'; S.form = null; S.known = null;
+      var k = mem[''];
+      S.draft = k ? k.draft : blank(((U.overlays || [])[0] || {}).name);
+      // a new template counts as unsaved work once it has a name or differs from where it started
+      S.base = k ? k.base : JSON.stringify(spec(S.draft));
       return;
     }
-    if (inPlace(t)) { renderOverlayOnly(t); return; }
-    renderOther(t);
+    S.sel = name;
+    if (!t) { S.kind = null; S.draft = null; S.form = null; return; }
+    var kept = mem[name];
+    S.kind = t.vif ? 'vif' : inPlace(t) ? 'inplace' : group(t) === 'mine' ? 'builder' : 'other';
+    if (kept) {
+      S.draft = kept.draft; S.form = kept.form; S.base = kept.base; S.known = kept.known;
+      if (kept.known != null && t.modified !== kept.known) { S.conflict = true; S.theirs = t.modified; }
+      return;
+    }
+    S.known = t.modified;
+    loadFrom(t);
+  }
+  function loadFrom(t) {
+    S.draft = S.kind === 'builder' ? fromTemplate(t) : null;
+    S.form = S.kind === 'inplace' ? savedForm(t) : null;
+    S.base = S.draft ? JSON.stringify(spec(S.draft)) : S.form ? JSON.stringify(S.form) : null;
+  }
+  // the editor's draft for another screen's link, or null
+  function draftInfo(name) {
+    if (ro()) return null;
+    if (name === S.sel && S.kind !== 'new' && changes()) return describe();
+    var k = mem[name];
+    if (!k) return null;
+    var cur = k.draft ? JSON.stringify(spec(k.draft)) : k.form ? JSON.stringify(k.form) : null;
+    return cur && cur !== k.base ? ['unsaved edits'] : null;
+  }
+
+  /* ---------- live state ---------- */
+  function onState() {
+    if (S.kind === 'new') { renderHead(); renderUsedBy(); renderBar(); return; }
+    var t = S.sel && find(S.sel);
+    if (S.sel && !t) {
+      if (changes()) U.toast('Template ' + S.sel + ' was deleted in another session.', { level: 'bad' });
+      delete mem[S.sel]; S.sel = null; S.kind = null; U.go('home:'); return;
+    }
+    if (t && S.known != null && t.modified !== S.known && !S.saving) {
+      if (changes()) { S.conflict = true; S.theirs = t.modified; }
+      else { S.known = t.modified; loadFrom(t); renderBody(); }
+    }
+    renderHead(); renderUsedBy(); renderBar();
+  }
+
+  /* ---------- head and Used by ---------- */
+  function renderHead() {
+    var t = S.sel && find(S.sel);
+    if (S.kind === 'new') {
+      el.head.innerHTML = '<h2>New template</h2><span class="small faint">Shared by every application on this server</span>';
+      return;
+    }
+    if (!t) { el.head.innerHTML = ''; return; }
+    var origin = t.shipped ? 'Ships with WSE' : inPlace(t) ? 'Your template, overlays switched on here' : t.managed ? 'Built here' : t.vif ? 'Video Intelligence' : 'Not made here';
+    el.head.innerHTML = '<h2>' + U.esc(t.name) + '</h2><span class="mono faint">' + U.esc(t.template) + '</span><span class="bdg">' + origin + '</span><span class="spacer"></span>' +
+      U.menuHtml('tpl', 'More actions for this template', [['from', 'New template from this one'], '-', ['del', 'Delete template...', true, !t.managed]]);
+    U.bindMenus(el.head);
+    el.head.querySelector('[data-mi=from]').onclick = function () { startNew(copyOf(t)); };
+    el.head.querySelector('[data-mi=del]').onclick = deleteTemplate;
+  }
+  function renderUsedBy() {
+    var t = S.sel && find(S.sel);
+    el.used.innerHTML = '';
+    if (!t || S.kind === 'new') { el.reach.innerHTML = ''; return; }
+    var users = U.streamsUsing(t.name), copies = users.filter(function (s) { return s.own; }), ord = users.filter(function (s) { return !s.own; });
+    var chip = function (s) {
+      var n = U.viewers(s);
+      return '<span class="uchip"><button type="button" class="chip" data-go="stream:' + U.esc(s.name) + '"><span class="dot ' + (s.publishing ? 'live' : '') + '"></span>' + U.esc(s.name) +
+        (s.publishing && n != null ? '<span class="faint" title="' + U.esc(U.viewersText(n)) + '">' + U.icon('eye') + n + '</span>' : '') + '</button>' +
+        (s.restartNeeded ? '<span class="bdg warn" title="New outputs wait for a restart">Restart</span>' : '') +
+        (s.own && !ro() ? '<button type="button" class="btn sm" data-write data-upcopy="' + U.esc(s.name) + '" title="Replace ' + U.esc(s.template) + ' with this template as saved">Update</button>' : '') + '</span>';
+    };
+    var group = function (title, tip, list, empty) {
+      return '<div class="ugroup"><span class="ug-h">' + title + U.tip(tip) + '</span><div class="ug-chips">' + (list.length ? list.map(chip).join('') : '<span class="faint small">' + empty + '</span>') + '</div></div>';
+    };
+    el.reach.innerHTML = '<div class="usedby" aria-label="Streams using this template">' +
+      group(U.icon('link') + 'Follow edits', 'These streams load this file through the template order of ' + U.app + ', so a save reaches them. The overlay changes at once, outputs at their next restart.', ord, 'None in ' + U.esc(U.app)) +
+      group(U.icon('copy') + 'Own copies', 'Each of these streams runs its own copy of this template. A save here does not reach them until you update the copy.', copies, 'None') + '</div>';
+    el.reach.querySelectorAll('[data-upcopy]').forEach(function (b) { b.onclick = function () { updateCopies(t.name, [b.getAttribute('data-upcopy')]); }; });
+  }
+  // right after a save: streams with their own copy still run the old version. One dialog shows the two steps,
+  // update the copy and restart, and does both on one answer; Used by keeps Update for later
+  function offerCopies(name, copies) {
+    var live = copies.filter(function (s) { return s.publishing; });
+    var chips = function (list) { return list.map(function (s) { return '<span class="chip"><span class="dot ' + (s.publishing ? 'live' : '') + '"></span>' + U.esc(s.name) + '</span>'; }).join(''); };
+    var app = live.some(function (s) { return s.arrives === 'server'; });
+    return U.choose(copies.length > 1 ? 'These streams still run the old ' + name : copies[0].name + ' still runs the old ' + name,
+      '<ol class="steps"><li><b>Update the copy</b><div class="dlg-streams">' + chips(copies) + '</div><span class="small muted">Copies ' + U.esc(name) + ' as saved now. The overlay changes at once.</span></li>' +
+      (live.length ? '<li><b>Restart</b><div class="dlg-streams">' + chips(live) + '</div><span class="small muted">New outputs, layers and hardware start only then' + (app ? '. Streams published inside WSE restart with the application ' + U.esc(U.app) + '.' : ', a gap of a few seconds for viewers.') + '</span></li>' : '') + '</ol>',
+      [{ label: 'Later', value: null }].concat(live.length ? [{ label: 'Update only', value: 'update' }, { label: 'Update and restart', value: 'both', kind: 'primary' }] : [{ label: 'Update', value: 'update', kind: 'primary' }])).then(function (v) {
+        if (!v) return null;
+        return U.api.post(vh() + '/templates/' + U.enc(name) + '/copies', { streams: copies.map(function (s) { return s.name; }) }).then(function (r2) {
+          U.toast('Updated ' + (r2.updated || copies.map(function (s) { return s.name; })).join(', ') + '.');
+          return U.refreshState(true).then(function () {
+            if (v !== 'both') return null;
+            // one application restart covers every stream published inside WSE
+            var done = false;
+            return live.reduce(function (p, s) {
+              return p.then(function () { if (s.arrives === 'server') { if (done) return null; done = true; } return U.restartStream(s.name, true); });
+            }, Promise.resolve());
+          });
+        }, function (e) { U.banner('tpl', 'bad', 'Not updated.', e.message); });
+      });
+  }
+  // streams with their own copy keep the old version until updated; the overlay changes at once, outputs on a restart
+  function updateCopies(name, streams) {
+    var rows = streams.map(function (s) { return U.streamRow(s) || { name: s }; }), live = rows.filter(function (r) { return r.publishing; });
+    U.confirm('Update ' + streams.join(', ') + ' from ' + name + '?', '<p>' + U.esc(streams.map(function (s) { return s + '.xml'; }).join(', ')) + ' take' + (streams.length === 1 ? 's' : '') + ' every output and setting of ' + U.esc(name) +
+      ' as saved now. Anything changed in the copy by hand is replaced; the copy is not kept.</p>' +
+      (live.length ? '<p>The overlay changes at once. New outputs need a restart, which is offered next:</p>' + live.map(U.restartLines).join('') : '<p>Not publishing now, so viewers see no gap.</p>'), 'Update copy', false).then(function (ok) {
+        if (!ok) return;
+        U.api.post(vh() + '/templates/' + U.enc(name) + '/copies', { streams: streams }).then(function (r2) {
+          if (!(r2.live || []).length) U.toast('Updated ' + (r2.updated || streams).join(', ') + '. Each picks it up when it next starts publishing.');
+          return U.refreshState(true).then(function () { return U.afterTemplateWrite(r2.live); });
+        }, function (e) { U.banner('tpl', 'bad', 'Not updated.', e.message); });
+      });
+  }
+
+  /* ---------- the body by kind ---------- */
+  function renderBody() {
+    var t = S.sel && find(S.sel);
+    if (S.kind === 'new' || S.kind === 'builder') { if (ro() && S.kind === 'builder') renderOther(t); else renderBuilder(); return; }
+    if (S.kind === 'inplace') { renderOverlayOnly(t); return; }
+    if (S.kind === 'vif') { el.body.innerHTML = '<div class="note"><span class="dot"></span><div><b>A Video Intelligence template.</b> A stream runs a VIF template or a URL Overlay one, not both, so this one cannot carry an overlay.</div></div>'; return; }
+    if (t) { renderOther(t); return; }
+    el.body.innerHTML = '<p class="muted">Pick a template in the list.</p>';
   }
 
   function overlayOptions(cur, none) {
@@ -202,7 +269,6 @@
     if (cur && names.indexOf(cur) < 0) names.unshift(cur);
     return (none ? '<option value="">' + none + '</option>' : '') + names.map(function (n) { return '<option' + (n === cur ? ' selected' : '') + '>' + U.esc(n) + '</option>'; }).join('');
   }
-
   function sizeLabel(o) {
     if (o.kind === 'passthrough') return 'Original';
     if (o.kind === 'audio') return 'Audio only';
@@ -231,14 +297,37 @@
         '<label>Sample rate<select data-o="sampleRate">' + opts([[0, 'As the source'], [48000, '48 kHz'], [44100, '44.1 kHz']], o.sampleRate) + '</select></label>' : '') + '</div>' +
       (enc && (o.channels || o.sampleRate) ? '<p class="hint key-note">Written as <span class="key">Audio/Resample</span>.</p>' : '');
   }
+  function videoSummary(o) { return o.codec + ' ' + kbps(o.videoBitrate) + (o.rateControl === 'cbr' ? ', constant' : o.rateControl === 'vbr' ? ', variable' : ''); }
+
+  // the picture an output encodes, drawn to scale against 1080p: a glance tells the ladder apart
+  function resBox(o) {
+    if (o.kind === 'audio') return '<span class="res res-a" aria-hidden="true">' + U.icon('audio') + '</span>';
+    if (o.kind === 'passthrough') return '<span class="res res-p" aria-hidden="true"><i style="width:64px;height:36px"></i></span>';
+    var h = o.height || 1080, k = Math.max(0.22, Math.min(1, h / 1080));
+    return '<span class="res" aria-hidden="true"><i style="width:' + Math.round(64 * k) + 'px;height:' + Math.round(36 * k) + 'px"></i></span>';
+  }
+  // one line per output; Details opens the full card for that output only
+  function row(o, i, d) {
+    var v = o.kind === 'video', lit = d.overlay && v && o.overlay && o.enabled;
+    var chips = v ? [U.esc(videoSummary(o))].concat(o.skip ? [fpsLabel(o.skip)] : []) : [o.kind === 'audio' ? 'Audio only' : 'As it arrives'];
+    if (o.kind !== 'audio') chips.push(audioText(o) === 'off' ? 'No audio' : 'Audio ' + audioText(o));
+    return '<div class="oc oc-row' + (o.enabled ? '' : ' off') + (lit ? ' ov' : '') + '" data-i="' + i + '">' + resBox(o) +
+      '<div class="oc-rn"><div class="oc-rt"><input type="text" value="' + U.esc(o.name) + '" data-o="name" aria-label="Output name" spellcheck="false">' + (sizeLabel(o) !== o.name ? '<span class="bdg">' + U.esc(sizeLabel(o)) + '</span>' : '') + '</div>' +
+      '<div class="oc-chips">' + chips.map(function (c) { return '<span>' + c + '</span>'; }).join('') + '</div></div>' +
+      '<span class="oc-ov">' + (v && o.enabled ? layerBadges(d, o) + (layerBadges(d, null) ? '<span class="lbadge from" title="Drawn on the input, so this output shows it too">' + U.icon('input') + 'from input</span>' : '') : '') + '</span>' +
+      '<span class="oc-ra"><label class="switch" title="Output on"><input type="checkbox" data-o="enabled"' + (o.enabled ? ' checked' : '') + '><span class="sr">Output on</span></label>' +
+      '<button class="btn sm" type="button" data-oexp aria-expanded="false">Edit</button>' +
+      '<button class="btn sm icon ghost" type="button" data-rm title="Remove this output" aria-label="Remove output ' + U.esc(o.name) + '">' + U.icon('close') + '</button></span></div>';
+  }
   function card(o, i, d) {
+    if (!S.openOut || !S.openOut.has(o)) return row(o, i, d);
     var v = o.kind === 'video', lit = d.overlay && v && o.overlay && o.enabled;
     var head = '<div class="oc-top"><input type="text" value="' + U.esc(o.name) + '" data-o="name" aria-label="Output name" spellcheck="false">' +
       '<label class="oc-on" title="Output on"><input type="checkbox" data-o="enabled"' + (o.enabled ? ' checked' : '') + '><span class="sr">Output on</span></label>' +
-      '<button class="btn icon" type="button" data-rm title="Remove this output" aria-label="Remove output ' + U.esc(o.name) + '">' +
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>' +
-      '<div class="oc-sum"><code>&lt;stream&gt;_' + U.esc(o.name) + '</code>' + (v && d.overlay ? '<label class="oc-ovl"><input type="checkbox" data-o="overlay"' + (o.overlay ? ' checked' : '') + '>' + U.esc(d.overlay) + '</label>' : '') + '</div>';
-    var cls = 'oc' + (o.enabled ? '' : ' off') + (lit ? ' ov' : '');
+      '<button class="btn sm" type="button" data-oexp aria-expanded="true">Close</button>' +
+      '<button class="btn sm icon ghost" type="button" data-rm title="Remove this output" aria-label="Remove output ' + U.esc(o.name) + '">' + U.icon('close') + '</button></div>' +
+      '<div class="oc-sum"><code>&lt;stream&gt;_' + U.esc(o.name) + '</code>' + (v ? layerBadges(d, o) : '') + '</div>';
+    var cls = 'oc oc-open' + (o.enabled ? '' : ' off') + (lit ? ' ov' : '');
     if (o.kind === 'passthrough') {
       return '<div class="' + cls + '" data-i="' + i + '">' + head + '<p class="hint oc-pad">The stream as it arrives. An overlay cannot be drawn on it.</p>' +
         sec(o, 'aud', 'Audio', audioText(o), audioBody(o, false)) + '</div>';
@@ -271,11 +360,10 @@
       '<span class="key">KeyFrameInterval</span> ' + (o.keyFollow ? 'follows the source' : o.keyInterval + ' frames at ' + FPS + ' fps') + '.</p>';
     var expert = '<p class="hint">Any encoder parameter by name, as <code>prefix.name</code>, for example <code>mainconcept.adaptive_b_frames</code>. WSE drops a name it does not know and says so in its log.</p>' +
       o.params.map(function (p, pi) { return '<div class="oc-f oc-param"><input type="text" data-param="' + pi + '" data-k="name" value="' + U.esc(p.name) + '" placeholder="prefix.name" spellcheck="false">' +
-        '<input type="text" data-param="' + pi + '" data-k="value" value="' + U.esc(p.value) + '" placeholder="value"><button class="btn icon" type="button" data-prm="' + pi + '" aria-label="Remove parameter">&#x2715;</button></div>'; }).join('') +
+        '<input type="text" data-param="' + pi + '" data-k="value" value="' + U.esc(p.value) + '" placeholder="value"><button class="btn sm icon ghost" type="button" data-prm="' + pi + '" aria-label="Remove parameter">' + U.icon('close') + '</button></div>'; }).join('') +
       '<button class="btn sm" type="button" data-addparam>+ Parameter</button>';
-    var videoSum = o.codec + ' ' + kbps(o.videoBitrate) + (o.rateControl === 'cbr' ? ', constant' : o.rateControl === 'vbr' ? ', variable' : '');
+    var videoSum = videoSummary(o);
     return '<div class="' + cls + '" data-i="' + i + '">' + head +
-      '<div class="oc-thumb"><span>' + U.esc(sizeLabel(o)) + (o.region ? ', region' : '') + '</span>' + (lit ? '<i class="oc-ov">overlay</i>' : '') + '</div>' +
       sec(o, 'pic', 'Picture', U.esc(sizeLabel(o) + (o.height ? ', ' + o.fit.replace('-', ' ') : '')), picture) +
       sec(o, 'mot', 'Frame rate', fpsLabel(o.skip), motion) +
       sec(o, 'vid', 'Video', U.esc(videoSum), video) +
@@ -292,21 +380,21 @@
       return '<td><select data-gm="' + gi + '" data-out="' + U.esc(o.name) + '" aria-label="' + U.esc(o.name) + ' in ' + U.esc(g.name) + '">' +
         opts([['', 'not in it'], ['all', 'in it']].concat(o.kind !== 'audio' ? [['video', 'video only']] : []).concat([['audio', 'audio only']]), v) + '</select></td>';
     };
-    return '<div class="b-play"><h4>Playback <button class="btn sm ghost" type="button" data-addgroup>+ Adaptive group</button></h4>' +
-      (d.groups.length ? '<table class="list b-groups"><thead><tr><th>Output</th>' + d.groups.map(function (g, gi) {
-        return '<th><input type="text" data-gname="' + gi + '" value="' + U.esc(g.name) + '" spellcheck="false" aria-label="Group name"><button class="btn icon" type="button" data-grm="' + gi + '" aria-label="Remove group ' + U.esc(g.name) + '">&#x2715;</button></th>'; }).join('') + '</tr></thead><tbody>' +
+    return '<div class="b-play"><div class="tb-h">' + U.icon('play') + 'Playback' + U.tip('An adaptive group is one stream name a player opens; it switches between the group\'s outputs as bandwidth allows. Audio only adds an output\'s audio as a separate track, for example a second language. WSE setting StreamNameGroups.') +
+      '<span class="spacer"></span><button class="btn sm ghost" type="button" data-addgroup>' + U.icon('plus') + 'Adaptive group</button></div>' +
+      (d.groups.length ? '<table class="tbl b-groups"><thead><tr><th>Output</th>' + d.groups.map(function (g, gi) {
+        return '<th><input type="text" data-gname="' + gi + '" value="' + U.esc(g.name) + '" spellcheck="false" aria-label="Group name"><button class="btn sm icon ghost" type="button" data-grm="' + gi + '" aria-label="Remove group ' + U.esc(g.name) + '">' + U.icon('close') + '</button></th>'; }).join('') + '</tr></thead><tbody>' +
         outs.map(function (o) { return '<tr><td><code>_' + U.esc(o.name) + '</code></td>' + d.groups.map(function (g, gi) { return cell(g, gi, o); }).join('') + '</tr>'; }).join('') +
         '<tr><td class="small muted">Players open</td>' + d.groups.map(function (g) { return '<td class="small"><code>ngrp:&lt;stream&gt;_' + U.esc(g.name) + '</code></td>'; }).join('') + '</tr></tbody></table>'
-        : '<p class="hint">No adaptive group. Players open each output by its own name.</p>') +
-      '<p class="hint">An adaptive group is one stream name a player opens; it switches between the group\'s outputs as bandwidth allows. "Audio only" adds an output\'s audio as a separate track, for example a second language. <span class="key">StreamNameGroups</span></p></div>';
+        : '<p class="faint small">No adaptive group: players open each output by name.</p>') + '</div>';
   }
 
   function summary(d) {
     var on = d.outputs.filter(function (o) { return o.enabled; });
     var ov = on.filter(function (o) { return d.overlay && o.kind === 'video' && o.overlay; });
-    var warn = d.overlay && !ov.length ? ' <span class="warn-text">No output shows the overlay yet: turn it on for at least one.</span>' : '';
-    return '<strong>' + on.length + (on.length === 1 ? ' output' : ' outputs') + (d.overlay ? ', ' + ov.length + ' with ' + U.esc(d.overlay) : '') + '.</strong> ' +
-      (d.groups.length ? 'Players get ' + d.groups.map(function (g) { return '<code>ngrp:&lt;stream&gt;_' + U.esc(g.name) + '</code>'; }).join(', ') + ' and each output by name.' : 'Players open each output by name.') + warn;
+    return '<span class="bdg">' + on.length + (on.length === 1 ? ' output' : ' outputs') + '</span>' +
+      (d.overlay ? '<span class="bdg' + (ov.length ? '' : ' warn') + '">' + (ov.length ? ov.length + ' with ' + U.esc(d.overlay) : 'No output draws ' + U.esc(d.overlay)) + '</span>' : '') +
+      (d.groups.length ? '<span class="bdg" title="Adaptive group names players open">' + d.groups.map(function (g) { return 'ngrp:_' + U.esc(g.name); }).join(', ') + '</span>' : '');
   }
 
   /* ---------- layers: the URL overlay and the transcoder's own image overlays ---------- */
@@ -321,40 +409,126 @@
   function libEntry(file) { return (S.lib || []).filter(function (x) { return x.file === file; })[0] || null; }
   function videoOutputs(d) { return d.outputs.filter(function (o) { return o.kind === 'video' && o.enabled; }); }
 
-  function layersHtml(d) {
-    var vids = videoOutputs(d), every = d.overlay && vids.length && !d.urlSome && vids.every(function (o) { return o.overlay; });
-    var url = '<div class="ly-row"><div class="ly-thumb ly-page" aria-hidden="true">www</div><div class="ly-main"><strong>' + (d.overlay ? U.esc(d.overlay) : 'No URL overlay') + '</strong>' +
-      '<div class="small muted">Live web pages from step 1. Choose the overlay at the top.</div></div>' +
-      (d.overlay ? '<div><span class="f">Drawn on</span><select data-urlwhere>' + opts([['all', 'Every output, once before scaling'], ['some', 'Chosen outputs']], every ? 'all' : 'some') + '</select>' +
-        (every ? '' : '<div class="hint">Tick it on each output card.</div>') + '</div>' : '') + '</div>';
-    var imgs = (d.images || []).map(function (l, i) {
-      var e = libEntry(l.file), pv = e && e.preview;
-      var where = l.where === 'outputs' ? '<div class="ly-outs">' + vids.map(function (o) {
-        return '<label class="check"><input type="checkbox" data-lyout="' + i + '" value="' + U.esc(o.name) + '"' + (l.outputs.indexOf(o.name) >= 0 ? ' checked' : '') + '>' + U.esc(o.name) + '</label>'; }).join('') + '</div>' : '';
-      return '<div class="ly-row" data-ly="' + i + '"><div class="ly-thumb">' + (pv ? '<img src="' + U.esc(pv) + '" alt="">' : '<span>?</span>') + '</div>' +
-        '<div class="ly-main"><strong>' + U.esc(l.file) + '</strong><div class="small muted">Image overlay, index ' + (i + 1) + (e ? '' : '. <span class="warn-text">Not found in the content folder.</span>') + '</div>' +
-        '<div class="oc-f ly-f"><label>Drawn on<select data-ly-k="where">' + opts([['all', 'Every output, before scaling'], ['outputs', 'Chosen outputs']], l.where) + '</select></label>' +
-        '<label>Position<select data-ly-k="align">' + opts(ALIGNS, l.align) + '</select></label>' +
-        '<label>Offset x<input type="number" data-ly-k="x" min="0" max="8192" value="' + l.x + '"></label><label>Offset y<input type="number" data-ly-k="y" min="0" max="8192" value="' + l.y + '"></label>' +
-        '<label>Width (0: its own)<input type="number" data-ly-k="width" min="0" max="8192" value="' + l.width + '"></label><label>Height (0: its own)<input type="number" data-ly-k="height" min="0" max="8192" value="' + l.height + '"></label>' +
-        '<label>Opacity %<input type="number" data-ly-k="opacity" min="0" max="100" value="' + l.opacity + '"></label></div>' + where +
-        '<label class="check"><input type="checkbox" data-ly-k="refresh"' + (l.refresh ? ' checked' : '') + '>Reload when the file changes</label></div>' +
-        '<div class="ly-acts">' + (i ? '<button class="btn icon" type="button" data-lyup="' + i + '" aria-label="Move up">&#x25B2;</button>' : '') +
-        '<button class="btn icon" type="button" data-lyrm="' + i + '" aria-label="Remove image layer">&#x2715;</button></div></div>';
-    }).join('');
-    return '<div class="b-layers"><h4>Layers <button class="btn sm ghost" type="button" data-addimg' + ((d.images || []).length >= MAX_IMAGES ? ' disabled' : '') + '>+ Image</button></h4>' + url + imgs +
-      '<p class="hint">An image layer is a PNG, JPEG, GIF or BMP in the server\'s content folder. Offsets are pixels from the chosen corner, ' +
-      'in source pixels when drawn before scaling and output pixels on a chosen output.</p></div>';
+  // where a layer is drawn: on the input, once and before scaling, so every output shows it in source pixels; or on
+  // chosen outputs, after scaling, in each output's pixels. For the URL overlay the module derives this from the
+  // outputs it is on (all of them: the input), so "Outputs" with every output picked is saved as the input.
+  function urlStage(d) { var v = videoOutputs(d); return !d.urlSome && v.length && v.every(function (o) { return o.overlay; }) ? 'input' : 'outputs'; }
+  function stageSeg(attr, stage) {
+    return '<div class="seg stage" role="group" aria-label="Drawn on">' +
+      '<button type="button" ' + attr + '="input" aria-pressed="' + (stage === 'input') + '">' + U.icon('input') + 'Input</button>' +
+      '<button type="button" ' + attr + '="outputs" aria-pressed="' + (stage === 'outputs') + '">' + U.icon('outputs') + 'Outputs</button></div>';
   }
-
-  function bindLayers(d) {
-    var uw = el.edit.querySelector('[data-urlwhere]');
-    if (uw) uw.onchange = function () {
-      d.urlSome = uw.value !== 'all';
-      if (!d.urlSome) videoOutputs(d).forEach(function (o) { o.overlay = true; });
-      rerender();
+  var STAGE_TIP = 'Input: drawn once on the source picture before scaling, so every output shows it, in source pixels. Outputs: drawn after scaling, only on the outputs you pick, in each output\'s pixels.';
+  function outPicks(attr, i, vids, isOn) {
+    return '<div class="ly-outs">' + vids.map(function (o) {
+      return '<label class="pilltog' + (isOn(o) ? ' on' : '') + '"><input type="checkbox" ' + attr + '="' + i + '" value="' + U.esc(o.name) + '"' + (isOn(o) ? ' checked' : '') + '>' + U.esc(o.name) + '</label>'; }).join('') + '</div>';
+  }
+  function layersHtml(d) {
+    var vids = videoOutputs(d), st = urlStage(d), picked = vids.filter(function (o) { return o.overlay; }).length;
+    var url = '<div class="lyc"><div class="lyc-top"><div class="ly-thumb" aria-hidden="true">' + U.icon('overlay') + '</div><div class="ly-main"><strong>' + (d.overlay ? U.esc(d.overlay) : 'No URL overlay') + '</strong><span class="small muted">Web pages, live</span></div></div>' +
+      (d.overlay && vids.length ? '<div class="lyc-row"><span class="f">Drawn on' + U.tip(STAGE_TIP) + '</span>' + stageSeg('data-urlstage', st) + '</div>' +
+        (st === 'outputs' ? outPicks('data-urlout', 0, vids, function (o) { return o.overlay; }) +
+          (picked === vids.length ? '<span class="bdg">Every output picked: saved as Input</span>' : !picked ? '<span class="bdg warn">Pick at least one output</span>' : '') : '') : '') + '</div>';
+    var imgs = (d.images || []).map(function (l, i) {
+      var e = libEntry(l.file), pv = e && e.preview, stage = l.where === 'outputs' ? 'outputs' : 'input';
+      return '<div class="lyc" data-ly="' + i + '"><div class="lyc-top"><div class="ly-thumb">' + (pv ? '<img src="' + U.esc(pv) + '" alt="">' : U.icon('grid')) + '</div>' +
+        '<div class="ly-main"><strong>' + U.esc(l.file) + '</strong><span class="small ' + (e || !S.lib ? 'muted' : 'warn-text') + '">' + (e || !S.lib ? 'Image' : 'Not in the content folder') + '</span></div>' +
+        '<div class="ly-acts">' + (i ? '<button class="btn sm icon ghost" type="button" data-lyup="' + i + '" aria-label="Move up">' + U.icon('up') + '</button>' : '') +
+        '<button class="btn sm icon ghost" type="button" data-lyrm="' + i + '" aria-label="Remove image layer">' + U.icon('close') + '</button></div></div>' +
+        '<div class="lyc-row"><span class="f">Drawn on' + U.tip(STAGE_TIP) + '</span>' + stageSeg('data-lystage', stage) + '</div>' +
+        (stage === 'outputs' ? outPicks('data-lyout', i, vids, function (o) { return l.outputs.indexOf(o.name) >= 0; }) : '') +
+        '<div class="lyc-row"><span class="f">Corner</span><div class="align9" role="radiogroup" aria-label="Corner">' + ALIGNS.map(function (a) {
+          return '<button type="button" role="radio" data-lyalign="' + a[0] + '" aria-checked="' + (l.align === a[0]) + '" aria-label="' + a[1] + '" title="' + a[1] + '"></button>'; }).join('') + '</div></div>' +
+        '<details class="lyc-more"><summary>Offset, size, opacity</summary><div class="oc-f ly-f">' +
+        '<label>Offset x<input type="number" data-ly-k="x" min="0" max="8192" value="' + l.x + '"></label><label>Offset y<input type="number" data-ly-k="y" min="0" max="8192" value="' + l.y + '"></label>' +
+        '<label>Width<input type="number" data-ly-k="width" min="0" max="8192" value="' + l.width + '" placeholder="its own"></label><label>Height<input type="number" data-ly-k="height" min="0" max="8192" value="' + l.height + '" placeholder="its own"></label>' +
+        '<label>Opacity %<input type="number" data-ly-k="opacity" min="0" max="100" value="' + l.opacity + '"></label></div>' +
+        '<label class="check"><input type="checkbox" data-ly-k="refresh"' + (l.refresh ? ' checked' : '') + '>Reload when the file changes</label></details></div>';
+    }).join('');
+    return '<div class="b-layers"><div class="tb-h">' + U.icon('overlay') + 'Layers' + U.tip('Image layers are PNG, JPEG, GIF or BMP files in the server\'s content folder. Offsets are pixels from the chosen corner. Width and height 0 keep the image\'s own size.') +
+      '<span class="spacer"></span><button class="btn sm ghost" type="button" data-addimg' + ((d.images || []).length >= MAX_IMAGES ? ' disabled' : '') + '>' + U.icon('plus') + 'Image</button></div>' +
+      (S.pick ? pickerHtml() : '') + url + imgs + '</div>';
+  }
+  // what is drawn where, as badges: the input row of the ladder, and each output row
+  function layerBadges(d, o) {
+    var b = [], st = urlStage(d);
+    if (d.overlay && (o ? st === 'outputs' && o.overlay : st === 'input')) b.push(d.overlay);
+    (d.images || []).forEach(function (l) { if (o ? l.where === 'outputs' && l.outputs.indexOf(o.name) >= 0 : l.where !== 'outputs') b.push(l.file); });
+    return b.map(function (n) { return '<span class="lbadge">' + U.icon('overlay') + U.esc(n) + '</span>'; }).join('');
+  }
+  // the picker: images already on the server, an upload, and removing an upload; inline, under the Layers title
+  function pickerHtml() {
+    var lib = S.lib;
+    if (!lib) return '<div class="ly-picker"><div class="skel"></div></div>';
+    return '<div class="ly-picker">' + (lib.length ? '<div class="ly-grid" role="radiogroup" aria-label="Images on the server">' + lib.map(function (x, i) {
+        return '<label class="ly-pick"><input type="radio" name="uo-img" value="' + U.esc(x.file) + '"' + (i ? '' : ' checked') + '>' + (x.preview ? '<img src="' + U.esc(x.preview) + '" alt="">' : '<span class="ly-noimg">?</span>') + '<span>' + U.esc(x.file) +
+          '<small>' + U.esc(x.width) + ' x ' + U.esc(x.height) + '</small></span>' + (x.uploaded ? '<button class="btn sm icon ghost" type="button" data-imgdel="' + U.esc(x.file) + '" aria-label="Delete ' + U.esc(x.file) + ' from the server">' + U.icon('close') + '</button>' : '') + '</label>'; }).join('') + '</div>'
+        : '<p class="muted small">No image in the content folder yet. Upload one.</p>') +
+      '<div class="fld" style="margin-top:12px"><label class="f" for="uo-img-up">Upload an image (PNG, JPEG, GIF or BMP, up to 2 MB)</label><input id="uo-img-up" type="file" accept=".png,.jpg,.jpeg,.gif,.bmp">' +
+      '<div class="hint">Uploads go to the server\'s <code>content/urloverlay/</code> folder.</div></div>' +
+      '<div class="hrow end" style="margin-top:8px"><button type="button" class="btn sm" data-pickcancel>Cancel</button><button type="button" class="btn sm primary" data-pickok' + (lib.length ? '' : ' disabled') + '>Add layer</button></div></div>';
+  }
+  function addImage(d, file) {
+    d.images = d.images || [];
+    d.images.push({ file: file, where: 'all', outputs: [], x: 16, y: 16, width: 0, height: 0, align: 'right,top', opacity: 100, refresh: false });
+  }
+  function bindPicker(d) {
+    var box = el.body.querySelector('.ly-picker');
+    if (!box) return;
+    var cancel = box.querySelector('[data-pickcancel]'), ok = box.querySelector('[data-pickok]');
+    if (cancel) cancel.onclick = function () { S.pick = false; rerender(); };
+    if (ok) ok.onclick = function () { var r = box.querySelector('input[name=uo-img]:checked'); if (!r) return; addImage(d, r.value); S.pick = false; rerender(); };
+    box.querySelectorAll('[data-imgdel]').forEach(function (b) {
+      b.onclick = function (e) {
+        e.preventDefault();
+        var f = b.getAttribute('data-imgdel');
+        if ((d.images || []).some(function (l) { return l.file === f; })) { U.toast(f + ' is a layer in this template; remove the layer first.', { level: 'bad' }); return; }
+        U.api.post(vh() + '/images', { 'delete': f }).then(function () { U.toast('Deleted ' + f + ' from the server.'); return library(true).then(function () { rerender(); }); },
+          function (er) { U.toast(er.message, { level: 'bad' }); });
+      };
+    });
+    var up = box.querySelector('#uo-img-up');
+    if (up) up.onchange = function () {
+      var f = up.files && up.files[0];
+      if (!f) return;
+      if (f.size > 2 * 1024 * 1024) { U.toast('An image is at most 2 MB.', { level: 'bad' }); return; }
+      var rd = new FileReader();
+      rd.onload = function () {
+        var name = f.name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '');
+        U.api.post(vh() + '/images', { name: name, data: rd.result }).then(function (r) {
+          return library(true).then(function () {
+            addImage(d, r.file); S.pick = false;
+            U.toast('Uploaded ' + r.file + ' and added it as a layer.');
+            rerender();
+          });
+        }, function (er) { U.toast('Not uploaded: ' + er.message, { level: 'bad' }); });
+      };
+      rd.readAsDataURL(f);
     };
-    el.edit.querySelectorAll('[data-ly]').forEach(function (row) {
+  }
+  function bindLayers(d) {
+    el.body.querySelectorAll('[data-urlstage]').forEach(function (b) {
+      b.onclick = function () {
+        if (b.getAttribute('data-urlstage') === 'input') { d.urlSome = false; videoOutputs(d).forEach(function (o) { o.overlay = true; }); }
+        else { d.urlSome = true; var v = videoOutputs(d); if (v.every(function (o) { return o.overlay; }) && v.length > 1) v.slice(1).forEach(function (o) { o.overlay = false; }); }
+        rerender();
+      };
+    });
+    el.body.querySelectorAll('[data-urlout]').forEach(function (c) {
+      c.onchange = function () { var o = videoOutputs(d).filter(function (x) { return x.name === c.value; })[0]; if (o) o.overlay = c.checked; d.urlSome = true; rerender(); };
+    });
+    el.body.querySelectorAll('[data-lystage]').forEach(function (b) {
+      b.onclick = function () {
+        var l = d.images[+b.closest('[data-ly]').getAttribute('data-ly')];
+        l.where = b.getAttribute('data-lystage') === 'outputs' ? 'outputs' : 'all';
+        if (l.where === 'outputs' && !l.outputs.length) l.outputs = videoOutputs(d).slice(0, 1).map(function (o) { return o.name; });
+        rerender();
+      };
+    });
+    el.body.querySelectorAll('[data-lyalign]').forEach(function (b) {
+      b.onclick = function () { d.images[+b.closest('[data-ly]').getAttribute('data-ly')].align = b.getAttribute('data-lyalign'); rerender(); };
+    });
+    el.body.querySelectorAll('[data-ly]').forEach(function (row) {
       var l = d.images[+row.getAttribute('data-ly')];
       row.querySelectorAll('[data-ly-k]').forEach(function (f) {
         f.onchange = function () {
@@ -367,66 +541,17 @@
         };
       });
     });
-    el.edit.querySelectorAll('[data-lyout]').forEach(function (c) {
+    el.body.querySelectorAll('[data-lyout]').forEach(function (c) {
       c.onchange = function () { var l = d.images[+c.getAttribute('data-lyout')]; l.outputs = l.outputs.filter(function (n) { return n !== c.value; }); if (c.checked) l.outputs.push(c.value); rerender(); };
     });
-    el.edit.querySelectorAll('[data-lyrm]').forEach(function (b) { b.onclick = function () { d.images.splice(+b.getAttribute('data-lyrm'), 1); rerender(); }; });
-    el.edit.querySelectorAll('[data-lyup]').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-lyup'), t = d.images[i]; d.images[i] = d.images[i - 1]; d.images[i - 1] = t; rerender(); }; });
-    var add = el.edit.querySelector('[data-addimg]');
-    if (add) add.onclick = function () { pickImage(d); };
-  }
-
-  // the picker: images already on the server, an upload, and removing an upload
-  function pickImage(d) {
-    library(true).then(function (lib) {
-      var grid = lib.length ? '<div class="ly-grid">' + lib.map(function (x, i) {
-        return '<label class="ly-pick"><input type="radio" name="uo-img" value="' + U.esc(x.file) + '"' + (i ? '' : ' checked') + '>' + (x.preview ? '<img src="' + U.esc(x.preview) + '" alt="">' : '<span class="ly-noimg">?</span>') + '<span>' + U.esc(x.file) +
-          '<small>' + U.esc(x.width) + ' x ' + U.esc(x.height) + '</small></span>' + (x.uploaded ? '<button class="btn icon" type="button" data-imgdel="' + U.esc(x.file) + '" aria-label="Delete ' + U.esc(x.file) + '">&#x2715;</button>' : '') + '</label>'; }).join('') + '</div>'
-        : '<p class="muted">No image in the content folder yet. Upload one.</p>';
-      U.prompt('Add an image layer', grid + '<div class="fld mt-m"><label class="f" for="uo-img-up">Upload an image (PNG, JPEG, GIF or BMP, up to 2 MB)</label><input id="uo-img-up" type="file" accept=".png,.jpg,.jpeg,.gif,.bmp"></div>' +
-        '<p class="hint">Uploads go to the server\'s <code>content/urloverlay/</code> folder.</p>', 'Add layer', function (m) {
-          // U.prompt shows a returned string as the error, so the choice goes back in an object
-          var r = m.querySelector('input[name=uo-img]:checked');
-          return r ? { file: r.value } : 'Pick an image, or upload one.';
-        }).then(function (v) {
-          if (!v) return;
-          var file = v.file;
-          d.images = d.images || [];
-          d.images.push({ file: file, where: 'all', outputs: [], x: 16, y: 16, width: 0, height: 0, align: 'right,top', opacity: 100, refresh: false });
-          rerender();
-        });
-      var m = U.root.querySelector('.modal');
-      if (!m) return;
-      m.querySelectorAll('[data-imgdel]').forEach(function (b) {
-        b.onclick = function (e) {
-          e.preventDefault();
-          var f = b.getAttribute('data-imgdel');
-          if ((d.images || []).some(function (l) { return l.file === f; })) { U.toast(f + ' is a layer in this template; remove the layer first.', { level: 'bad' }); return; }
-          U.api.post(vh() + '/images', { 'delete': f }).then(function () { U.toast('Deleted ' + f + '.'); b.closest('.ly-pick').remove(); S.lib = null; },
-            function (er) { U.toast(er.message, { level: 'bad' }); });
-        };
-      });
-      var up = m.querySelector('#uo-img-up');
-      up.onchange = function () {
-        var f = up.files && up.files[0];
-        if (!f) return;
-        if (f.size > 2 * 1024 * 1024) { U.toast('An image is at most 2 MB.', { level: 'bad' }); return; }
-        var rd = new FileReader();
-        rd.onload = function () {
-          var name = f.name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '');
-          U.api.post(vh() + '/images', { name: name, data: rd.result }).then(function (r) {
-            m.querySelector('[data-a=no]').click(); // closes the dialog the way Cancel does
-            library(true).then(function () {
-              d.images = d.images || [];
-              d.images.push({ file: r.file, where: 'all', outputs: [], x: 16, y: 16, width: 0, height: 0, align: 'right,top', opacity: 100, refresh: false });
-              U.toast('Uploaded ' + r.file + ' and added it as a layer.');
-              rerender();
-            });
-          }, function (er) { U.toast('Not uploaded: ' + er.message, { level: 'bad' }); });
-        };
-        rd.readAsDataURL(f);
-      };
-    }, function (e) { U.toast('The image list could not be read: ' + e.message, { level: 'bad' }); });
+    el.body.querySelectorAll('[data-lyrm]').forEach(function (b) { b.onclick = function () { d.images.splice(+b.getAttribute('data-lyrm'), 1); rerender(); }; });
+    el.body.querySelectorAll('[data-lyup]').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-lyup'), t = d.images[i]; d.images[i] = d.images[i - 1]; d.images[i - 1] = t; rerender(); }; });
+    var add = el.body.querySelector('[data-addimg]');
+    if (add) add.onclick = function () {
+      S.pick = !S.pick; rerender();
+      if (S.pick) library(true).then(function () { if (S.draft === d) rerender(); }, function (e) { S.pick = false; rerender(); U.toast('The image list could not be read: ' + e.message, { level: 'bad' }); });
+    };
+    bindPicker(d);
   }
 
   // pixels encoded per second over the enabled video outputs, for an assumed 1080p 30 fps source, in 720p 30 fps units
@@ -439,48 +564,54 @@
       if (o.region && o.height === 0) { w = o.region.w; h = o.region.h; }
       px += w * h * 30 / (o.skip + 1); n++;
     });
-    if (!n) return 'No output encodes video, so the transcoder only handles audio and copies.';
-    var unit = 1280 * 720 * 30, cpus = U.serverInfo && U.serverInfo.cpus;
-    return '<strong>Estimated load:</strong> about ' + Math.round(px / 1e6) + ' megapixels a second to encode, ' + (Math.round(px / unit * 10) / 10) + ' times one 720p 30 fps output' +
-      ' (for a 1080p 30 fps source, plus decoding it once' + (d.hardware === 'cpu' ? '' : ', on the ' + ({ nvidia: 'NVIDIA GPU', intel: 'Intel Quick Sync', netint: 'NETINT VPU' })[d.hardware]) + ').' +
+    if (!n) return '<span class="bdg">Audio and copies only</span>';
+    var unit = 1280 * 720 * 30, cpus = U.serverInfo && U.serverInfo.cpus, x = Math.round(px / unit * 10) / 10;
+    var why = 'About ' + Math.round(px / 1e6) + ' megapixels a second to encode, for a 1080p 30 fps source plus decoding it once' + (d.hardware === 'cpu' ? '' : ', on the ' + ({ nvidia: 'NVIDIA GPU', intel: 'Intel Quick Sync', netint: 'NETINT VPU' })[d.hardware]) + '.' +
       (cpus ? ' This server has ' + cpus + ' CPU core' + (cpus > 1 ? 's' : '') + '.' : '') +
-      (d.hardware !== 'cpu' && d.overlay ? ' With the overlay on, frames are copied off the card to draw it, so this costs more than the same template without it.' : '') +
+      (d.hardware !== 'cpu' && d.overlay ? ' With the overlay on, frames are copied off the card to draw it, so this costs more than without it.' : '') +
       ' An estimate: what a core holds depends on the codec, the speed setting and the picture.';
+    var pct = Math.min(100, Math.round(x / 6 * 100));
+    return '<span class="load" title="Estimated encode load, in 720p 30 fps outputs">Encode load<span class="load-bar"><i style="width:' + pct + '%"></i></span>' + x + ' x 720p30</span>' + U.tip(why);
   }
 
   function renderBuilder() {
     var d = S.draft, t = S.sel && find(S.sel), hw = HW.filter(function (x) { return x[0] === d.hardware; })[0] || HW[0];
-    var h = '<div class="b-head"><div class="b-name">' +
-      (d.isNew ? '<label class="f" for="uo-b-name">Template name</label><input id="uo-b-name" type="text" data-d="name" value="' + U.esc(d.name) + '" placeholder="for example scoreboard-ladder" spellcheck="false" autocomplete="off">' +
-        '<div class="hint">Saved as <code>transcoder/templates/' + U.esc(d.name || '<name>') + '.xml</code>. Not a stream name: step 3 makes each stream\'s own copy.</div>'
-        : '<h3>' + U.esc(d.name) + '</h3><div class="hint"><code>transcoder/templates/' + U.esc(d.name) + '.xml</code>' + (t && (t.listedBy || []).length ? ', listed by ' + t.listedBy.map(U.esc).join(', ') : '') + '</div>') + '</div>' +
-      '<div><label class="f" for="uo-b-ov">Overlay</label><select id="uo-b-ov" data-d="overlay">' + overlayOptions(d.overlay, 'No overlay') + '</select></div>' +
-      '<div><span class="f">Hardware for the whole template</span><div class="seg" role="group" aria-label="Hardware">' + HW.map(function (x) {
-        return '<button type="button" data-hw="' + x[0] + '" aria-pressed="' + (d.hardware === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div><div class="hint">' + hw[2] + '</div></div></div>' +
-      (t && t.overlay && !(U.overlays || []).some(function (o) { return o.name === t.overlay; }) ? '<div class="notice bad"><div>It names overlay <strong>' + U.esc(t.overlay) + '</strong>, which does not exist in ' + U.esc(U.app) + '. Streams using it show nothing.</div></div>' : '') +
-      layersHtml(d) +
-      '<div class="b-bar"><div><span class="f">Start from</span><div class="presets">' + PRESETS.map(function (p, i) {
-        return '<button type="button" class="pill" data-preset="' + i + '" aria-pressed="' + (d.preset === i) + '">' + p[0] + '</button>'; }).join('') + '</div></div></div>' +
-      '<div class="oc-grid">' + d.outputs.map(function (o, i) { return card(o, i, d); }).join('') +
-      '<div class="oc-add"><button class="btn" type="button" data-add="video">+ Add output</button>' +
-      '<button class="btn sm ghost" type="button" data-add="passthrough">+ The original, untouched</button><button class="btn sm ghost" type="button" data-add="audio">+ Audio only</button></div></div>' +
-      '<div class="b-sum">' + summary(d) + '</div><div class="b-load hint">' + loadText(d) + '</div>' + playback(d) +
-      '<details class="b-adv"' + (S.advOpen ? ' open' : '') + '><summary>Decode</summary><div class="b-advgrid">' +
+    var b = S.base && !d.isNew ? JSON.parse(S.base) : null;
+    var h = '<div class="tb-grid"><div class="tb-src"><div class="tb-card"><div class="tb-h">' + U.icon('input') + 'Source and overlay</div>' +
+      '<div class="b-name">' + (d.isNew ? '<label class="f" for="uo-b-name">Template name' + U.tip('Saved as transcoder/templates/<name>.xml. Not a stream name: using it on a stream makes that stream its own copy.') + '</label><input id="uo-b-name" type="text" data-d="name" value="' + U.esc(d.name) + '" placeholder="for example scoreboard-ladder" spellcheck="false" autocomplete="off">'
+        : '<span class="f">File</span><div class="val mono">' + U.esc(d.name) + '.xml</div>') + '</div>' +
+      '<div class="b-ov"><label class="f" for="uo-b-ov">Overlay' + U.tip('The URL overlay this template draws. Live on save for every stream that loads this file.') + '</label><select id="uo-b-ov" data-d="overlay"' + (b && (b.overlay || '') !== (d.overlay || '') ? ' class="is-draft"' : '') + '>' + overlayOptions(d.overlay, 'None') + '</select>' +
+        (b && (b.overlay || '') !== (d.overlay || '') ? '<div class="hint">Saved: ' + U.esc(b.overlay || 'None') + '</div>' : '') + '</div>' +
+      '<div><span class="f">Hardware' + U.tip(hw[2] + ' For the whole template. Takes effect after a restart.') + '</span><div class="seg" role="group" aria-label="Hardware">' + HW.map(function (x) {
+        return '<button type="button" data-hw="' + x[0] + '" aria-pressed="' + (d.hardware === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div></div>' +
+      (t && t.overlay && !(U.overlays || []).some(function (o) { return o.name === t.overlay; }) ? '<div class="note bad"><span class="dot bad"></span><div>Overlay <strong>' + U.esc(t.overlay) + '</strong> does not exist in ' + U.esc(U.app) + '.</div></div>' : '') +
+      '</div><div class="tb-card">' + layersHtml(d) + '</div>' +
+      '<details class="b-adv tb-card"' + (S.advOpen ? ' open' : '') + '><summary>Decode</summary><div class="b-advgrid">' +
       '<label class="check"><input type="checkbox" data-d="deinterlace"' + (d.deinterlace ? ' checked' : '') + '>Deinterlace the source</label>' +
-      '<label>Never below (fps)<input type="number" data-d="minFrameRate" min="0" max="120" value="' + (d.minFrameRate || 0) + '"><span class="hint">For sources that drop frames: WSE fills up to this rate. 0 leaves it out.</span></label>' +
-      (d.hardware !== 'cpu' ? '<label>GPU or device<input type="number" data-d="gpuId" min="-1" max="15" value="' + d.gpuId + '"><span class="hint">-1 lets WSE choose.</span></label>' : '') +
-      '</div></details>';
-    el.edit.innerHTML = h;
+      '<label>Never below (fps)' + U.tip('For sources that drop frames: WSE fills up to this rate. 0 leaves it out.') + '<input type="number" data-d="minFrameRate" min="0" max="120" value="' + (d.minFrameRate || 0) + '"></label>' +
+      (d.hardware !== 'cpu' ? '<label>GPU or device' + U.tip('-1 lets WSE choose.') + '<input type="number" data-d="gpuId" min="-1" max="15" value="' + d.gpuId + '"></label>' : '') +
+      '</div></details></div>' +
+      '<div class="tb-outs"><div class="tb-card"><div class="tb-h">' + U.icon('outputs') + 'Outputs</div>' +
+      // presets replace every output, so they are offered only while the template is new
+      (d.isNew ? '<div class="b-bar"><span class="f">Start from</span><div class="presets">' + PRESETS.map(function (p, i) {
+        return '<button type="button" class="pill" data-preset="' + i + '" aria-pressed="' + (d.preset === i) + '">' + p[0] + '</button>'; }).join('') + '</div></div>' : '') +
+      '<div class="b-sum hrow">' + summary(d) + '<span class="spacer"></span>' + loadText(d) + '</div>' +
+      '<div class="oc-list"><div class="oc-in"><span class="res res-in" aria-hidden="true">' + U.icon('input') + '</span><div><b>Input</b><span class="small muted">The source picture, before scaling</span></div><span class="oc-ov">' + (layerBadges(d, null) || '<span class="faint small">Nothing drawn here</span>') + '</span></div>' +
+      d.outputs.map(function (o, i) { return card(o, i, d); }).join('') +
+      '<div class="oc-add"><button class="btn sm" type="button" data-add="video">' + U.icon('plus') + 'Output</button>' +
+      '<button class="btn sm ghost" type="button" data-add="passthrough">' + U.icon('plus') + 'Original</button><button class="btn sm ghost" type="button" data-add="audio">' + U.icon('plus') + 'Audio only</button></div></div></div>' +
+      '<div class="tb-card">' + playback(d) + '</div></div></div>';
+    el.body.innerHTML = h;
     bindBuilder();
     if (!S.lib && !S.libLoading && (d.images || []).length) { S.libLoading = true; library().then(function () { S.libLoading = false; if (S.draft === d) rerender(); }, function () { S.libLoading = false; }); }
   }
 
   function bindBuilder() {
     var d = S.draft;
-    el.edit.querySelectorAll('[data-d]').forEach(function (f) {
+    el.body.querySelectorAll('[data-d]').forEach(function (f) {
       var k = f.getAttribute('data-d');
       f.addEventListener(f.type === 'text' ? 'input' : 'change', function () {
-        if (k === 'name') { d.name = f.value.trim().replace(/\.xml$/i, ''); var r = el.list.querySelector('.tpl-row.sel strong'); if (r && d.isNew) r.textContent = d.name || 'New template'; renderBar(); return; }
+        if (k === 'name') { d.name = f.value.trim().replace(/\.xml$/i, ''); renderBar(); U.changed(); return; }
         if (f.type === 'checkbox') d[k] = f.checked;
         else if (f.type === 'number') d[k] = num(f.value, d[k]);
         else d[k] = f.value;
@@ -488,12 +619,12 @@
         rerender();
       });
     });
-    var adv = el.edit.querySelector('.b-adv');
+    var adv = el.body.querySelector('.b-adv');
     if (adv) adv.addEventListener('toggle', function () { S.advOpen = adv.open; });
-    el.edit.querySelectorAll('[data-preset]').forEach(function (b) {
+    el.body.querySelectorAll('[data-preset]').forEach(function (b) {
       b.onclick = function () {
         var i = +b.getAttribute('data-preset'), before = JSON.stringify({ outputs: d.outputs, groups: d.groups, preset: d.preset });
-        d.outputs = PRESETS[i][1](); d.preset = i; d.groups = defaultGroups(d.outputs); d.urlSome = false;
+        d.outputs = PRESETS[i][1](); d.preset = i; d.groups = defaultGroups(d.outputs);
         if (!d.overlay) d.outputs.forEach(function (o) { o.overlay = false; });
         rerender();
         U.toast('Outputs replaced with ' + PRESETS[i][0] + '.', { undo: function () {
@@ -504,16 +635,24 @@
         } });
       };
     });
-    el.edit.querySelectorAll('[data-hw]').forEach(function (b) {
+    el.body.querySelectorAll('[data-hw]').forEach(function (b) {
       b.onclick = function () {
         d.hardware = b.getAttribute('data-hw');
         if (d.hardware !== 'cpu') d.outputs.forEach(function (o) { if (o.codec === 'VP8' || o.codec === 'VP9') o.codec = 'H.264'; });
         rerender();
       };
     });
-    el.edit.querySelectorAll('[data-sec]').forEach(function (b) { b.onclick = function () { var k = b.getAttribute('data-sec'); S.open[k] = !S.open[k]; rerender(); }; });
-    el.edit.querySelectorAll('[data-add]').forEach(function (b) { b.onclick = function () { addOutput(b.getAttribute('data-add')); }; });
-    el.edit.querySelectorAll('.oc').forEach(function (c) {
+    el.body.querySelectorAll('[data-sec]').forEach(function (b) { b.onclick = function () { var k = b.getAttribute('data-sec'); S.open[k] = !S.open[k]; rerender(); }; });
+    el.body.querySelectorAll('[data-add]').forEach(function (b) { b.onclick = function () { addOutput(b.getAttribute('data-add')); }; });
+    el.body.querySelectorAll('[data-oexp]').forEach(function (b) {
+      b.onclick = function () {
+        var o = d.outputs[+b.closest('.oc').getAttribute('data-i')];
+        if (!S.openOut) S.openOut = new WeakSet();
+        if (S.openOut.has(o)) S.openOut.delete(o); else S.openOut.add(o);
+        rerender();
+      };
+    });
+    el.body.querySelectorAll('.oc').forEach(function (c) {
       var i = +c.getAttribute('data-i'), o = d.outputs[i];
       c.querySelector('[data-rm]').onclick = function () {
         if (d.outputs.length === 1) { U.toast('A template needs at least one output.', { level: 'bad' }); return; }
@@ -525,7 +664,7 @@
       var ap = c.querySelector('[data-addparam]');
       if (ap) ap.onclick = function () { o.params.push({ name: '', value: '' }); rerender(); };
       c.querySelectorAll('[data-prm]').forEach(function (b) { b.onclick = function () { o.params.splice(+b.getAttribute('data-prm'), 1); rerender(); }; });
-      c.querySelectorAll('[data-param]').forEach(function (f) { f.oninput = function () { o.params[+f.getAttribute('data-param')][f.getAttribute('data-k')] = f.value.trim(); renderBar(); }; });
+      c.querySelectorAll('[data-param]').forEach(function (f) { f.oninput = function () { o.params[+f.getAttribute('data-param')][f.getAttribute('data-k')] = f.value.trim(); renderBar(); U.changed(); }; });
       c.querySelectorAll('[data-region]').forEach(function (f) { f.onchange = function () { o.region[f.getAttribute('data-region')] = Math.max(0, num(f.value, 0)); rerender(); }; });
       c.querySelectorAll('[data-o]').forEach(function (f) {
         var k = f.getAttribute('data-o');
@@ -535,7 +674,7 @@
             var old = o.name; o.name = f.value.trim();
             d.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.output === old) m.output = o.name; }); });
             (d.images || []).forEach(function (l) { l.outputs = l.outputs.map(function (n) { return n === old ? o.name : n; }); });
-            renderSummary(); renderBar(); return;
+            renderSummary(); renderBar(); U.changed(); return;
           }
           if (k === 'enabled' || k === 'overlay' || k === 'keyFollow' || k === 'hdrToSdr' || k === 'captions') o[k] = f.checked;
           else if (k === 'regionOn') o.region = f.checked ? { x: 0, y: 0, w: 1280, h: 720 } : null;
@@ -551,9 +690,9 @@
           else if (k === 'height') {
             if (f.value === 'custom') o.height = o.height && !size(o.height) ? o.height : 1440;
             else {
-              var old = size(o.height), h = +f.value, s = size(h);
-              if (old && o.name === old[1]) { var nn = s ? s[1] : 'full'; d.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.output === o.name) m.output = nn; }); }); o.name = nn; }
-              if (s && (!old || o.videoBitrate === old[2])) { o.videoBitrate = s[2]; o.profile = o.codec === 'H.264' ? s[3] : o.profile; }
+              var old2 = size(o.height), h = +f.value, s = size(h);
+              if (old2 && o.name === old2[1]) { var nn = s ? s[1] : 'full'; d.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.output === o.name) m.output = nn; }); }); o.name = nn; }
+              if (s && (!old2 || o.videoBitrate === old2[2])) { o.videoBitrate = s[2]; o.profile = o.codec === 'H.264' ? s[3] : o.profile; }
               o.height = h; o.width = Math.round(h * 16 / 9 / 2) * 2;
             }
           }
@@ -564,7 +703,7 @@
         });
       });
     });
-    el.edit.querySelectorAll('[data-gm]').forEach(function (s) {
+    el.body.querySelectorAll('[data-gm]').forEach(function (s) {
       s.onchange = function () {
         var g = d.groups[+s.getAttribute('data-gm')], name = s.getAttribute('data-out');
         g.members = g.members.filter(function (m) { return m.output !== name; });
@@ -572,10 +711,10 @@
         rerender();
       };
     });
-    el.edit.querySelectorAll('[data-gname]').forEach(function (f) { f.onchange = function () { d.groups[+f.getAttribute('data-gname')].name = f.value.trim(); rerender(); }; });
-    el.edit.querySelectorAll('[data-grm]').forEach(function (b) { b.onclick = function () { d.groups.splice(+b.getAttribute('data-grm'), 1); rerender(); }; });
+    el.body.querySelectorAll('[data-gname]').forEach(function (f) { f.onchange = function () { d.groups[+f.getAttribute('data-gname')].name = f.value.trim(); rerender(); }; });
+    el.body.querySelectorAll('[data-grm]').forEach(function (b) { b.onclick = function () { d.groups.splice(+b.getAttribute('data-grm'), 1); rerender(); }; });
     bindLayers(d);
-    var ag = el.edit.querySelector('[data-addgroup]');
+    var ag = el.body.querySelector('[data-addgroup]');
     if (ag) ag.onclick = function () {
       var n = 'group' + (d.groups.length + 1);
       var smallest = d.outputs.filter(function (o) { return o.enabled && o.kind === 'video'; }).sort(function (a, b) { return (a.height || 9999) - (b.height || 9999); }).slice(0, 2);
@@ -586,28 +725,30 @@
   // a selector for the focused builder control, so a re-render can put focus back on it
   function focusKey() {
     var a = document.activeElement;
-    if (!a || a === el.edit || !el.edit.contains(a)) return null;
+    if (!a || a === el.body || !el.body.contains(a)) return null;
     if (a.id) return '#' + CSS.escape(a.id);
     var attrs = Array.prototype.filter.call(a.attributes, function (x) { return /^data-/.test(x.name) || (x.name === 'value' && a.type === 'checkbox'); });
     if (!attrs.length) return null;
-    var card = a.closest('.oc[data-i]'), ly = a.closest('[data-ly]');
-    return (card ? '.oc[data-i="' + card.getAttribute('data-i') + '"] ' : ly ? '[data-ly="' + ly.getAttribute('data-ly') + '"] ' : '') +
+    var c = a.closest('.oc[data-i]'), ly = a.closest('[data-ly]');
+    return (c ? '.oc[data-i="' + c.getAttribute('data-i') + '"] ' : ly ? '[data-ly="' + ly.getAttribute('data-ly') + '"] ' : '') +
       a.tagName.toLowerCase() + attrs.map(function (x) { return '[' + x.name + '="' + CSS.escape(x.value) + '"]'; }).join('');
   }
   function rerender() {
-    var y = el.edit.scrollTop, f = focusKey();
-    renderBuilder(); renderBar();
-    el.edit.scrollTop = y;
-    var n = f && el.edit.querySelector(f);
-    if (n) n.focus();
+    var f = focusKey();
+    S.savedNote = null;
+    renderBuilder(); renderBar(); U.changed();
+    var n = f && el.body.querySelector(f);
+    if (n) n.focus({ preventScroll: true });
   }
-  function renderSummary() { var s = el.edit.querySelector('.b-sum'); if (s) s.innerHTML = summary(S.draft); }
+  function renderSummary() { var s = el.body.querySelector('.b-sum'); if (s) s.innerHTML = summary(S.draft) + '<span class="spacer"></span>' + loadText(S.draft); }
 
   function addOutput(kind) {
     var d = S.draft;
     d.preset = null;
-    if (kind === 'passthrough') { var p = original(); p.name = unique(d, 'source'); d.outputs.unshift(p); rerender(); return; }
-    if (kind === 'audio') { var a = audioOnly(); a.name = unique(d, 'audio'); d.outputs.push(a); rerender(); return; }
+    if (!S.openOut) S.openOut = new WeakSet();
+    // a new output opens, so its settings are in view
+    if (kind === 'passthrough') { var p = original(); p.name = unique(d, 'source'); d.outputs.unshift(p); S.openOut.add(p); rerender(); return; }
+    if (kind === 'audio') { var a = audioOnly(); a.name = unique(d, 'audio'); d.outputs.push(a); S.openOut.add(a); rerender(); return; }
     // the next standard size below the smallest video output there is, else the largest not used yet
     var have = d.outputs.filter(function (o) { return o.kind === 'video'; }).map(function (o) { return o.height; });
     var low = have.filter(function (h) { return h > 0; }).reduce(function (m, h) { return Math.min(m, h); }, Infinity);
@@ -617,7 +758,7 @@
     o.name = unique(d, o.name);
     var at = d.outputs.length;
     while (at > 0 && d.outputs[at - 1].kind === 'audio') at--;
-    d.outputs.splice(at, 0, o);
+    d.outputs.splice(at, 0, o); S.openOut.add(o);
     // a new rendition joins the first adaptive group, as most ladders want
     if (d.groups[0]) d.groups[0].members.push({ output: o.name, only: '' });
     rerender();
@@ -657,7 +798,7 @@
       if (gseen[gn.toLowerCase()] || seen[gn.toLowerCase()]) return 'Group ' + gn + ' has the name of another group or output.';
       gseen[gn.toLowerCase()] = 1;
     }
-    if (d.overlay && !d.outputs.some(function (o) { return o.enabled && o.kind === 'video' && o.overlay; })) return 'No output shows the overlay.';
+    if (d.overlay && !d.outputs.some(function (o) { return o.enabled && o.kind === 'video' && o.overlay; })) return 'No output carries the overlay.';
     var vids = videoOutputs(d).map(function (o) { return o.name; });
     for (var l = 0; l < (d.images || []).length; l++) {
       var im = d.images[l];
@@ -667,25 +808,22 @@
     return null;
   }
 
-  /* ---------- another template: read-only, with "Use with an overlay" ---------- */
+  /* ---------- another template: read-only, with "Use with an overlay" and "New template from this one" ---------- */
   function renderOther(t) {
-    var v = verdict(t), can = carriers(t).length > 0;
-    var users = (t.listedBy || []);
-    el.edit.innerHTML = '<div class="b-head"><div class="b-name"><h3>' + U.esc(t.name) + '</h3><div class="hint"><code>transcoder/templates/' + U.esc(t.template) + '</code>' +
-      (t.shipped ? ', ships with WSE' : '') + '</div></div>' +
-      '<div class="row">' + (can ? '<button class="btn primary" type="button" data-act="use">Use with an overlay...</button>' : '') +
-      '<button class="btn" type="button" data-act="from">New template from this one</button></div></div>' +
-      '<div class="notice ' + (v.cls === 'ok' ? 'ok' : v.cls === 'warn' ? 'slow' : '') + '"><div><strong>' + v.text + '.</strong> ' + v.long + '</div></div>' +
-      '<table class="list"><thead><tr><th>Output</th><th>Size</th><th>Video</th><th>Audio</th><th>On</th></tr></thead><tbody>' +
+    var v = verdict(t), can = carriers(t).length > 0 && !ro() && group(t) === 'other';
+    var outs = fromTemplate(t).outputs;
+    var h = '<div class="note ' + (v.cls === 'on' ? 'on' : v.cls === 'warn' ? 'warn' : '') + '"><span class="dot ' + (v.cls === 'on' ? 'on' : v.cls === 'warn' ? 'warn' : '') + '"></span><div><b>' + v.text + '.</b> ' + v.long + '</div></div>' +
+      '<div><div class="sec-h">Outputs</div><table class="tbl"><thead><tr><th>Output</th><th>Picture</th><th>Video</th><th>Audio</th><th>Carries the overlay</th></tr></thead><tbody>' +
       (t.encodes || []).map(function (e) {
-        var o = fromTemplate(t).outputs.filter(function (x) { return x.name === e.name; })[0];
-        var video = /^passthru$/i.test(e.codec || '') ? 'passes through' : /^disable/i.test(e.codec || '') ? 'none' : U.esc(e.codec || '') + (o && o.videoBitrate ? ', ' + Math.round(o.videoBitrate / 1000).toLocaleString() + ' kbps' : '');
-        return '<tr><td><code>' + U.esc(e.name) + '</code></td><td>' + U.esc(o ? sizeLabel(o) : '') + '</td><td>' + video + '</td><td>' + U.esc(e.audioCodec || '') + '</td><td>' + (e.enabled ? 'yes' : '<span class="muted">off</span>') + '</td></tr>';
-      }).join('') + '</tbody></table>' +
-      '<p class="hint">Read-only here. ' + (users.length ? 'Applications that list it: ' + users.map(U.esc).join(', ') + '. ' : '') + 'Step 3 can still use it on a stream as it is.</p>';
-    var use = el.edit.querySelector('[data-act=use]');
-    if (use) use.onclick = function () { useDialog(t); };
-    el.edit.querySelector('[data-act=from]').onclick = function () { startNew(copyOf(t)); };
+        var o = outs.filter(function (x) { return x.name === e.name; })[0];
+        var video = /^passthru$/i.test(e.codec || '') ? 'Passes through' : /^disable/i.test(e.codec || '') ? 'None' : U.esc(e.codec || '') + (o && o.videoBitrate ? ', ' + kbps(o.videoBitrate) : '');
+        return '<tr><td><b>' + U.esc(e.name) + '</b>' + (e.enabled ? '' : ' <span class="faint">off</span>') + '</td><td class="muted">' + U.esc(o ? sizeLabel(o) : '') + '</td><td>' + video + '</td><td>' + U.esc(e.audioCodec || '') + '</td>' +
+          '<td>' + (/^passthru$/i.test(e.codec || '') ? '<span class="tgl-text">Not encoded</span>' : '<span class="tgl-text">' + (o && o.overlay ? 'Carries ' + U.esc(t.overlay) : 'No') + '</span>') + '</td></tr>';
+      }).join('') + '</tbody></table>' + U.roNote() + '</div>';
+    if (can) h += useHtml(t);
+    else if (!ro() && group(t) === 'other') h += '<p class="small muted">It can still be used on a stream as it is, from the stream view.</p>';
+    el.body.innerHTML = h;
+    if (can) bindUse(t);
   }
   // a new template built from t; one without an overlay gets the first overlay on every video output
   function copyOf(t) {
@@ -699,173 +837,192 @@
   }
   function freeName(b) { return unique({ outputs: all().map(function (x) { return { name: x.name }; }) }, b); }
 
-  function useDialog(t) {
-    if (!(U.overlays || []).length) { U.toast('Make an overlay in step 1 first.', { level: 'bad' }); return; }
+  // "Use with an overlay": a copy carrying the overlay, or overlays switched on in the template itself
+  function useHtml(t) {
     var c = carriers(t), apps = t.listedBy || [];
-    var copyName = freeName(t.name + '-overlay');
-    U.prompt('Use ' + t.name + ' with an overlay',
-      '<label class="opt"><input type="radio" name="uo-use" value="copy" checked><span><strong>Make a copy with the overlay</strong>' +
-        '<span class="hint">Writes <code>' + U.esc(copyName) + '.xml</code>, which you can then change here. <code>' + U.esc(t.template) + '</code> stays as it is.</span></span></label>' +
-      (t.shipped ? '' : '<label class="opt"><input type="radio" name="uo-use" value="inplace"><span><strong>Change ' + U.esc(t.name) + ' itself</strong>' +
+    var u = S.use || (S.use = { how: 'copy', name: freeName(t.name + '-overlay'), overlay: ((U.overlays || [])[0] || {}).name || '', encodes: c.map(function (e) { return e.name; }), error: null });
+    if (!(U.overlays || []).length) return '<div class="note"><span class="dot"></span><div><b>Use it with an overlay.</b> Make an overlay first; then this template can carry it as a copy or in place. <button type="button" class="btn sm" data-go="new-overlay:">New overlay</button></div></div>';
+    return '<div><div class="sec-h">Use it with an overlay</div><div class="stack">' +
+      '<label class="opt"><input type="radio" name="uo-use" value="copy"' + (u.how === 'copy' ? ' checked' : '') + '><span><strong>Make a copy with the overlay</strong>' +
+        '<span class="hint">Writes <code>' + U.esc(u.name || '<name>') + '.xml</code>, which you can then change in the builder. <code>' + U.esc(t.template) + '</code> stays as it is.</span></span></label>' +
+      (t.shipped ? '' : '<label class="opt"><input type="radio" name="uo-use" value="inplace"' + (u.how === 'inplace' ? ' checked' : '') + '><span><strong>Change ' + U.esc(t.name) + ' itself</strong>' +
         '<span class="hint">Switches on dynamic overlays in <code>' + U.esc(t.template) + '</code> after a backup; uninstall puts it back. Templates are shared by every application on the server' +
-        (apps.length ? ': ' + apps.map(U.esc).join(', ') + ' list it.' : '; no application lists it now.') + '</span></span></label>') +
-      '<div class="two mt-m"><div class="fld"><label class="f" for="uo-use-ov">Overlay</label><select id="uo-use-ov">' + overlayOptions(((U.overlays || [])[0] || {}).name) + '</select></div>' +
-      '<div class="fld" data-copyname><label class="f" for="uo-use-n">Name of the copy</label><input id="uo-use-n" type="text" value="' + U.esc(copyName) + '" spellcheck="false"></div></div>' +
-      '<div class="fld"><span class="f">Outputs that show it</span>' + c.map(function (e) {
-        return '<label class="check"><input type="checkbox" data-use-enc="' + U.esc(e.name) + '" checked>' + U.esc(e.name) + '</label>'; }).join('') +
-      '<div class="hint">Outputs that pass video through cannot show an overlay and are not listed.</div></div>',
-      'Use it', function (m) {
-        var how = m.querySelector('input[name=uo-use]:checked').value;
-        var picked = Array.prototype.map.call(m.querySelectorAll('[data-use-enc]:checked'), function (b) { return b.getAttribute('data-use-enc'); });
-        if (!picked.length) return 'Pick at least one output.';
-        var n = m.querySelector('#uo-use-n').value.trim().replace(/\.xml$/i, '');
-        if (how === 'copy' && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(n) || n.indexOf('..') >= 0)) return 'Name: letters, digits, dot, dash and underscore.';
-        if (how === 'copy' && (U.templates || []).some(function (x) { return x.name === n; })) return 'A template named ' + n + ' exists.';
-        return { how: how, name: n, overlay: m.querySelector('#uo-use-ov').value, encodes: picked.length === c.length ? [] : picked };
-      }).then(function (v) {
-        if (!v) return;
-        U.api.post(vh() + '/templates/' + U.enc(t.name) + '/use', v).then(function (r) {
-          var made = String(r.template || '').replace(/\.xml$/, '');
-          U.toast(v.how === 'copy' ? 'Made ' + made + ', a copy of ' + t.name + ' carrying ' + v.overlay + '. Next: step 3 uses it on streams.'
-            : 'Switched on overlays in ' + t.name + '; it carries ' + v.overlay + '. The original is backed up.');
-          return U.refreshState(true).then(function () { select(made); });
-        }, function (e) { U.banner('tpl', 'bad', 'Not done.', e.message); });
-      });
-    var m = U.root.querySelector('.modal');
-    if (m) m.querySelectorAll('input[name=uo-use]').forEach(function (r) {
-      r.onchange = function () { m.querySelector('[data-copyname]').hidden = r.value !== 'copy' || !r.checked; };
-    });
+        (apps.length ? ': ' + U.esc(apps.join(', ')) + ' list it.' : '; no application lists it now.') + '</span></span></label>') + '</div>' +
+      '<div class="grid2" style="margin-top:12px"><div class="fld"><label class="f" for="uo-use-ov">Overlay</label><select id="uo-use-ov" data-use-ov>' + overlayOptions(u.overlay) + '</select></div>' +
+      (u.how === 'copy' ? '<div class="fld"><label class="f" for="uo-use-n">Name of the copy</label><input id="uo-use-n" type="text" data-use-n value="' + U.esc(u.name) + '" spellcheck="false"></div>' : '<div></div>') + '</div>' +
+      '<div class="fld"><span class="f">Outputs that carry it</span><div class="hrow">' + c.map(function (e) {
+        return '<label class="check"><input type="checkbox" data-use-enc="' + U.esc(e.name) + '"' + (u.encodes.indexOf(e.name) >= 0 ? ' checked' : '') + '>' + U.esc(e.name) + '</label>'; }).join('') + '</div>' +
+      '<div class="hint">Outputs that pass video through cannot show an overlay and are not listed.</div></div>' +
+      (u.error ? '<p class="err">' + U.esc(u.error) + '</p>' : '') +
+      '<div class="hrow"><span class="spacer"></span><button type="button" class="btn primary" data-use-go>' + (u.how === 'copy' ? 'Create the copy' : 'Switch overlays on') + '</button></div></div>';
+  }
+  function bindUse(t) {
+    var u = S.use, c = carriers(t);
+    el.body.querySelectorAll('input[name=uo-use]').forEach(function (r) { r.onchange = function () { u.how = r.value; u.error = null; renderOther(t); }; });
+    var ov = el.body.querySelector('[data-use-ov]'); if (ov) ov.onchange = function () { u.overlay = ov.value; };
+    var n = el.body.querySelector('[data-use-n]'); if (n) n.oninput = function () { u.name = n.value.trim().replace(/\.xml$/i, ''); };
+    el.body.querySelectorAll('[data-use-enc]').forEach(function (b) { b.onchange = function () { var e = b.getAttribute('data-use-enc'); u.encodes = u.encodes.filter(function (x) { return x !== e; }); if (b.checked) u.encodes.push(e); }; });
+    var go = el.body.querySelector('[data-use-go]');
+    if (go) go.onclick = function () {
+      u.error = !u.encodes.length ? 'Pick at least one output.' :
+        u.how === 'copy' && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(u.name) || u.name.indexOf('..') >= 0) ? 'Name: letters, digits, dot, dash and underscore.' :
+        u.how === 'copy' && (U.templates || []).some(function (x) { return x.name === u.name; }) ? 'A template named ' + u.name + ' exists.' : null;
+      if (u.error) { renderOther(t); return; }
+      go.disabled = true;
+      var body = { how: u.how, name: u.name, overlay: u.overlay, encodes: u.encodes.length === c.length ? [] : u.encodes };
+      U.api.post(vh() + '/templates/' + U.enc(t.name) + '/use', body).then(function (r) {
+        var made = String(r.template || '').replace(/\.xml$/, '');
+        U.toast(u.how === 'copy' ? 'Made ' + made + ', a copy of ' + t.name + ' carrying ' + u.overlay + '. Use it on a stream from the stream view.'
+          : 'Switched on overlays in ' + t.name + '; it carries ' + u.overlay + '. The original is backed up.');
+        S.use = null;
+        return U.refreshState(true).then(function () { U.go('template:' + (made || t.name)); });
+      }, function (e) { go.disabled = false; u.error = e.message; renderOther(t); });
+    };
   }
 
   /* ---------- a customer's template changed in place: only its overlay and outputs ---------- */
   function savedForm(t) { return { overlay: t.overlay || '', encodes: (t.overlayEncodes || []).slice().sort() }; }
-  function overlayForm(t) {
-    var f = el.edit && el.edit.querySelector('[data-io-ov]');
-    if (!f || el.edit.getAttribute('data-for') !== t.name) return savedForm(t);
-    var picked = Array.prototype.map.call(el.edit.querySelectorAll('[data-io-enc]:checked'), function (b) { return b.getAttribute('data-io-enc'); }).sort();
-    return { overlay: f.value, encodes: picked.length === carriers(t).length ? [] : picked };
-  }
   function renderOverlayOnly(t) {
-    var c = carriers(t), listed = t.overlayEncodes || [];
-    el.edit.setAttribute('data-for', t.name);
-    el.edit.innerHTML = '<div class="b-head"><div class="b-name"><h3>' + U.esc(t.name) + '</h3><div class="hint"><code>transcoder/templates/' + U.esc(t.template) + '</code>, your own template with overlays switched on</div></div></div>' +
-      '<div class="fld"><label class="f" for="uo-io-ov">Overlay</label><select id="uo-io-ov" data-io-ov>' + overlayOptions(t.overlay, 'No overlay') + '</select></div>' +
-      '<div class="fld"><span class="f">Outputs that show it</span>' + c.map(function (e) {
-        return '<label class="check"><input type="checkbox" data-io-enc="' + U.esc(e.name) + '"' + (!listed.length || listed.indexOf(e.name) >= 0 ? ' checked' : '') + '>' + U.esc(e.name) + '</label>'; }).join('') + '</div>' +
-      '<p class="hint">Its outputs are changed where it was written, for example in WSE Manager. To build on it here, use New template from this one.</p>' +
-      '<button class="btn" type="button" data-act="from">New template from this one</button>';
-    el.edit.querySelector('[data-act=from]').onclick = function () { startNew(copyOf(t)); };
-  }
-
-  /* ---------- changes, the action bar, saving ---------- */
-  function current() {
-    if (S.draft) return JSON.stringify(spec(S.draft));
-    var t = S.sel && find(S.sel);
-    return t && inPlace(t) ? JSON.stringify(overlayForm(t)) : null;
-  }
-  function changes() {
-    if (S.draft && S.draft.isNew) return 1;
-    var c = current();
-    return c != null && S.base != null && c !== S.base ? 1 : 0;
-  }
-  function onEdit() { if (S.sel && !S.draft) renderBar(); }
-  function renderBar() {
-    if (!el.bar) return;
-    var t = S.sel && find(S.sel);
-    if (!S.draft && (!t || !inPlace(t))) {
-      el.bar.innerHTML = '<span class="msg">' + (t ? 'Use it with an overlay, or start a new template from it.' : 'Pick a template, or make one with New template.') + '</span>';
+    var c = carriers(t), f = S.form || savedForm(t), b = S.base ? JSON.parse(S.base) : savedForm(t);
+    if (ro()) {
+      el.body.innerHTML = '<dl class="kv"><dt>Overlay</dt><dd>' + U.esc(b.overlay || 'None') + '</dd><dt>Outputs that carry it</dt><dd>' + U.esc(b.encodes.length ? b.encodes.join(', ') : 'Every output') + '</dd></dl>' + U.roNote();
       return;
     }
-    var why = S.draft && changes() ? problem(S.draft) : null;
-    U.actionBar(el.bar, { changes: changes(), conflict: S.conflict, saving: S.saving, saveLabel: S.draft && S.draft.isNew ? 'Create template' : 'Save',
-      note: why || 'All changes saved. Next: step 3 uses the template on streams.',
+    el.body.innerHTML = '<div class="fld" style="max-width:280px"><label class="f" for="uo-io-ov">Overlay drawn by this template</label><select id="uo-io-ov" data-io-ov' + (f.overlay !== b.overlay ? ' class="is-draft"' : '') + '>' + overlayOptions(f.overlay, 'None') + '</select>' +
+      '<div class="hint">' + (f.overlay !== b.overlay ? 'Saved: ' + U.esc(b.overlay || 'None') + '. ' : '') + 'Live on save for streams that load this file.</div></div>' +
+      '<div class="fld"><span class="f">Outputs that carry it</span><div class="hrow">' + c.map(function (e) {
+        return '<label class="check"><input type="checkbox" data-io-enc="' + U.esc(e.name) + '"' + (!f.encodes.length || f.encodes.indexOf(e.name) >= 0 ? ' checked' : '') + '>' + U.esc(e.name) + '</label>'; }).join('') + '</div></div>' +
+      '<p class="small muted">Its outputs are changed where it was written, for example in WSE Manager. To build on it here, use New template from this one in the menu.</p>';
+    var sel = el.body.querySelector('[data-io-ov]');
+    function read() {
+      var picked = Array.prototype.map.call(el.body.querySelectorAll('[data-io-enc]:checked'), function (x) { return x.getAttribute('data-io-enc'); }).sort();
+      S.form = { overlay: sel.value, encodes: picked.length === c.length ? [] : picked };
+      S.savedNote = null;
+      renderBar(); U.changed();
+      sel.classList.toggle('is-draft', S.form.overlay !== b.overlay);
+    }
+    sel.onchange = read;
+    el.body.querySelectorAll('[data-io-enc]').forEach(function (x) { x.onchange = read; });
+  }
+
+  /* ---------- changes, the save bar, saving ---------- */
+  function currentJson() {
+    if (S.draft) return JSON.stringify(spec(S.draft));
+    if (S.form) return JSON.stringify(S.form);
+    return null;
+  }
+  function changes() {
+    if (ro()) return 0;
+    if (S.kind === 'new') return newChanged(S.draft, S.base) ? 1 : 0;
+    var c = currentJson();
+    return c != null && S.base != null && c !== S.base ? 1 : 0;
+  }
+  function newChanged(d, b) { return !!d && (!!d.name || b == null || JSON.stringify(spec(d)) !== b); }
+  var WORDS = { videoBitrate: 'video bitrate', height: 'size', width: 'width', fit: 'fit', codec: 'codec', profile: 'profile', rateControl: 'rate control', peakBitrate: 'peak',
+    speed: 'speed', keyFollow: 'keyframes', keyInterval: 'keyframes', skip: 'frame rate', audio: 'audio', audioBitrate: 'audio bitrate', channels: 'channels', sampleRate: 'sample rate',
+    captions: 'captions', params: 'expert parameters', overlay: 'carries the overlay', enabled: 'on or off', region: 'region', hdrToSdr: 'HDR to SDR', kind: 'kind' };
+  // the changes in words, for the save bar
+  function describe() {
+    if (S.kind === 'new') return ['new template ' + (S.draft.name || '(no name yet)')];
+    var a = S.base ? JSON.parse(S.base) : {}, b = JSON.parse(currentJson() || '{}'), out = [];
+    if (S.form) {
+      if (a.overlay !== b.overlay) out.push('overlay ' + (b.overlay || 'none'));
+      if (JSON.stringify(a.encodes) !== JSON.stringify(b.encodes)) out.push('outputs carrying it');
+      return out;
+    }
+    if ((a.overlay || '') !== (b.overlay || '')) out.push('overlay ' + (b.overlay || 'none'));
+    if (a.hardware !== b.hardware) out.push('hardware ' + b.hardware);
+    var ao = a.outputs || [], bo = b.outputs || [];
+    bo.forEach(function (o) {
+      var s = ao.filter(function (x) { return x.name === o.name; })[0];
+      if (!s) { out.push('add ' + o.name); return; }
+      var w = {};
+      Object.keys(o).forEach(function (k) { if (JSON.stringify(o[k]) !== JSON.stringify(s[k])) w[WORDS[k] || k] = 1; });
+      if (Object.keys(w).length) out.push(o.name + ' ' + Object.keys(w).join(', '));
+    });
+    ao.forEach(function (s) { if (!bo.some(function (o) { return o.name === s.name; })) out.push('remove ' + s.name); });
+    if (JSON.stringify(a.images) !== JSON.stringify(b.images)) out.push('image layers');
+    if (JSON.stringify(a.groups) !== JSON.stringify(b.groups)) out.push('adaptive groups');
+    if (a.deinterlace !== b.deinterlace || a.gpuId !== b.gpuId || a.minFrameRate !== b.minFrameRate) out.push('decode');
+    return out.length ? out : ['unsaved edits'];
+  }
+  function impact() {
+    if (S.kind === 'new') return 'Writes transcoder/templates/' + (S.draft.name || '<name>') + '.xml. No stream uses it until you use it on a stream or add it to the template order.';
+    var users = U.streamsUsing(S.sel), ord = users.filter(function (s) { return !s.own; }), copies = users.filter(function (s) { return s.own; });
+    var on = ord.filter(function (s) { return s.publishing; }).map(function (s) { return s.name; }), off = ord.filter(function (s) { return !s.publishing; }).map(function (s) { return s.name; });
+    return (on.length ? 'Overlay changes live now on ' + on.join(', ') + '; outputs wait for a restart. ' : 'No stream that follows it is publishing. ') +
+      (off.length ? off.join(', ') + ' gets it when it publishes. ' : '') + (copies.length ? copies.map(function (s) { return s.template; }).join(', ') + ' will not change.' : '');
+  }
+  function renderBar() {
+    if (!el.bar || U.current() !== 'template') return;
+    var n = changes();
+    U.saveBar(el.bar, { changes: n ? describe() : [], impact: impact(), conflict: S.conflict, saving: S.saving,
+      problem: S.draft && n ? problem(S.draft) : null, saveLabel: S.kind === 'new' ? 'Create template' : 'Save', saved: S.savedNote,
       onSave: save, onDiscard: discard,
-      onTheirs: function () { S.conflict = false; S.known = S.theirs; open(find(S.sel)); renderEdit(); renderBar(); },
+      onTheirs: function () { S.conflict = false; delete mem[S.sel]; var t = find(S.sel); S.known = t.modified; loadFrom(t); renderBody(); renderBar(); U.changed(); },
       onMine: function () { S.conflict = false; S.known = S.theirs; renderBar(); U.toast('Keeping your version. Save replaces the one saved in the other session.'); } });
-    if (why) { var msg = el.bar.querySelector('.msg'); if (msg) { msg.textContent = why; msg.classList.add('warn-text'); } }
   }
   function discard() {
-    S.conflict = false;
-    if (S.draft && S.draft.isNew) { S.draft = null; S.base = null; load(); if (!S.sel) { renderList(); renderEdit(); renderBar(); } U.toast('Discarded the new template.'); return; }
-    open(find(S.sel)); renderEdit(); renderBar(); U.toast('Discarded the unsaved changes.');
+    S.conflict = false; S.savedNote = null; S.pick = false;
+    if (S.kind === 'new') { delete mem['']; S.draft = null; U.toast('Discarded the new template.'); U.changed(); U.go('home:'); return; }
+    delete mem[S.sel];
+    var t = find(S.sel);
+    if (t) loadFrom(t);
+    renderBody(); renderBar(); U.changed(); U.toast('Discarded the unsaved changes to ' + S.sel + '.');
   }
-  function leave() {
-    if (!changes()) return Promise.resolve(true);
-    var name = S.draft && S.draft.isNew ? 'The new template' : 'Template ' + S.sel;
-    return U.choose('Unsaved changes', '<p>' + U.esc(name) + ' has unsaved changes.</p>',
-      [{ label: 'Stay', value: 'stay' }, { label: 'Discard', value: 'discard' }, { label: 'Save', value: 'save', kind: 'primary' }]).then(function (v) {
-        if (v === 'discard') {
-          S.conflict = false;
-          if (S.draft && S.draft.isNew) { S.draft = null; S.base = null; } else open(find(S.sel));
-          renderList(); renderEdit(); renderBar();
-          return true;
-        }
-        if (v === 'save') return save();
-        return false;
-      });
+  function startNew(draft) {
+    stash();
+    if (draft) mem[''] = { draft: draft, base: null };
+    U.go('template:');
   }
 
   function save() {
-    if (!changes() || S.saving) return Promise.resolve(!changes());
-    var t = S.sel && find(S.sel), req, label;
+    if (!changes() || S.saving || S.conflict || ro()) return Promise.resolve(!changes());
+    var t = S.sel && find(S.sel), req, label, isNew = S.kind === 'new';
     if (S.draft) {
       var why = problem(S.draft);
       if (why) { U.toast(why, { level: 'bad' }); return Promise.resolve(false); }
       var body = spec(S.draft);
       label = S.draft.name;
-      req = S.draft.isNew ? U.api.post(vh() + '/templates', body) : U.api.post(vh() + '/templates/' + U.enc(label) + '/spec', body);
+      req = isNew ? U.api.post(vh() + '/templates', body) : U.api.post(vh() + '/templates/' + U.enc(label) + '/spec', body);
     } else {
-      var f = overlayForm(t);
-      if (f.overlay && !Array.prototype.some.call(el.edit.querySelectorAll('[data-io-enc]'), function (b) { return b.checked; })) { U.toast('No output picked: tick at least one.', { level: 'bad' }); return Promise.resolve(false); }
+      var f = S.form;
+      if (f.overlay && !el.body.querySelector('[data-io-enc]:checked')) { U.toast('No output picked: tick at least one.', { level: 'bad' }); return Promise.resolve(false); }
       label = t.name;
       req = U.api.post(vh() + '/templates/' + U.enc(label) + '/overlay', { overlay: f.overlay || null, encodes: f.encodes });
     }
-    var isNew = S.draft && S.draft.isNew;
     S.saving = true; renderBar();
+    var copies = isNew ? [] : U.streamsUsing(label).filter(function (s) { return s.own; });
     return req.then(function (res) {
       U.clearBanner('tpl');
-      U.toast((isNew ? 'Created template ' : 'Saved template ') + label + '.' + (isNew ? ' Next: step 3 uses it on streams.' : ''));
+      delete mem[isNew ? '' : label];
       // still saving until the new state is in, so the poll does not read this save as another session's
       return U.refreshState(true).then(function () {
         S.saving = false; S.conflict = false;
-        select(label);
+        if (isNew) { S.draft = null; U.toast('Created template ' + label + '. Use it on a stream from the stream view.'); U.go('template:' + label); }
+        else {
+          // the draft is saved now: without this, select() would stash it as unsaved work against the old base and
+          // bring it back as a conflict with this very save
+          S.kind = null;
+          select(label); renderHead(); renderBody(); renderUsedBy();
+          var live = ((res && res.live) || []).filter(function (x) { return x.application === U.app; });
+          S.savedNote = { title: 'Saved at ' + U.hhmm() + ': ' + label + '.', detail: (live.length ? 'Live on ' + live.map(function (x) { return x.stream; }).join(', ') + '. ' : '') +
+            (copies.length ? copies.map(function (s) { return s.name; }).join(', ') + (copies.length > 1 ? ' run their own copies' : ' runs its own copy') + ', not this save. Update in Used by.' : '') };
+          renderBar();
+        }
+        U.changed();
         // running streams that loaded this file show the overlay now; outputs wait for a restart
-        return U.afterTemplateWrite(res && res.live).then(function () { return isNew ? null : offerCopies(label); });
+        return U.afterTemplateWrite(res && res.live).then(function () { return isNew || !copies.length ? null : offerCopies(label, copies); });
       }).then(function () { return true; });
     }, function (e) { S.saving = false; renderBar(); U.banner('tpl', 'bad', 'Not saved.', e.message); return false; });
-  }
-
-  // streams with their own copy keep the old version until asked
-  function offerCopies(name) {
-    return U.api.get(vh() + '/templates/' + U.enc(name) + '/copies').then(function (r) {
-      var copies = (r && r.copies) || [];
-      if (!copies.length) return null;
-      var live = (U.appStreams || []).filter(function (s) { return s.publishing; }).map(function (s) { return s.name; });
-      var rows = copies.map(function (c) {
-        var on = live.indexOf(c.stream) >= 0;
-        return '<label class="check"><input type="checkbox" data-copy="' + U.esc(c.stream) + '" checked>' + U.esc(c.stream) + (on ? ' <span class="tag warn">publishing</span>' : '') + '</label>';
-      }).join('');
-      return U.prompt('Update the streams that use ' + name + '?', '<p>These streams have their own copy of ' + U.esc(name) + ' and keep the old version until updated.</p>' + rows +
-        '<p class="hint">A publishing stream shows the overlay change at once; new outputs need it restarted, which is offered next.</p>', 'Update', function (m) {
-          return Array.prototype.map.call(m.querySelectorAll('[data-copy]:checked'), function (b) { return b.getAttribute('data-copy'); });
-        }).then(function (streams) {
-          if (!streams || !streams.length) return null;
-          return U.api.post(vh() + '/templates/' + U.enc(name) + '/copies', { streams: streams }).then(function (r2) {
-            if (!(r2.live || []).length) U.toast('Updated ' + (r2.updated || []).join(', ') + '. Each picks it up when it next starts publishing.');
-            return U.afterTemplateWrite(r2.live).then(function () { return U.refreshState(true); });
-          });
-        });
-    });
   }
 
   function deleteTemplate() {
     var t = S.sel && find(S.sel);
     if (!t || !t.managed) { U.toast(t ? t.name + ' was not made here, so it is not deleted from here.' : 'Pick a template made here first.'); return; }
-    var users = streamsUsing(t.name), direct = users.filter(function (s) { return !s.own && s.publishing; });
+    var users = U.streamsUsing(t.name), direct = users.filter(function (s) { return !s.own && s.publishing; });
     if (direct.length) {
-      U.choose('Template ' + t.name + ' is in use', '<p>' + U.esc(direct.map(function (s) { return s.name; }).join(', ')) + ' ' + (direct.length > 1 ? 'are' : 'is') +
-        ' publishing with it as the application\'s default.</p><p>Change the application\'s default or the template of those streams first (step 3).</p>',
-        [{ label: 'Close', value: null }, { label: 'Go to step 3', value: 'go', kind: 'primary' }]).then(function (v) { if (v === 'go') U.go('uo-streams'); });
+      U.toast(direct.map(function (s) { return s.name; }).join(', ') + (direct.length > 1 ? ' are' : ' is') + ' publishing with ' + t.name + ' through the template order. Change the order or use another template on those streams first.', { level: 'bad' });
       return;
     }
     U.confirm('Delete template ' + t.name + '?', '<p>The file <code>transcoder/templates/' + U.esc(t.name) + '.xml</code> is deleted. This cannot be undone.</p>' +
@@ -873,29 +1030,41 @@
       (users.length ? '<p>Streams with their own copy keep running their copy: ' + U.esc(users.map(function (s) { return s.name; }).join(', ')) + '.</p>' : ''), 'Delete template', true).then(function (ok) {
         if (!ok) return;
         U.api.v2del('/transcoder/templates/' + U.enc(t.name)).then(function () {
-          S.sel = null; S.known = null; S.draft = null; S.base = null;
+          delete mem[t.name]; S.sel = null; S.kind = null; S.draft = null; S.base = null;
           U.toast('Deleted template ' + t.name + '.');
-          return U.refreshState(true).then(load);
+          return U.refreshState(true).then(function () { U.go('home:'); });
         }, function (e) { U.banner('tpl', 'bad', 'Not deleted.', e.message); });
       });
   }
 
-  U.views['uo-template'] = {
-    init: function (section) {
-      el.list = section.querySelector('[data-tpl-list]');
-      el.edit = section.querySelector('[data-tpl-edit]');
-      el.bar = section.querySelector('[data-tpl-bar]');
-      el.del = section.querySelector('[data-act=delete-template]');
-      el.edit.addEventListener('input', onEdit);
-      el.edit.addEventListener('change', onEdit);
-      section.querySelector('[data-act=new-template]').onclick = function () { leave().then(function (ok) { if (ok) startNew(); }); };
-      section.querySelector('[data-act=delete-template]').onclick = deleteTemplate;
-      S.sel = null;
+  U.screens.template = {
+    init: function (box) {
+      box.innerHTML = '<div class="pnl"><div class="ed-h" data-th></div><div class="pnl-b stack-4"><div data-reach></div><div data-tb></div><div data-used></div></div></div><div data-bar hidden></div>';
+      el = { head: box.querySelector('[data-th]'), reach: box.querySelector('[data-reach]'), body: box.querySelector('[data-tb]'), used: box.querySelector('[data-used]'), bar: box.querySelector('[data-bar]') };
+      mem = {};
     },
-    app: function () { S.sel = null; S.known = null; S.draft = null; S.base = null; S.conflict = false; },
-    show: function () { if (U.app) load(); },
-    state: function () { if (U.current === 'uo-template') load(); },
-    leave: function () { return leave(); },
-    save: function () { save(); }
+    show: function (name) {
+      if (!name && ro()) { U.go('home:'); return; }
+      if (name && !find(name)) { U.go('home:'); return; }
+      if (name !== S.sel || (name == null && S.kind !== 'new') || !S.kind) select(name || null);
+      renderHead(); renderBody(); renderUsedBy(); renderBar();
+      if (S.kind === 'new') { var n = el.body.querySelector('[data-d=name]'); if (n && !n.value) n.focus(); }
+    },
+    hide: function () { stash(); S.pick = false; },
+    state: function () { if (U.current() === 'template') onState(); },
+    app: function () { mem = {}; S.sel = null; S.kind = null; S.draft = null; S.form = null; S.base = null; S.conflict = false; S.lib = null; S.savedNote = null; },
+    access: function () { if (U.current() === 'template') { renderHead(); renderBody(); renderUsedBy(); renderBar(); } },
+    save: function () { save(); },
+    draftInfo: draftInfo,
+    unsaved: function () {
+      if (ro()) return [];
+      var out = [], cur = S.kind === 'new' ? '' : S.sel;
+      if (S.kind && changes() && !mem[cur]) out.push({ label: S.kind === 'new' ? 'New template' + (S.draft && S.draft.name ? ' ' + S.draft.name : '') : S.sel, detail: describe().join(', '), go: 'template:' + (cur || '') });
+      Object.keys(mem).forEach(function (n) {
+        var k = mem[n], c = k.draft ? JSON.stringify(spec(k.draft)) : k.form ? JSON.stringify(k.form) : null;
+        if (n === '' ? newChanged(k.draft, k.base) : c && c !== k.base) out.push({ label: n === '' ? 'New template' + (k.draft.name ? ' ' + k.draft.name : '') : n, go: 'template:' + n });
+      });
+      return out;
+    }
   };
 })();
