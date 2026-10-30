@@ -97,7 +97,21 @@
     var items = Array.prototype.slice.call(el.list.querySelectorAll('[data-items] [data-go]')).filter(function (b) { return b.getAttribute('data-go').indexOf('order:') !== 0; });
     var last = (U.view.last || {})[tab], pick = items.filter(function (b) { return b.getAttribute('data-go') === last; })[0] || items[0];
     if (pick) U.go(pick.getAttribute('data-go'), { tab: tab });
+    // an empty list opens what makes its first item, or On air when there is nothing to make
+    else U.go(tab === 'overlays' && !U.readOnly ? 'new-overlay:' : tab === 'templates' && !U.readOnly ? 'template:' : 'home:', { tab: tab });
   }
+  // what to open once go (for example "template:alex") is deleted: the row below it in the same list, else the one above
+  U.neighborOf = function (go) {
+    var all = Array.prototype.slice.call(el.list.querySelectorAll('[data-items] .li[data-go]')).map(function (b) { return b.getAttribute('data-go'); })
+      .filter(function (g) { return g !== 'new-overlay:' && g !== 'template:'; });
+    var i = all.indexOf(go);
+    return i < 0 ? null : all[i + 1] || all[i - 1] || null;
+  };
+  // after a delete the page stays in the list it was in: near, when it is still there, else the tab's first item
+  U.stayIn = function (tab, near) {
+    if (near && el.list.querySelector('[data-items] .li[data-go="' + CSS.escape(near) + '"]')) U.go(near, { tab: tab });
+    else setTab(tab);
+  };
   // the tab's head (search and New) is built once per tab, so typing in the search box keeps its focus
   function renderList() {
     var tab = U.view.tab;
@@ -156,7 +170,8 @@
       U.streams().forEach(function (s) {
         var sub = (s.publishing ? '' : 'Not publishing, ') + (s.overlay ? s.overlay : 'No overlay') + (s.restartNeeded ? ', restart pending' : '') + (s.added ? ', added here' : '');
         if (!matches(s.name + ' ' + sub)) return;
-        h.push(item('stream:' + s.name, s.publishing ? 'live' : '', U.esc(s.name), U.esc(sub), unsavedFor('stream:' + s.name), v.screen === 'stream' && v.id === s.name));
+        h.push(item('stream:' + s.name, s.publishing ? 'live' : '', U.esc(s.name), U.esc(sub), unsavedFor('stream:' + s.name), v.screen === 'stream' && v.id === s.name, null,
+          U.rowMenuHtml('stream:' + s.name, 'Actions for ' + s.name, U.streamItems(s.name))));
       });
       if (!U.streams().length) foot.innerHTML = '<p class="small faint lfoot">Streams show here while they publish. Add a name for one that has not started yet.</p>';
     } else if (tab === 'overlays') {
@@ -179,14 +194,16 @@
       var list = (U.templates || []).filter(function (t) { return t && !t.error && !U.copyBase(t) && !t.vif; });
       var mine = list.filter(function (t) { return t.overlay || t.managed; }), other = list.filter(function (t) { return !(t.overlay || t.managed); });
       function copyItem(c) {
-        var s = U.streamRow(c.name), sel = v.screen === 'template' && v.id === c.name;
-        return item('template:' + c.name, s && s.publishing ? 'live' : '', U.icon('sub') + U.esc(c.name), 'Copy for stream ' + U.esc(c.name) + (s && s.publishing ? ', publishing' : ''), '', sel, null,
-          U.rowMenuHtml('copy:' + c.name, 'Actions for the copy ' + c.name, [['update', 'Update from ' + U.copyBase(c)], ['stream', 'Open stream ' + c.name]]), 'lsub');
+        var s = U.streamRow(c.name), sel = v.screen === 'template' && v.id === c.name, behind = c.copyCurrent === false, base = U.copyBase(c);
+        return item('template:' + c.name, s && s.publishing ? 'live' : '', U.icon('sub') + U.esc(c.name), behind ? '<span class="warn-text">Differs from ' + U.esc(base) + '</span>' : 'Copy for stream ' + U.esc(c.name) + (s && s.publishing ? ', publishing' : ''), '', sel, null,
+          (behind && !U.readOnly ? '<button type="button" class="btn sm rowupd" data-write data-cupd="' + U.esc(c.name) + '" title="Copy ' + U.esc(base) + ' as saved now into ' + U.esc(c.name) + '">Update</button>' : '') +
+          U.rowMenuHtml('copy:' + c.name, 'Actions for the copy ' + c.name, [['update', 'Update from ' + base], ['stream', 'Open stream ' + c.name]]), 'lsub' + (behind ? ' behind' : ''));
       }
       function tplItem(t, master) {
         var users = U.streamsUsing(t.name), live = users.filter(function (s) { return s.publishing; });
         var copies = (U.templates || []).filter(function (c) { return c && U.copyBase(c) === t.name; });
-        var sub = (t.overlay ? t.overlay : 'No overlay') + (master ? ', ' + copies.length + ' stream cop' + (copies.length === 1 ? 'y' : 'ies') : t.shipped ? ', ships with WSE' : '');
+        var behind = copies.filter(function (c) { return c.copyCurrent === false; }).length;
+        var sub = (t.overlay ? t.overlay : 'No overlay') + (master ? ', ' + copies.length + ' stream cop' + (copies.length === 1 ? 'y' : 'ies') + (behind ? ', ' + behind + ' differ' + (behind === 1 ? 's' : '') : '') : t.shipped ? ', ships with WSE' : '');
         if (!matches(t.name + ' ' + sub + ' ' + copies.map(function (c) { return c.name; }).join(' '))) return '';
         return item('template:' + t.name, live.length ? 'on' : '', U.esc(t.name), U.esc(sub), unsavedFor('template:' + t.name), v.screen === 'template' && v.id === t.name, null,
           U.rowMenuHtml('template:' + t.name, 'Actions for ' + t.name, master ? [['dup', 'Duplicate...'], '-', ['del', 'Delete template...', true, !t.managed]] : [['dup', 'New master from this one']])) +
@@ -195,6 +212,13 @@
       var a = mine.map(function (t) { return tplItem(t, true); }).join(''), b = other.map(function (t) { return tplItem(t, false); }).join('');
       if (a) h.push('<li class="lgroup">Master templates' + U.tip('A master is where a template is edited. A stream runs its own copy of a master, made when it is put on the stream, so editing a master changes no stream until its copy is updated from it.') + '</li>' + a);
       if (b) h.push('<li class="lgroup">Other templates on this server</li>' + b);
+      // copies whose master is gone: nothing above lists them, and they cannot be updated
+      var orphans = (U.templates || []).filter(function (c) { return c && !c.error && U.copyBase(c) && !U.templateEntry(U.copyBase(c)); }).filter(function (c) { return matches(c.name + ' ' + U.copyBase(c)); });
+      if (orphans.length) h.push('<li class="lgroup">Copies without a master' + U.tip('Each is the own copy, for one stream, of a master that no longer exists. The stream still runs it; it can no longer be updated. Delete it to have the stream use the template order again.') + '</li>' + orphans.map(function (c) {
+        var s = U.streamRow(c.name);
+        return item('template:' + c.name, s && s.publishing ? 'live' : '', U.esc(c.name), 'Copy of ' + U.esc(U.copyBase(c)) + ', which no longer exists', '', v.screen === 'template' && v.id === c.name, null,
+          U.rowMenuHtml('copy:' + c.name, 'Actions for the copy ' + c.name, [['stream', 'Open stream ' + c.name], '-', ['del', 'Delete this copy...', true, !!(s && s.publishing)]]));
+      }).join(''));
     }
     var pages = U.overlayPagesNode, a = document.activeElement, kept = pages && a && pages.contains(a) ? a : null;
     box.innerHTML = h.join('') || '<li class="small faint" style="padding:8px 12px">Nothing matches.</li>';
@@ -452,6 +476,7 @@
     var t = e.target.closest && e.target.closest('button, [data-go], .scrim');
     if (!t || !root.contains(t)) { U.closeMenus(); return; }
     if (t.hasAttribute('data-rowfor')) { e.preventDefault(); e.stopPropagation(); U.openRowMenu(t); return; }
+    if (t.hasAttribute('data-cupd')) { e.preventDefault(); U.closeMenus(); U.rowActions.copy(t.getAttribute('data-cupd'), 'update'); return; }
     if (!t.closest('.menu')) U.closeMenus();
     if (t.hasAttribute('data-close-after')) closeDrawer();
     if (t.hasAttribute('data-go')) { e.preventDefault(); U.go(t.getAttribute('data-go')); return; }

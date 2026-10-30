@@ -1,26 +1,19 @@
-/* URL Overlay stream view: how one stream reaches viewers (input, template, outputs), what viewers of an output get,
-   the overlay on the stream (a staged swap), using a template on it with a dry run, and the restart. The save bar
-   covers only this screen's own changes; unsaved edits to the same overlay or template in their editors are linked,
-   never saved or discarded from here. Status per output is what the template is configured to do, labeled so. */
+/* URL Overlay stream view: how one stream reaches viewers (input, template, outputs), a preview of one output, the
+   addresses players open it at, and the template's actions (apply or change it with a dry run, stop using it) on the
+   template's menu. The overlay is the template's: it is changed in the template, not here. The save bar covers only
+   the dry run. Unsaved edits to the same overlay or template in their editors are linked, never saved from here. */
 (function () {
   'use strict';
   var U = window.UrlOverlay;
   var box = null, el = {};
-  // per stream, in memory: { swap: overlay name or '' (undefined when unchanged), dry: { template, plan, error } or null }
+  // per stream, in memory: { dry: { template, plan, error } or null }
   var mem = {};
-  var S = { name: null, status: null, preview: null, timer: null, out: null, watching: false, player: null, saving: false, lastEnc: null, saved: null };
+  var S = { name: null, status: null, preview: null, timer: null, out: null, watching: false, player: null, saving: false, lastEnc: null, saved: null, ptype: null };
 
-  function m(name) { return mem[name || S.name] || (mem[name || S.name] = { swap: undefined, dry: null }); }
+  function m(name) { return mem[name || S.name] || (mem[name || S.name] = { dry: null }); }
   function row() { return U.streamRow(S.name) || { name: S.name, publishing: false, template: null, own: false, added: true }; }
   function tpl() { return U.templateOfStream(row()); }
   function fileName(r) { return r.template ? String(r.template).replace(/\.xml$/i, '') : null; }
-  function swapOf(r) { var x = m(r.name).swap; return x === undefined || x === (r.overlay || '') ? undefined : x; }
-  // the streams that load the same file as this one, so a swap reaches them all
-  function reach(r) {
-    if (!r.template) return [];
-    if (r.own) return [r];
-    return (U.appStreams || []).filter(function (s) { return !s.own && s.template === r.template; });
-  }
   function outputs() {
     var st = S.status, t = st && st.transcoder;
     if (t && t.state === 'running' && (t.encodes || []).length) {
@@ -42,31 +35,35 @@
       (r.publishing ? '<span class="bdg on">On air</span><span class="small muted">' + (r.pulled ? 'Pulled' : r.arrives === 'server' ? 'Inside WSE' : 'Pushed') + (dec ? ', ' + dec : '') + '</span>' : '<span class="bdg">Not publishing</span>') +
       '<span class="spacer"></span>' + (r.publishing && n != null ? '<span class="small muted">' + U.viewersText(n) + '</span>' : '') +
       (r.publishing ? '<button type="button" class="btn sm" data-write data-restart>' + U.icon('refresh') + 'Restart ' + U.esc(r.name) + '</button>' : '') +
-      '<button type="button" class="btn sm" data-write data-usetpl>Use template on this stream</button>' +
-      (own ? U.menuHtml('st', 'More actions for ' + r.name, [['stopown', 'Stop using ' + own + '...', true]]) : '');
+      U.rowMenuHtml('stream:' + r.name, 'Actions for ' + r.name, streamItems(r));
     var b = el.head.querySelector('[data-restart]');
     if (b) b.onclick = function () { U.restartStream(r.name, false, r.restartNeeded ? 'Its template builds other outputs since it started; they take effect now. The overlay stays as it is.' : null); };
-    el.head.querySelector('[data-usetpl]').onclick = function () { openDry(); };
-    U.bindMenus(el.head);
-    var so = el.head.querySelector('[data-mi=stopown]');
-    if (so) so.onclick = stopUsing;
   }
+  // what a stream's menu offers, here and in the list
+  function streamItems(r) {
+    var base = U.baseOfStream(r);
+    return [['tpl', r.template ? 'Change template...' : 'Apply a template...'], ['stop', 'Stop using ' + (r.own && U.copyBase(r) ? U.copyBase(r) : 'its template') + '...', false, !r.own],
+      '-', ['dup', 'Duplicate...'], ['del', 'Delete...', true, r.publishing || (!r.own && !r.added)]];
+  }
+  U.streamItems = function (name) { return streamItems(U.streamRow(name) || { name: name, added: true }); };
   function renderPipe() {
     var r = row(), t = tpl(), base = U.baseOfStream(r), ov = r.overlay ? U.overlayEntry(r.overlay) : null, outs = outputs();
     var dec = S.status && S.status.transcoder && S.status.transcoder.decoderWidth ? S.status.transcoder.decoderWidth + ' x ' + S.status.transcoder.decoderHeight : null;
     if (!S.out || !outs.some(function (o) { return o.name === S.out; })) S.out = (outs.filter(function (o) { return o.carries; })[0] || outs[0] || {}).name || null;
     el.pipe.innerHTML = '<div class="pn pn-in"><span class="nk">Input</span><span class="ln"><b>' + (r.publishing ? (r.pulled ? 'Pulled stream' : r.arrives === 'server' ? 'Published inside WSE' : 'Pushed stream') : 'Waiting') + '</b></span>' +
         '<span class="ln">' + (r.publishing ? dec || 'Publishing' : 'No encoder connected') + '</span></div><span class="ar">' + U.icon('arrow') + '</span>' +
-      '<div class="pn pn-tpl"><span class="nk">Template</span>' + (r.template ?
-        '<span class="ln"><button type="button" class="linkbtn" data-go="template:' + U.esc(base || fileName(r)) + '"><b>' + U.esc(r.template) + '</b></button><span class="faint">' + (r.own ? 'own copy' : 'shared') + (r.restartNeeded ? ', restart pending' : '') + '</span></span>' +
+      '<div class="pn pn-tpl"><span class="nk">Template' + (r.template ? U.rowMenuHtml('tpl:' + r.name, 'Template actions for ' + r.name, [['tpl', 'Change template...'], ['stop', 'Stop using it...', true, !r.own], '-', ['open', 'Open ' + (base || fileName(r))]]) : '') + '</span>' + (r.template ?
+        '<span class="ln"><button type="button" class="linkbtn" data-go="template:' + U.esc(r.own ? fileName(r) : base || fileName(r)) + '"><b>' + U.esc(r.template) + '</b></button><span class="faint">' + (r.own ? 'copy of ' + U.esc(base || '') : 'shared') + (r.restartNeeded ? ', restart pending' : '') + '</span></span>' +
         (r.vif ? '<span class="ln faint">A VIF template; no overlay</span>' : ov ? '<button type="button" class="ovbadge" data-go="overlay:' + U.esc(ov.name) + '">' + U.icon('overlay') + U.esc(ov.name) + ', ' + (ov.pages || 0) + ' page' + (ov.pages === 1 ? '' : 's') + '</button>' :
           r.overlay ? '<span class="ln"><span class="dot bad"></span>' + U.esc(r.overlay) + ' does not exist</span>' : '<span class="ln faint">' + (t && !t.dynamicOverlays ? 'Cannot carry an overlay yet' : 'No overlay') + '</span>')
-        : '<span class="ln"><b>None</b></span><span class="ln faint">Not transcoded</span>') + '</div>' +
+        : '<span class="ln"><b>None</b></span><span class="ln faint">Not transcoded</span>' + (U.readOnly ? '' : '<button type="button" class="btn sm" data-applytpl>Apply a template</button>')) + '</div>' +
       '<span class="ar">' + U.icon('arrow') + '</span><div class="pn-outs" role="group" aria-label="Outputs, as configured; pick one to watch and check">' + (outs.length ? outs.map(function (o) {
         return '<button type="button" class="pn" aria-pressed="' + (o.name === S.out) + '" data-out="' + U.esc(o.name) + '"><span class="nk">Output</span><span class="ln"><b>' + U.esc(o.name) + '</b></span>' +
           '<span class="ln"><span class="dot"></span>' + U.esc(U.configuredText(o)) + '</span></button>';
       }).join('') : '<div class="pn"><span class="nk">Outputs</span><span class="ln faint">' + (r.template ? 'Known when the transcoder starts' : 'None') + '</span></div>') + '</div>';
     el.pipe.querySelectorAll('[data-out]').forEach(function (b) { b.onclick = function () { pickOut(b.getAttribute('data-out')); }; });
+    var ap = el.pipe.querySelector('[data-applytpl]');
+    if (ap) ap.onclick = function () { openDry(); };
   }
   function pickOut(name) {
     if (S.out === name) return;
@@ -75,51 +72,7 @@
     renderWatchBar(); renderSide();
   }
 
-  /* ---------- what viewers get: the checks from page to output ---------- */
-  // one check as a chip: the state at a glance, the sentence behind it in the tip
-  function li(dot, label, detail) {
-    var t = U.esc(String(detail).replace(/<br>/g, '; ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
-    return '<li class="ck ' + dot + '" tabindex="0" data-tip="' + t + '" aria-label="' + U.esc(label) + ': ' + t + '"><span class="dot ' + dot + '"></span>' + U.esc(label) + '</li>';
-  }
-  function whyHtml() {
-    var r = row(), st = S.status;
-    var h = '';
-    if (!r.publishing) {
-      h = li('', 'Not publishing', r.overlay ? U.esc(r.overlay) + ' shows on ' + (outputs().filter(function (o) { return o.carries; }).map(function (o) { return o.name; }).join(', ') || 'no output') + ' when it starts.' :
-        r.template ? 'No overlay will show: its template names none.' : 'No template applies to it, so it is not transcoded. Use a template on it to give it an overlay.');
-    } else if (!st) {
-      h = li('', 'Reading', 'Reading the status of ' + U.esc(r.name) + '.');
-    } else {
-      var t = st.transcoder || {}, tp = st.template || {}, from = st.overlayFrom || {}, d = st.draw, running = t.state === 'running';
-      var caps = (st.objects || []).filter(function (o) { return o.capture; });
-      var capsOk = caps.length > 0 && caps.every(function (o) { return o.capture.state === 'running' && o.capture.lastCaptureAt; });
-      var o = outputs().filter(function (x) { return x.name === S.out; })[0];
-      h += li(running ? 'on' : t.state === 'vif-template' ? '' : 'bad', 'Transcoder', running ? 'Running, decoding ' + t.decoderWidth + ' x ' + t.decoderHeight + '.' :
-        t.state === 'vif-template' ? 'Runs a VIF template, so no overlay is drawn.' : 'Not running: ' + U.esc(r.name) + ' is not transcoded, or its transcoder is off.');
-      if (running) {
-        h += li(tp.loaded ? 'on' : '', 'Template', tp.loaded ? U.esc(tp.loaded) + (tp.own ? ', its own copy' : ', from the template order') + '.' : 'Known when the transcoder starts.');
-        h += li(from.source === 'template' && !from.missing ? 'on' : from.missing ? 'bad' : '', 'Overlay', from.source === 'template' ? (from.missing ? U.esc(from.name) + ' is named by the template but does not exist in ' + U.esc(U.app) + '.' : U.esc(from.name) + ', from the template.') :
-          from.source === 'stream' ? 'Saved for this stream directly (an older setup).' : 'The template names no overlay.');
-        if (caps.length) h += li(capsOk ? 'on' : 'bad', 'Pages', caps.map(function (x) {
-          var c = x.capture;
-          return U.esc(x.id) + ': ' + U.esc(c.state) + (c.lastCaptureAt ? ', ' + U.ago(c.lastCaptureAt) : '') + (c.sharedBy > 1 ? ', browser shared by ' + c.sharedBy + ' streams' : '') +
-            (c.lastError && c.state !== 'running' ? ' (' + U.esc(c.lastError) + ')' : '');
-        }).join('<br>'));
-        if (d) h += li(d.slowCount || (d.avgMs || 0) > (d.maxDrawingTimeMs || 100) / 2 ? 'warn' : 'on', 'Burn-in ' + Math.round(d.avgMs || 0) + ' ms', Math.round(d.avgMs || 0) + ' ms per update of ' + (d.maxDrawingTimeMs || 100) + ' allowed' + (d.slowCount ? ', ' + d.slowCount + ' slow' : '') + '.');
-        // Chrome takes screenshots off the transcoder, which draws the last one it has meanwhile
-        var shots = caps.filter(function (x) { return x.capture.timing && x.capture.timing.screenshotMs != null; }).map(function (x) {
-          var tm = x.capture.timing, every = Math.max(tm.intervalMs || 0, tm.screenshotMs);
-          return (caps.length > 1 ? U.esc(x.id) + ': ' : '') + Math.round(tm.screenshotMs) + ' ms per screenshot, one every ' + (every >= 1000 ? (every / 1000).toFixed(1) + ' s' : Math.round(every) + ' ms');
-        });
-        if (shots.length) h += li('', 'Page screenshot', shots.join('; ') + '; the stream keeps the last picture meanwhile.');
-        if (o) h += li('', o.name + ', configured', U.esc(U.configuredText(o)) + '. Configuration only: whether the encoder drew it is not measured yet.');
-      }
-    }
-    if (r.restartNeeded) h += li('warn', 'Restart pending', 'Its template builds other outputs since it started; they take effect when ' + U.esc(r.name) + ' restarts. The overlay is not affected.');
-    return h;
-  }
-
-  // one sentence that leads the side column; the checks behind it stay under Details
+  // one sentence on what viewers of the picked output get
   function verdict() {
     var r = row(), st = S.status, o = outputs().filter(function (x) { return x.name === S.out; })[0];
     if (!r.publishing) return ['', 'Not publishing.'];
@@ -174,7 +127,7 @@
     S.player.load(url);
   }
 
-  /* ---------- the side column: other screens' unsaved work, what viewers get, the overlay on this stream ---------- */
+  /* ---------- the side column: other screens' unsaved work, what viewers get, where players open it ---------- */
   function scopeHtml() {
     if (U.readOnly) return '';
     var r = row(), h = '', base = U.baseOfStream(r);
@@ -187,50 +140,53 @@
   function renderSide() {
     var r = row(), o = S.out, oo = outputs().filter(function (x) { return x.name === o; })[0];
     el.scope.innerHTML = scopeHtml();
-    // an output that cannot carry an overlay has nothing to set here: say what it is and point at the ones that can
-    if (oo && (oo.passthrough || oo.audio)) {
-      var can = outputs().filter(function (x) { return x.carries; });
-      el.why.innerHTML = '<div class="sec-h">What viewers of ' + U.esc(o) + ' get</div><div class="passnote">' + U.icon(oo.audio ? 'audio' : 'input') +
-        '<div><b>' + (oo.audio ? 'Audio only' : 'The stream as it arrives') + '</b><span class="small muted">No overlay can be drawn on ' + (oo.audio ? 'audio' : 'a passthrough output') + '.</span></div></div>' +
-        (can.length ? '<div class="hrow chips"><span class="small muted">With the overlay:</span>' + can.map(function (x) { return '<button type="button" class="chip" data-pickout="' + U.esc(x.name) + '">' + U.icon('overlay') + U.esc(x.name) + '</button>'; }).join('') + '</div>' : '');
-      el.why.querySelectorAll('[data-pickout]').forEach(function (b) { b.onclick = function () { pickOut(b.getAttribute('data-pickout')); }; });
-      el.whyd.innerHTML = ''; el.cue.innerHTML = '';
-      return;
-    }
-    var v = verdict();
-    el.why.innerHTML = '<div class="sec-h">What viewers of ' + U.esc(o || r.name) + ' get</div><p class="verdict">' + (v[0] ? '<span class="dot ' + v[0] + '"></span>' : '') + '<span>' + v[1] + '</span></p>' +
-      '<ul class="checks" aria-label="Checks from page to output">' + whyHtml() + '</ul>';
-    el.whyd.innerHTML = '';
-    renderCue();
+    var v = oo && (oo.passthrough || oo.audio) ? ['', U.esc(o) + (oo.audio ? ' is audio only' : ' is the stream as it arrives') + ', so no overlay is drawn on it.'] : verdict();
+    el.why.innerHTML = '<p class="verdict">' + (v[0] ? '<span class="dot ' + v[0] + '"></span>' : '') + '<span>' + v[1] + '</span></p>' +
+      (r.restartNeeded ? '<p class="small warn-text" style="margin-top:6px">Its template builds other outputs since it started; they take effect when ' + U.esc(r.name) + ' restarts.</p>' : '');
+    renderPlay();
   }
-  // a poll does not redraw the select while it is in use
-  function renderCue(force) {
-    if (!force && el.cue.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
-    var r = row(), t = tpl(), sw = swapOf(r), cur = sw !== undefined ? sw : (r.overlay || '');
-    var h = '<div class="sec-h">Overlay' + U.tip('One overlay per stream. It is drawn on every output that carries it; passthrough and audio outputs never do.') + '</div>';
-    if (!r.template) h += '<p class="val faint">None. ' + U.esc(r.name) + ' is not transcoded; use a template on it first.</p>';
-    else if (r.vif) h += '<p class="val faint">None. It runs a VIF template.</p>';
-    else if (U.readOnly) h += '<p class="val">' + (r.overlay ? U.esc(r.overlay) : 'None') + '</p>' + U.roNote();
-    else if (!t || !t.managed) h += '<p class="val">' + (r.overlay ? U.esc(r.overlay) : 'None') + '</p><p class="small muted">' + U.esc(r.template) + ' was not written by URL Overlay, so its overlay is set in the template editor. ' +
-      '<button type="button" class="linkbtn" data-go="template:' + U.esc(U.baseOfStream(r) || '') + '"><b>Open ' + U.esc(U.baseOfStream(r) || r.template) + '</b></button></p>';
-    else {
-      var names = (U.overlays || []).map(function (x) { return x.name; });
-      if (r.overlay && names.indexOf(r.overlay) < 0) names.unshift(r.overlay);
-      var who = reach(r).map(function (s) { return s.name; });
-      h += '<select data-swap class="' + (sw !== undefined ? 'is-draft' : '') + '" aria-label="Overlay for ' + U.esc(r.name) + '"><option value="">None</option>' + names.map(function (n) {
-        return '<option value="' + U.esc(n) + '"' + (n === cur ? ' selected' : '') + '>' + U.esc(n) + (U.overlayEntry(n) ? '' : ', does not exist') + '</option>'; }).join('') + '</select>' +
-        '<div class="hrow chips">' + (sw !== undefined ? '<span class="chip-draft">Saved: ' + U.esc(r.overlay || 'None') + '</span>' : '') +
-        '<span class="bdg" title="The file this changes">' + U.icon('copy') + U.esc(r.template) + '</span>' +
-        (r.own ? '<span class="bdg">' + U.esc(r.name) + ' only</span>' : '<span class="bdg" title="Streams that load this file">' + U.icon('link') + U.esc(who.join(', ')) + '</span>') + '<span class="bdg on">Live on save</span></div>';
-    }
-    var caps = S.status && (S.status.objects || []).filter(function (x) { return x.capture; });
-    if (caps && caps.length) h += '<div class="sec-h" style="margin-top:12px">Pages' + U.tip('Pages of ' + (r.overlay || '') + ', shared by every stream that shows it.') + '</div><div class="checks">' + caps.map(function (x) {
-      var c = x.capture, bad = c.state === 'blocked' || c.state === 'error';
-      return '<span class="ck ' + (bad ? 'bad' : '') + '" tabindex="0" data-tip="' + U.esc(bad ? c.state + (c.lastError ? ': ' + c.lastError : '') : 'Captured ' + U.ago(c.lastCaptureAt)) + '"><span class="dot ' + (bad ? 'bad' : 'on') + '"></span>' + U.esc(x.id) + '</span>';
-    }).join('') + '</div>';
-    el.cue.innerHTML = h;
-    var s = el.cue.querySelector('[data-swap]');
-    if (s) s.onchange = function () { m(r.name).swap = s.value === (r.overlay || '') ? undefined : s.value; renderCue(true); renderBar(); U.changed(); };
+
+  /* ---------- playback addresses: each output and adaptive group, for the kinds the application serves ---------- */
+  // HLS and MPEG-DASH when the application lists their HTTP streamers; RTMP on the same streaming port
+  var KINDS = [['cupertinostreaming', 'HLS', '/playlist.m3u8'], ['mpegdashstreaming', 'MPEG-DASH', '/manifest.mpd'], ['rtmp', 'RTMP', '']];
+  function playHtml() {
+    var pv = S.preview, r = row();
+    if (!pv) return '<p class="small faint">' + (r.publishing || r.template ? 'Reading the playback addresses...' : 'Known once ' + U.esc(r.name) + ' is transcoded.') + '</p>';
+    var ports = pv.ports || {}, port = ports.http || ports.https, scheme = ports.http ? 'http' : 'https', host = window.location.hostname, app = pv.application || U.app;
+    if (!port) return '<p class="small faint">The application has no streaming port to play from.</p>';
+    var kinds = KINDS.filter(function (k) { return k[0] === 'rtmp' || (pv.streamers || []).indexOf(k[0]) >= 0; });
+    if (!kinds.some(function (k) { return k[0] === S.ptype; })) S.ptype = kinds[0][0];
+    var k = kinds.filter(function (x) { return x[0] === S.ptype; })[0];
+    var url = function (name) { return k[0] === 'rtmp' ? 'rtmp://' + host + ':' + port + '/' + app + '/' + name : scheme + '://' + host + ':' + port + '/' + app + '/' + name + k[2]; };
+    var outs = outputs().map(function (x) { return [x.name, x.stream, x.name === S.out]; });
+    var t = tpl(), groups = (t && t.groups || []).map(function (g) { return [g.name, 'ngrp:' + r.name + '_' + g.name, false, true]; });
+    var rows = outs.concat(k[0] === 'rtmp' ? [] : groups);
+    if (!rows.length) rows = [[r.name, r.name, true]];
+    return '<div class="seg play-k" role="radiogroup" aria-label="Playback type">' + kinds.map(function (x) {
+        return '<button type="button" role="radio" data-ptype="' + x[0] + '" aria-checked="' + (x[0] === S.ptype) + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+      '<ul class="play-l">' + rows.map(function (x) {
+        var u = url(x[1]);
+        return '<li' + (x[2] ? ' class="sel"' : '') + '><span class="pl-n">' + U.esc(x[0]) + (x[3] ? '<span class="bdg">adaptive</span>' : '') + '</span><code title="' + U.esc(u) + '">' + U.esc(u) + '</code>' +
+          '<button type="button" class="btn sm icon ghost" data-copyurl="' + U.esc(u) + '" aria-label="Copy the ' + U.esc(k[1]) + ' address of ' + U.esc(x[0]) + '" title="Copy">' + U.icon('copy') + '</button></li>';
+      }).join('') + '</ul>' +
+      '<p class="small faint">Addresses on this server as you reach it' + (k[0] === 'rtmp' ? '' : '; viewers outside your network may need its public name') + '.</p>';
+  }
+  function renderPlay() {
+    el.play.innerHTML = '<div class="sec-h">Playback' + U.tip('Where a player opens each output of ' + S.name + '. Adaptive groups let a player switch between outputs as bandwidth allows. Types are the ones ' + U.app + ' serves.') + '</div>' + playHtml();
+    el.play.querySelectorAll('[data-ptype]').forEach(function (b) { b.onclick = function () { S.ptype = b.getAttribute('data-ptype'); renderPlay(); }; });
+    el.play.querySelectorAll('[data-copyurl]').forEach(function (b) { b.onclick = function () { copyText(b.getAttribute('data-copyurl')); }; });
+  }
+  // the Manager is often served over plain http, where the clipboard API is not offered
+  function copyText(text) {
+    var done = function () { U.toast('Copied ' + text); };
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, function () { U.toast('Not copied. Select the address and copy it.', { level: 'bad' }); }); return; }
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    U.root.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    if (ok) done(); else U.toast('Not copied. Select the address and copy it.', { level: 'bad' });
   }
 
   /* ---------- use a template on this stream: a dry run, written only on Save ---------- */
@@ -287,11 +243,10 @@
     el.dry.querySelector('[data-dclose]').onclick = function () { m().dry = null; renderDry(); renderBar(); U.changed(); };
   }
 
-  /* ---------- the save bar: the dry run, or the overlay swap ---------- */
+  /* ---------- the save bar: the dry run ---------- */
   function changes() {
-    var r = row(), d = m().dry, sw = swapOf(r), out = [];
+    var r = row(), d = m().dry, out = [];
     if (d) out.push('Use ' + d.template + ' on ' + r.name);
-    else if (sw !== undefined) out.push(r.template + ' overlay: ' + (sw || 'none'));
     return out;
   }
   function impact() {
@@ -301,38 +256,18 @@
       return (removes ? r.overlay + ' leaves ' + r.name + ' now. ' : 'Overlay ' + (t && t.overlay !== (r.overlay || null) ? 'changes now' : 'unchanged') + '. ') +
         (r.publishing ? 'Outputs wait for a restart' + (n != null ? ' (' + U.viewersText(n) + ')' : '') + '.' : 'Applies when it starts publishing.') + (removes || r.own ? ' You confirm before it is written.' : '');
     }
-    var who = reach(r), live = who.filter(function (s) { return s.publishing; }).map(function (s) { return s.name; }), later = who.filter(function (s) { return !s.publishing; }).map(function (s) { return s.name; });
-    return (live.length ? 'Live now on ' + live.join(', ') + '.' : 'No stream that loads it is publishing.') + (later.length ? ' ' + later.join(', ') + ' gets it when it publishes.' : '');
+    return '';
   }
   function renderBar() {
     var d = m().dry;
     U.saveBar(el.bar, { changes: changes(), impact: impact(), saving: S.saving, problem: d && d.error ? d.error : d && !d.plan ? 'Checking what changes...' : null,
       saveLabel: d ? 'Use on ' + S.name : 'Save', saved: S.saved && S.saved.stream === S.name ? S.saved : null, onSave: save, onDiscard: discard });
   }
-  function discard() { var x = m(); x.dry = null; x.swap = undefined; render(); U.changed(); }
+  function discard() { var x = m(); x.dry = null; render(); U.changed(); }
   function save() {
     var r = row(), x = m();
-    if (S.saving || !changes().length) return;
-    if (x.dry) return saveUse(r, x.dry);
-    return saveSwap(r, swapOf(r));
-  }
-  function saveSwap(r, ov) {
-    var t = tpl(), who = reach(r), losing = r.overlay && ov !== r.overlay ? who.filter(function (s) { return s.publishing && s.overlay === r.overlay; }) : [];
-    var ask = !losing.length ? Promise.resolve(true) : U.confirm(r.overlay + ' leaves ' + losing.map(function (s) { return s.name; }).join(', ') + '?', '<ul>' + losing.map(function (s) {
-      var n = U.viewers(s);
-      return '<li><b>' + U.esc(r.overlay) + ' disappears' + (n != null ? ' for ' + U.viewersText(n) : '') + ' now</b> on ' + U.esc(s.name) + '.</li>';
-    }).join('') + '</ul><p>' + (ov ? U.esc(ov) + ' replaces it at once.' : 'No overlay replaces it.') + ' ' + U.esc(r.template) + ' is changed.</p>', 'Save', false);
-    return ask.then(function (ok) {
-      if (!ok) return;
-      S.saving = true; renderBar();
-      var encodes = ov && t && t.overlay ? (t.overlayEncodes || []) : [];
-      return U.api.post(U.vhostPath() + '/templates/' + U.enc(fileName(r)) + '/overlay', { overlay: ov || null, encodes: encodes }).then(function (res) {
-        S.saving = false; m(r.name).swap = undefined;
-        S.saved = { stream: r.name, title: 'Saved at ' + U.hhmm() + ': ' + r.template + ' overlay ' + (ov || 'none') + '.', detail: (res.live || []).length ? 'Live now on ' + res.live.map(function (x) { return x.stream; }).join(', ') + '.' : 'No stream that loads it is publishing.' };
-        U.changed();
-        return U.refreshState(true).then(function () { render(); return U.afterTemplateWrite(res.live); });
-      }, function (e) { S.saving = false; renderBar(); U.banner('swap', 'bad', 'Not saved.', e.message); });
-    });
+    if (S.saving || !x.dry) return;
+    return saveUse(r, x.dry);
   }
   function saveUse(r, d) {
     var t = U.templateEntry(d.template), n = U.viewers(r), removes = r.publishing && r.overlay && (!t || t.overlay !== r.overlay);
@@ -368,6 +303,70 @@
       });
   }
 
+  /* ---------- a stream's menu: its template, a duplicate, deleting it ---------- */
+  // a copy of the stream: the new name gets its own copy of the same template, after a dry run says what that changes
+  function duplicate(name) {
+    var r = U.streamRow(name) || { name: name }, base = U.baseOfStream(r);
+    U.choose('Duplicate ' + name, '<div class="fld"><label class="f" for="uo-dup-n">New stream name</label><input id="uo-dup-n" type="text" data-dupn value="' + U.esc(name + '-2') + '" spellcheck="false" autocomplete="off">' +
+      '<div class="hint">The name an encoder publishes it as. ' + (base ? 'It gets its own copy of ' + U.esc(base) + ', so it shows the same overlay and outputs.' : U.esc(name) + ' has no template, so only the name is added.') + '</div></div><p class="err" data-duperr></p>',
+      [{ label: 'Cancel', value: null }, { label: 'Duplicate', value: 'go', kind: 'primary' }]).then(function (v) {
+        if (v !== 'go') return;
+        var n = (U.dupName || '').trim();
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(n) || n.indexOf('..') >= 0) { U.toast('Stream name: letters, digits, dot, dash and underscore.', { level: 'bad' }); return; }
+        if (U.streamRow(n) || U.templateEntry(n)) { U.toast(n + ' is a stream or template name already.', { level: 'bad' }); return; }
+        if (!base) { if (U.added.indexOf(n) < 0) U.added.push(n); U.go('stream:' + n, { tab: 'streams' }); return; }
+        var path = U.appPath() + '/templates/assign';
+        U.api.get(path + '?scope=stream&template=' + U.enc(base) + '&stream=' + U.enc(n)).then(function (p) {
+          var app = p.transcoderTurnsOn ? '<p><b>This switches the transcoder on for ' + U.esc(U.app) + '</b>, which needs an application restart.</p>' :
+            p.templatesBefore !== p.templatesAfter ? '<p>' + U.esc(U.app) + ' is set to look for a template named after each stream first. That applies after an application restart.</p>' : '';
+          var ask = app ? U.confirm('Duplicate ' + name + ' as ' + n + '?', '<p>Writes <span class="mono">' + U.esc(n) + '.xml</span>, a copy of ' + U.esc(base) + '.</p>' + app, 'Duplicate', false) : Promise.resolve(true);
+          return ask.then(function (ok) {
+            if (!ok) return null;
+            return U.api.post(path, { scope: 'stream', template: base, stream: n }).then(function (res) {
+              if (U.added.indexOf(n) < 0) U.added.push(n);
+              U.toast(n + ' gets its own copy of ' + base + ' when it publishes.' + (res.restartRequired ? ' Restart ' + U.app + ' for the transcoder setting to take effect.' : ''));
+              return U.refreshState(true).then(function () { U.go('stream:' + n, { tab: 'streams' }); });
+            });
+          });
+        }).catch(function (e) { U.banner('dup', 'bad', 'Not duplicated.', e.message); });
+      });
+    var all = U.root.querySelectorAll('.modal'), dlg = all[all.length - 1], inp = dlg && dlg.querySelector('[data-dupn]');
+    U.dupName = inp ? inp.value : '';
+    if (inp) { inp.oninput = function () { U.dupName = inp.value; }; inp.focus(); inp.select(); }
+  }
+  // a stream that is not publishing: its own copy is deleted and the name forgotten here
+  function deleteStream(name) {
+    var r = U.streamRow(name) || { name: name, added: true };
+    if (r.publishing) { U.toast(name + ' is publishing. Stop it at its encoder first; its template can be stopped from its menu.', { level: 'bad' }); return; }
+    var forget = function () { U.added = (U.added || []).filter(function (x) { return x !== name; }); };
+    // a stream's copy is deleted from the template list too; the page stays in the list it was opened from
+    var tab = U.current() === 'template' ? 'templates' : 'streams', near = U.neighborOf((tab === 'templates' ? 'template:' : 'stream:') + name);
+    var here = (U.current() === 'stream' || U.current() === 'template') && U.view.id === name;
+    if (!r.own) { forget(); U.toast('Removed ' + name + ' from this list.'); U.changed(); return U.refreshState(true).then(function () { if (here) U.stayIn(tab, near); }); }
+    U.confirm('Delete ' + name + '?', '<p>Deletes <span class="mono">' + U.esc(r.template) + '</span>, ' + U.esc(name) + '\'s own copy' + (U.copyBase(r) ? ' of ' + U.esc(U.copyBase(r)) : '') + '. ' +
+      'If it publishes again it gets its template from the application\'s template order.</p><p>This cannot be undone.</p>', 'Delete', true).then(function (ok) {
+        if (!ok) return;
+        U.api.v2del('/transcoder/templates/' + U.enc(fileName(r))).then(function () {
+          forget(); delete mem[name];
+          U.toast('Deleted ' + name + '\'s template copy.');
+          return U.refreshState(true).then(function () { if (here) U.stayIn(tab, near); });
+        }, function (e) { U.banner('delstream', 'bad', 'Not deleted.', e.message); });
+      });
+  }
+  function onStream(name, then) { if (U.current() !== 'stream' || S.name !== name) U.go('stream:' + name, { tab: U.view.tab === 'onair' ? 'onair' : 'streams' }); then(); }
+  U.rowActions.stream = function (name, act) {
+    if (act === 'tpl') onStream(name, openDry);
+    else if (act === 'stop') onStream(name, stopUsing);
+    else if (act === 'dup') duplicate(name);
+    else if (act === 'del') deleteStream(name);
+  };
+  U.rowActions.tpl = function (name, act) {
+    var r = U.streamRow(name) || { name: name };
+    if (act === 'tpl') onStream(name, openDry);
+    else if (act === 'stop') onStream(name, stopUsing);
+    else if (act === 'open') U.go('template:' + (r.own ? fileName(r) : U.baseOfStream(r) || fileName(r)));
+  };
+
   /* ---------- status: only for the stream in view, while it is shown ---------- */
   function startStatus() {
     if (S.timer) S.timer.stop();
@@ -391,7 +390,7 @@
           renderSide();
         });
       }, function (e) {
-        if (S.name === name) el.why.innerHTML = '<div class="sec-h">What viewers get</div><p class="err">The status of ' + U.esc(name) + ' could not be read: ' + U.esc(e.message) + '</p>';
+        if (S.name === name) el.why.innerHTML = '<p class="err">The status of ' + U.esc(name) + ' could not be read: ' + U.esc(e.message) + '</p>';
       });
     });
   }
@@ -400,10 +399,10 @@
     init: function (b) {
       box = b;
       box.innerHTML = '<div class="pnl"><div class="sh" data-sh></div><div class="pipe" role="group" data-pipe></div><div data-dry></div>' +
-        '<div class="mon"><div><div class="mon-h" data-monh></div><div data-watch></div></div><div class="side"><div class="scope-lines" data-scope></div><div data-why></div><div data-cue></div><div data-whyd></div></div></div></div>' +
+        '<div class="mon"><div><div class="mon-h" data-monh></div><div data-watch></div></div><div class="side"><div class="scope-lines" data-scope></div><div data-why></div><div data-play class="play"></div></div></div></div>' +
         '<div data-bar hidden></div>';
       el = { head: box.querySelector('[data-sh]'), pipe: box.querySelector('[data-pipe]'), dry: box.querySelector('[data-dry]'), monh: box.querySelector('[data-monh]'), watch: box.querySelector('[data-watch]'),
-        scope: box.querySelector('[data-scope]'), why: box.querySelector('[data-why]'), whyd: box.querySelector('[data-whyd]'), cue: box.querySelector('[data-cue]'), bar: box.querySelector('[data-bar]') };
+        scope: box.querySelector('[data-scope]'), why: box.querySelector('[data-why]'), play: box.querySelector('[data-play]'), bar: box.querySelector('[data-bar]') };
       el.pipe.setAttribute('aria-label', 'How the stream reaches viewers');
     },
     show: function (name) {
@@ -425,9 +424,8 @@
     unsaved: function () {
       var out = [];
       Object.keys(mem).forEach(function (n) {
-        var x = mem[n], r = U.streamRow(n) || { name: n, overlay: null };
+        var x = mem[n];
         if (x.dry) out.push({ label: n + ': use ' + x.dry.template, detail: 'dry run', go: 'stream:' + n });
-        else if (x.swap !== undefined && x.swap !== (r.overlay || '')) out.push({ label: n + ': overlay ' + (x.swap || 'none'), go: 'stream:' + n });
       });
       return out;
     }

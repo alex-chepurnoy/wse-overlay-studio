@@ -65,6 +65,17 @@ public class PreviewConfig extends StreamResourceBase
 		p.put("http", http);
 		p.put("https", https);
 		body.put("ports", p);
+		// the application's HTTP streamers (Application.xml HTTPStreamers), for the playback addresses the page offers
+		List<String> streamers = new ArrayList<>();
+		for(String s: String.valueOf(appInstance.getHTTPStreamerList()).split(","))
+		{
+			if(!s.isBlank() && !s.trim().equals("null"))
+			{
+				streamers.add(s.trim());
+			}
+		}
+		body.put("streamers", streamers);
+		body.put("application", app);
 		return true;
 	}
 

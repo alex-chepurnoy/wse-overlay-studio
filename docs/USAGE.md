@@ -1,114 +1,168 @@
 # Using URL Overlay
 
-Open WSE Manager, choose **URL Overlay** in the top bar, and pick an application in the header. The page follows four
-steps, left to right, and marks each one done from what exists on the server. It keeps itself current: a change made
-in another browser, through REST or by editing a file shows within a few seconds.
+Open WSE Manager, choose **URL Overlay** in the top bar, and pick an application in the header. The page keeps itself
+current: a change made in another browser, through REST or by editing a file shows within a few seconds.
 
-An overlay reaches viewers only through a transcoder template: the overlay is named in a template, the template is
-used by a stream, and the outputs that template builds carry the overlay.
+An overlay reaches viewers only through a transcoder template: the overlay is named in a template, a stream runs that
+template, and the outputs that template builds carry the overlay.
 
 Changes need a WSE administrator (a REST user in the `admin` group). Anyone else sees the page read only.
 
 The screenshots use a test feed from *Big Buck Bunny* (c) Blender Foundation, www.bigbuckbunny.org, licensed under
 CC BY 3.0, with a public clock page as the overlay.
 
-## 1. Overlay
+## The page
 
-![Overlay step](images/usage-1-overlay.png)
+The header shows the capture service, the browsers in use, the pages capturing, streams waiting for a restart,
+unsaved work and the streams on air. Each item opens the status drawer, except On air, which opens the On air list. **Help** lists the keyboard shortcuts, the
+gear opens **Settings**, and the last button switches between the light and dark theme.
+
+The list column has four tabs: **On air**, **Overlays**, **Templates** and **Streams**. The center shows the item picked
+in the list. Every row in a list has a menu (**...**) with its actions. Deleting an item keeps the page in the same
+list, on the next item.
+
+Nothing is written while you edit. Each screen has one save bar at the bottom for its own object; unsaved work stays
+while the page is open.
+
+## On air
+
+![On air](images/usage-1-on-air.png)
+
+The application's publishing streams: each one's overlay and the outputs its template is configured to build, and
+viewers on this server. The stream name, the overlay and the outputs each open their own screen. The list column
+filters the streams: all on air, needing attention (a restart pending, or a template naming an overlay that does not
+exist), healthy, and not publishing.
+
+## Create a new overlay
+
+![Create a new overlay](images/usage-2-create.png)
+
+**Create a new overlay** on On air puts a web page on a stream in four steps:
+
+1. **Overlay**: paste the page's address. The server captures it once before anything is saved, and places it inside
+   title safe on a publishing stream. Or pick an overlay you already made.
+2. **Template**: pick the renditions that carry the overlay, as a ladder.
+3. **Stream**: pick a publishing stream, or name one that has not started yet. A dry run says what is written and
+   whether a restart is needed before you apply it.
+4. **Preview**: watch each output, marked as measured or as configured.
+
+## Overlays
+
+![Overlay editor](images/usage-3-overlay.png)
 
 An overlay is a named set of pages placed on the video, saved per application in
 `conf.modules/urloverlay/<application>/<overlay>.json`.
 
-- **New** makes an overlay. Add a page by its URL; the page list draws the top entry on top, and entries can be
-  dragged to reorder.
-- **The preview** shows a publishing stream with each page's latest capture placed on it. Drag a page to move it,
-  drag its corners to resize it, or nudge it with the arrow keys.
+- **Pages** are listed under the open overlay in the list column; the top one draws on top, and rows can be dragged
+  to reorder. **Add page** is last. Each page's menu moves it up or down or removes it.
+- **The overlay's menu** adds a page, duplicates the overlay, or deletes it. An overlay a template carries cannot be
+  deleted until no template names it.
+- **The canvas** shows the pages on a publishing stream picked under **Background**. The background is only for placing
+  pages: when that stream does not show this overlay, the frame says *Background only*. Drag a page to move it, drag
+  its corners to resize it, or nudge it with the arrow keys. **Safe area** shows title safe.
 - **The inspector** has four tabs for the selected page:
 
 | Tab | Settings |
 |---|---|
-| Page | Page URL (http or https, no `user:password`); browser width and height the page is rendered at |
-| Transparency | The capture as taken and after keying side by side; click the left one to pick the key color. Tolerance (0 to 255); whether to paint the page's own background with the key color |
-| Placement | X, Y, width and height on the source picture; opacity; **Crop the page** to show only part of it, such as just the clock |
+| Page | Page URL (http or https, no `user:password`); browser width and height the page is rendered at; **Capture speed** for every page of the overlay (Standard 0.5 s, Fast 0.25 s, Fastest 0.1 s, or any value in seconds); **Advanced drawing**: snap to even pixels, compose in the background, slow compose warning |
+| Place | X, Y, width and height on the source picture; opacity |
+| Key, crop | The capture as taken and after keying side by side; click the left one to pick the key color. Tolerance (0 to 255); whether to paint the page's own background with the key color; drag across the page to show only part of it, such as just the clock |
 | Timing | Wait after load before the first capture; reload the page every N seconds (0 never) |
 
-Edits show in the preview within about a second, marked **draft**. Nobody watching sees them until **Save** in the
-bar at the bottom, which says how many live streams it updates. **Discard** drops them; `Ctrl+Z` undoes. Saving
-updates every running stream showing the overlay at once, with no restart. Streams showing the same page share one
-browser.
+Edits show on the canvas within about a second, marked unsaved. Nobody watching sees them until **Save**, which says
+how many live streams it updates. **Discard** drops them; `Ctrl+Z` undoes. Saving updates every running stream showing
+the overlay at once, with no restart. Streams showing the same page share one browser.
 
-## 2. Template
+## Templates
 
-![Template step](images/usage-2-template.png)
+![Template editor](images/usage-4-template.png)
 
-Every transcoder template in the virtual host's `transcoder/templates/` is listed, grouped by whether it carries a URL
-overlay, with a verdict on whether it can.
+Every transcoder template in the virtual host's `transcoder/templates/` is listed:
 
-- **New template** starts from a ladder: **Original + overlay copy**, **1080p, 720p, 360p**, **720p, 360p**,
-  **Single 720p** or **Audio only**. Then add, remove and change outputs; each output can carry the overlay or not.
-- **Hardware** is chosen once for the whole template: CPU, NVIDIA, Intel or NETINT. Anything but CPU needs that
-  hardware on the server, and an overlay makes GPU frames go through system memory to be drawn on.
-- **Each output card**: Picture (size, fit, a region of the source), frame rate (same, half or a third of the
-  source; captions are dropped below full rate), Video (H.264, H.265, VP8, VP9, profile, bitrate, and for H.264 rate
-  control and speed), Audio (AAC or Opus, bitrate, mono or stereo, sample rate), Captions, and Expert (any encoder
-  parameter by name).
-- **Layers**: the URL overlay drawn once before scaling on every output, or on chosen outputs; up to eight image
-  overlays (a file from the virtual host's `content/` folder, or one uploaded into `content/urloverlay/`, at most
-  2 MB and 4096 pixels a side), each at one of nine positions (corners, edge centers or center) with an offset,
-  size and opacity.
-- **Decode**: deinterlace, and a minimum frame rate for sources that drop frames.
-- **Playback**: adaptive groups. Players open each output as `<stream>_<output>` and each group as
-  `ngrp:<stream>_<group>`.
-- An estimate of the encoding load is shown against the server's CPU cores. It assumes a 1080p, 30 fps source.
+- **Master templates** are the ones made here. You edit a master; putting it on a stream gives that stream its own
+  copy, `transcoder/templates/<stream>.xml`, listed under the master. Saving a master changes no stream until its copy
+  is updated. A copy that no longer matches its master says *Differs from <master>*, with **Update** beside it.
+- **Other templates on this server**, such as WSE's own `transrate`. **New master from this one** in its menu starts a
+  master from it.
+- **Copies without a master**: a stream's copy whose master was deleted. The stream still runs it; deleting it makes
+  the stream use the application's template order again.
 
-WSE's own templates (`transrate`, `transcode` and the others it ships) have dynamic overlays off, so they cannot
-carry an overlay as they are. **Use with an overlay** writes a copy that can. A template of your own can instead be
-changed in place; it is backed up first, and the dialog names the applications that use it. VIF templates are listed
-but cannot be used here.
+A master is edited in three parts:
 
-## 3. Streams
+- **Hardware** for the whole template: CPU, NVIDIA, Intel or NETINT, and the device. Beside it, what decodes, scales
+  and encodes. Anything but CPU needs that hardware on the server, and an overlay makes GPU frames go through system
+  memory to be drawn on.
+- **Decode**: deinterlace and a minimum frame rate for the source; the **URL overlay** this template draws, or **New URL
+  overlay**; whether it is drawn on the input (once, before scaling, on every output) or on chosen outputs; and up to
+  eight **image layers** (a file from the virtual host's `content/` folder, or one uploaded into `content/urloverlay/`,
+  at most 2 MB and 4096 pixels a side), each at one of nine positions with an offset, size and opacity.
+- **Encode**: the outputs, with an estimate of the encoding load (it assumes a 1080p, 30 fps source). A new master
+  starts from a ladder: **Original + overlay copy**, **1080p, 720p, 360p**, **720p, 360p**, **Single 720p** or
+  **Audio only**. Each output shows what scales and encodes it, and **Edit** opens Picture (size, fit, a region of the
+  source), Frame rate, Video (H.264, H.265, VP8, VP9, profile, bitrate, and for H.264 rate control and speed), Audio,
+  Captions and Expert (any encoder parameter by name). **Playback** sets adaptive groups: players open each output as
+  `<stream>_<output>` and each group as `ngrp:<stream>_<group>`.
 
-![Streams step](images/usage-3-streams.png)
+WSE's own templates have dynamic overlays off, so they cannot carry an overlay as they are. **Use with an overlay**
+writes a copy that can. A template of your own can instead be changed in place; it is backed up first, and the dialog
+names the applications that use it. VIF templates are listed but cannot be used here.
 
-The application's streams, publishing or with their own template, each with the template WSE would load for it and
-the overlay that template carries.
+## Streams
 
-- **Use a template on a stream** writes the stream's own copy, `transcoder/templates/<stream>.xml`, which WSE picks
-  before the application's default. Before writing, the page says what changes: whether the application's transcoder
-  is switched on, whether the stream leaves a VIF template, and when the stream picks the change up.
-- **What applies at once:** which overlay a template carries, and on which outputs.
-- **What waits for a restart:** new outputs, sizes or bitrates, or a different template. Such a stream is marked in
-  the list. **Restart now** resets a pulled stream, or disconnects an RTMP or RTP (RTSP, WebRTC) publisher so its
-  encoder reconnects with the new template. Viewers see a short gap. Other pushed streams must be restarted at the
-  encoder.
-- **Which template a stream gets** edits the application's `Transcoder/Templates` order (at most 12 entries): WSE
-  uses the first file in the list that exists for the stream. The new order is saved to `Application.xml`, backed up
-  first, and applies after the application restarts.
+![Stream view](images/usage-5-stream.png)
 
-The application picker also lists live applications without URL Overlay. **Add to <application>...** adds the module
-to its `Application.xml` (backed up, and taken out again by uninstall) and restarts the application, now or later.
-Streams publishing to it disconnect for a few seconds; the dialog names them first.
+The application's streams, publishing or with their own template copy. A stream's menu applies or changes its
+template, stops using it, duplicates the stream, or deletes it.
 
-## 4. Live
+- **Apply or change a template** writes the stream's own copy of a master. A dry run says first what changes: whether
+  the application's transcoder is switched on, whether the stream leaves a VIF template, and when it picks the change
+  up.
+- **Stop using it** deletes the stream's copy; the stream then gets its template from the application's template
+  order when it next starts.
+- **Duplicate** gives a new stream name its own copy of the same master, for an encoder that has not started yet.
+- **Delete** removes a stream's own copy and the name from the list. It is not offered while the stream publishes.
 
-![Live step](images/usage-4-live.png)
+The stream view shows the input, the template (with the same template actions in its menu) and the outputs. Pick an
+output to watch it, about 10 seconds behind live, with one sentence on what its viewers get. **Playback** lists the
+address of every output and adaptive group for HLS and MPEG-DASH, when the application serves them, and RTMP, each with
+a copy button. The addresses use the host name the page was opened with.
 
-One stream's output with the overlay, played in the page, and a row of checks: Transcoder, Template, Overlay, Pages,
-Burn-in cost, Page screenshot and Outputs with the overlay. The banner turns green only when an output viewers watch
-carries the overlay; otherwise each failed check says what is missing.
+**What applies at once:** which overlay a template carries, and on which outputs. **What waits for a restart:** new
+outputs, sizes or bitrates, or a different template; such a stream is marked in the header. **Restart** resets a pulled
+stream, disconnects an RTMP or RTP (RTSP, WebRTC) publisher so its encoder reconnects with the new template, or restarts
+the application for a stream published inside WSE. Viewers see a short gap. Other pushed streams must be restarted at
+the encoder.
 
-Previews play from the streaming port (1935 by default) at the host name the page was opened with. WSE's HTTP
-streamer allows this by default; setting `cupertinoCORSHeadersEnabled` or `httpCORSHeadersEnabled` to false stops it.
+Previews play from the streaming port (1935 by default). WSE's HTTP streamer allows this by default; setting
+`cupertinoCORSHeadersEnabled` or `httpCORSHeadersEnabled` to false stops it.
 
-## Server view
+The application picker also lists live applications without URL Overlay. **Add URL Overlay to <application>** adds the
+module to its `Application.xml` (backed up, and taken out again by uninstall) and restarts the application, now or
+later. Streams publishing to it disconnect for a few seconds; the dialog names them first.
 
-![Server view](images/usage-server.png)
+## Settings in the page
 
-**Server and Chrome** in the header opens a view of the capture service (version, account, browser sessions, memory per browser),
-Chrome and chromedriver with the last update check, the sandbox, and the network rules for captured pages with recent
-blocks. It is read only: each value names the setting behind it.
+![Settings](images/usage-6-settings.png)
 
-## Settings
+- **Pages captured at once** changes the capture service's limit while it runs, with no restart, and keeps it for its
+  next start. It starts from `maxCaptures` in `capture.properties`. On Linux the service's systemd unit caps its memory
+  at install time, and the page never sets more pages than that cap holds; the dialog says how many that is. Run the
+  installer again with a higher `maxCaptures` to raise the cap.
+- **Template order** edits the application's `Transcoder/Templates` (at most 12 entries): WSE uses the first file in
+  the list that exists for each stream. The new order is saved to `Application.xml`, backed up first, and applies after
+  the application restarts.
+- **Show WSE setting names under the fields**, for this browser.
+
+## Status drawer
+
+![Status drawer](images/usage-server.png)
+
+Any item in the header opens the status drawer: the capture service (version, account, sandbox), Chrome and
+chromedriver with the last update check, browsers open and the memory limit per browser, the network rules for captured
+pages with recent blocks, streams waiting for a restart, and unsaved work. It is read only: each value names the
+setting behind it.
+
+## Settings on the server
 
 ### `conf/Server.xml`
 
@@ -146,7 +200,7 @@ Written by the installer; restart `WowzaURLOverlayCapture` after a change.
 | `socket` | required | The Unix socket the service listens on; must match `UrlOverlayCaptureSocket` |
 | `chrome`, `chromedriver` | set by the installer | The Chrome and chromedriver the service runs |
 | `workDir` | required | Chrome profiles and work files |
-| `maxCaptures` | `4` | Browsers open at once; one more is refused |
+| `maxCaptures` | `4` | Browsers open at once when the service starts; one more is refused. **Settings** in the page changes it while the service runs |
 | `maxBrowserMemoryMB` | `1024` | A browser above this is restarted |
 | `logFile` | standard output | The service's log; the installer sets `capture.log` in the service's log folder |
 | `autoUpdate` | on | `false` stops the daily Chrome update. Read by the updater; the service itself logs it as an unknown setting and ignores it |
@@ -170,8 +224,8 @@ and all contain `UrlOverlay`. The capture service logs to `/var/log/wse-url-over
 | *Blocked host: <host> resolves to <address> (<rule>). Allow it with the UrlOverlayAllowHosts server property.* | The page's address is private, loopback, link-local, metadata or this server. See Settings. A block after loading (an image or script the page fetches) shows on the page row as *Blocked: <rule> <address>* |
 | *Blocked port: <port>. Pages are captured from ports ...; add others with the UrlOverlayAllowPorts server property.* | Add the port to `UrlOverlayAllowPorts` |
 | *Chrome did not start in its sandbox (...). Captures stay off until it does; the service never runs Chrome without its sandbox.* | On Ubuntu 23.10 and later the message continues *This system restricts unprivileged user namespaces ...*: the AppArmor profile `/etc/apparmor.d/wse-url-overlay-chrome` is missing or not loaded. Run the installer again, or check `aa-status`. On Windows, check that the service runs as `NT SERVICE\WowzaURLOverlayCapture` and can read the Chrome folder |
-| Overlay does not show on a stream | Step 4's checks. Usually the stream's template names no overlay, the transcoder is off, or the stream has not restarted since its outputs changed |
-| A stream runs a VIF template | The overlay is skipped on it. Give the stream its own URL Overlay template in step 3 |
+| Overlay does not show on a stream | The stream view's sentence under the player says why. Usually the stream's template names no overlay, the transcoder is off, or the stream has not restarted since its outputs changed |
+| A stream runs a VIF template | The overlay is skipped on it. Apply a URL Overlay template from the stream's menu |
 | Linux: the page renders without text | Install `fontconfig` and a font package such as `fonts-liberation` |
 | The installer stops with exit 3 | It cannot write to the WSE folder (run as administrator or with `sudo`), or WSE is running: stop it first |
 

@@ -192,7 +192,7 @@
     var t = S.sel && findAny(S.sel);
     if (S.sel && !t) {
       if (changes()) U.toast('Template ' + S.sel + ' was deleted in another session.', { level: 'bad' });
-      delete mem[S.sel]; S.sel = null; S.kind = null; U.go('home:'); return;
+      delete mem[S.sel]; S.sel = null; S.kind = null; U.stayIn('templates'); return;
     }
     if (t && S.known != null && t.modified !== S.known && !S.saving) {
       if (changes()) { S.conflict = true; S.theirs = t.modified; }
@@ -212,26 +212,8 @@
     var origin = S.kind === 'copy' ? 'Stream copy of ' + U.esc(U.copyBase(t)) : t.shipped ? 'Ships with WSE' : inPlace(t) ? 'Your template, overlays switched on here' : t.managed || t.overlay ? 'Master template' : t.vif ? 'Video Intelligence' : 'Not made here';
     el.head.innerHTML = '<h2>' + U.esc(t.name) + '</h2><span class="bdg' + (S.kind === 'builder' ? ' on' : '') + '">' + origin + '</span><span class="mono faint">' + U.esc(t.template) + '</span>';
   }
-  function renderUsedBy() {
-    var t = S.sel && find(S.sel);
-    el.used.innerHTML = '';
-    if (!t || S.kind === 'new' || S.kind === 'copy') { el.reach.innerHTML = ''; return; }
-    var users = U.streamsUsing(t.name), copies = users.filter(function (s) { return s.own; }), ord = users.filter(function (s) { return !s.own; });
-    var chip = function (s) {
-      var n = U.viewers(s);
-      return '<span class="uchip"><button type="button" class="chip" data-go="stream:' + U.esc(s.name) + '"><span class="dot ' + (s.publishing ? 'live' : '') + '"></span>' + U.esc(s.name) +
-        (s.publishing && n != null ? '<span class="faint" title="' + U.esc(U.viewersText(n)) + '">' + U.icon('eye') + n + '</span>' : '') + '</button>' +
-        (s.restartNeeded ? '<span class="bdg warn" title="New outputs wait for a restart">Restart</span>' : '') +
-        (s.own && !ro() ? '<button type="button" class="btn sm" data-write data-upcopy="' + U.esc(s.name) + '" title="Replace ' + U.esc(s.template) + ' with this template as saved">Update</button>' : '') + '</span>';
-    };
-    var group = function (title, tip, list, empty) {
-      return '<div class="ugroup"><span class="ug-h">' + title + U.tip(tip) + '</span><div class="ug-chips">' + (list.length ? list.map(chip).join('') : '<span class="faint small">' + empty + '</span>') + '</div></div>';
-    };
-    el.reach.innerHTML = '<div class="usedby" aria-label="Streams using this template">' +
-      group(U.icon('copy') + 'Stream copies', 'Each of these streams runs its own copy of this master. A save here does not reach them until you update the copy.', copies, 'None') +
-      group(U.icon('link') + 'Loaded directly', 'These streams load this file itself through the template order of ' + U.app + ', so a save reaches them. The overlay changes at once, outputs at their next restart.', ord, 'None in ' + U.esc(U.app)) + '</div>';
-    el.reach.querySelectorAll('[data-upcopy]').forEach(function (b) { b.onclick = function () { updateCopies(t.name, [b.getAttribute('data-upcopy')]); }; });
-  }
+  // who uses a master is in the list column beside it, with its copies and whether they still match
+  function renderUsedBy() { el.used.innerHTML = ''; el.reach.innerHTML = ''; }
   // right after a save: streams with their own copy still run the old version. One dialog shows the two steps,
   // update the copy and restart, and does both on one answer; Used by keeps Update for later
   function offerCopies(name, copies) {
@@ -832,7 +814,8 @@
   function renderCopy(t) {
     var base = U.copyBase(t), m = find(base), s = U.streamRow(t.name);
     el.body.innerHTML = '<div class="note"><span class="dot ' + (s && s.publishing ? 'live' : '') + '"></span><div><b>' + U.esc(t.name) + ' runs this copy of ' + U.esc(base) + '.</b> ' +
-      'It changes only when it is updated from ' + U.esc(base) + ', which replaces anything changed in it. To change it, edit the master and update.' +
+      (m ? 'It changes only when it is updated from ' + U.esc(base) + ', which replaces anything changed in it. To change it, edit the master and update.' :
+        U.esc(base) + ' no longer exists, so this copy cannot be updated. Deleting it makes ' + U.esc(t.name) + ' use the application\'s template order when it next starts.') +
       '<div class="hrow" style="margin-top:8px">' + (m ? '<button type="button" class="btn sm" data-go="template:' + U.esc(base) + '">Open ' + U.esc(base) + '</button>' : '<span class="bdg warn">' + U.esc(base) + ' no longer exists</span>') +
       (m && !ro() ? '<button type="button" class="btn sm" data-write data-cupd>Update from ' + U.esc(base) + '</button>' : '') +
       '<button type="button" class="btn sm ghost" data-go="stream:' + U.esc(t.name) + '">Open stream ' + U.esc(t.name) + '</button></div></div></div>' + outputsTable(t);
@@ -1006,7 +989,7 @@
   }
   function discard() {
     S.conflict = false; S.savedNote = null; S.pick = false;
-    if (S.kind === 'new') { delete mem['']; S.draft = null; U.toast('Discarded the new template.'); U.changed(); U.go('home:'); return; }
+    if (S.kind === 'new') { delete mem['']; S.draft = null; S.kind = null; U.toast('Discarded the new template.'); U.changed(); U.stayIn('templates'); return; }
     delete mem[S.sel];
     var t = find(S.sel);
     if (t) loadFrom(t);
@@ -1071,12 +1054,13 @@
       (inPlace(t) ? '<p>It is your own template with overlays switched on; its backup stays beside it.</p>' : '') +
       (users.length ? '<p>Streams with their own copy keep running their copy: ' + U.esc(users.map(function (s) { return s.name; }).join(', ')) + '.</p>' : ''), 'Delete template', true).then(function (ok) {
         if (!ok) return;
+        var near = U.neighborOf('template:' + t.name);
         U.api.v2del('/transcoder/templates/' + U.enc(t.name)).then(function () {
           delete mem[t.name];
           var here = S.sel === t.name;
           if (here) { S.sel = null; S.kind = null; S.draft = null; S.base = null; }
           U.toast('Deleted template ' + t.name + '.');
-          return U.refreshState(true).then(function () { if (here) U.go('home:'); });
+          return U.refreshState(true).then(function () { if (here) U.stayIn('templates', near); });
         }, function (e) { U.banner('tpl', 'bad', 'Not deleted.', e.message); });
       });
   }
@@ -1095,6 +1079,7 @@
     var c = findAny(name), base = c && U.copyBase(c);
     if (act === 'update' && base && find(base)) updateCopies(base, [name]);
     else if (act === 'stream') U.go('stream:' + name);
+    else if (act === 'del') U.rowActions.stream(name, 'del');
   };
 
   U.screens.template = {
@@ -1105,7 +1090,7 @@
     },
     show: function (name) {
       if (!name && ro()) { U.go('home:'); return; }
-      if (name && !findAny(name)) { U.go('home:'); return; }
+      if (name && !findAny(name)) { U.stayIn('templates'); return; }
       if (name !== S.sel || (name == null && S.kind !== 'new') || !S.kind) select(name || null);
       renderHead(); renderBody(); renderUsedBy(); renderBar();
       if (S.kind === 'new') { var n = el.body.querySelector('[data-d=name]'); if (n && !n.value) n.focus(); }

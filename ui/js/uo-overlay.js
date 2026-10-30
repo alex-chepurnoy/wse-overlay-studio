@@ -159,7 +159,7 @@
     if (!e) {
       // deleted in another session
       if (changes()) { U.toast('Overlay ' + S.name + ' was deleted in another session. Save puts your version back.', { level: 'bad' }); }
-      else { U.toast('Overlay ' + S.name + ' was deleted in another session.'); delete mem[S.name]; S.name = null; U.go('home:'); return; }
+      else { U.toast('Overlay ' + S.name + ' was deleted in another session.'); delete mem[S.name]; S.name = null; U.stayIn('overlays'); return; }
     }
     if (e && S.known != null && e.modified !== S.known && !S.saving) {
       if (S.justSaved) { S.known = e.modified; S.justSaved = false; }
@@ -904,12 +904,13 @@
     }
     U.confirm('Delete overlay ' + name + '?', '<p>Its pages and placement are deleted. No template carries it, so no stream changes. This cannot be undone.</p>', 'Delete overlay', true).then(function (ok) {
       if (!ok) return;
+      var near = U.neighborOf('overlay:' + name);
       U.api.del(ovPath(name)).then(function () {
         U.toast('Deleted overlay ' + name + '.');
         delete mem[name];
         var here = S.name === name;
         if (here) { S.name = null; S.saved = S.draft = null; }
-        return U.refreshState(true).then(function () { if (here) U.go('home:'); });
+        return U.refreshState(true).then(function () { if (here) U.stayIn('overlays', near); });
       }, function (e) { U.banner('ov', 'bad', 'Not deleted.', e.message); });
     });
   }

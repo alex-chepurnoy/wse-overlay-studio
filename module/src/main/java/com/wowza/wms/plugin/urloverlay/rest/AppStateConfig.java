@@ -190,6 +190,12 @@ public class AppStateConfig extends VHostResourceBase
 			try(InputStream in = Files.newInputStream(f.toPath()))
 			{
 				m.putAll(TemplateValidator.validate(in).toMap());
+				// a stream's copy says whether it still matches its master, so the list can offer an update
+				String base = TemplateFiles.copyBase(f.getName(), m.get("description") == null ? null : String.valueOf(m.get("description")));
+				if(base != null)
+				{
+					m.put("copyCurrent", TemplateFiles.copyIsCurrent(dir, base, f.getName().substring(0, f.getName().length() - 4)));
+				}
 			}
 			catch(Exception e)
 			{
