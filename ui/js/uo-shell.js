@@ -6,7 +6,7 @@
   var U = window.UrlOverlay;
   var root, el = {}, current = null, drawer = null, search = {};
   // which list tab each screen belongs to
-  var TAB = { home: 'onair', stream: 'streams', overlay: 'overlays', 'new-overlay': 'overlays', template: 'templates', order: 'templates', nomodule: null };
+  var TAB = { home: 'onair', stream: 'streams', overlay: 'overlays', 'new-overlay': 'overlays', template: 'templates', order: 'templates', nomodule: null, task: null };
   U.view = { screen: 'home', id: null, tab: 'onair', filter: 'all' };
 
   /* ---------- router ---------- */
@@ -32,9 +32,10 @@
     Object.keys(U.screens).forEach(function (k) { var s = el.center.querySelector('[data-screen="' + k + '"]'); if (s) s.hidden = k !== screen; });
     var scr = U.screens[screen];
     el.grid.classList.toggle('has-insp', !!scr.insp);
-    el.grid.classList.toggle('no-left', screen === 'nomodule');
+    // the task takes the full width: its stepper and summary replace the list column
+    el.grid.classList.toggle('no-left', screen === 'nomodule' || screen === 'task');
     el.grid.classList.remove('show-left'); el.grid.classList.remove('insp-open');
-    el.left.hidden = screen === 'nomodule';
+    el.left.hidden = screen === 'nomodule' || screen === 'task';
     el.insp.hidden = !scr.insp;
     if (!scr.insp) el.insp.innerHTML = '';
     saveView();
@@ -317,13 +318,8 @@
     el.list.removeAttribute('data-for');
     renderStrip();
     U.refreshState(true).then(function () {
-      var to = stored && stored.screen ? stored.screen + ':' + (stored.id || '') : 'home:';
-      // a stored object that no longer exists falls back to On air
-      if (stored && stored.screen === 'overlay' && !U.overlayEntry(stored.id)) to = 'home:';
-      if (stored && stored.screen === 'template' && stored.id && !U.templateEntry(stored.id)) to = 'home:';
-      if (stored && stored.screen === 'stream' && !U.streamRow(stored.id)) to = 'home:';
-      if (stored && stored.screen === 'new-overlay') to = 'home:';
-      U.go(keepView && current && current !== 'nomodule' ? current + ':' + (U.view.id || '') : to, { tab: U.view.tab === 'onair' ? null : U.view.tab, keepFilter: true });
+      // the page always opens on On air: what is live, and the way in to put a page on a stream
+      U.go(keepView && current && current !== 'nomodule' ? current + ':' + (U.view.id || '') : 'home:', { tab: keepView ? (U.view.tab === 'onair' ? null : U.view.tab) : 'onair', keepFilter: true });
     });
     U.startStatePoll();
   }

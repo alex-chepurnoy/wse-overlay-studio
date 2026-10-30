@@ -139,7 +139,7 @@
         if (!ok) return null;
         return request('PUT', V2 + '/applications/' + enc(app) + '/actions/restart').then(function () {
           U.toast('Restarted ' + app + '. Its streams start again in a few seconds.');
-          return U.refreshState(true);
+          return U.refreshState(true).then(function () { return true; });
         }, function (e) { U.banner('restart', 'bad', app + ' was not restarted.', e.message); });
       });
   };
@@ -154,7 +154,7 @@
       if (!ok) return null;
       return U.api.post(U.streamPath(U.app, stream) + '/restart', {}).then(function (r) {
         U.toast(r.how === 'reset' ? 'Reset ' + stream + '. Its new outputs start in a few seconds.' : 'Disconnected ' + stream + '\'s encoder. Its new outputs start when it reconnects.');
-        return U.refreshState(true);
+        return U.refreshState(true).then(function () { return true; });
       }, function (e) { U.banner('restart', 'bad', stream + ' was not restarted.', e.message); });
     });
   };
@@ -428,6 +428,30 @@
     outputs: '<path d="M4 6h16M4 12h11M4 18h7"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
+  };
+  U.debounce = function (fn, ms) { var t = null; return function () { var a = arguments, me = this; clearTimeout(t); t = setTimeout(function () { fn.apply(me, a); }, ms); }; };
+  // how often an overlay's pages are captured, as three named speeds plus the exact value. Measured on one page:
+  // 0.5 s about 12% of a CPU core, 0.25 s about 23%, 0.1 s about 54%, for the capture service
+  // (docs/perf/2026-10-30-thread-drawing-and-capture-rate.md)
+  U.SPEEDS = [[0.5, 'Standard', 'Scoreboards and lower thirds'], [0.25, 'Fast', 'Clocks; about twice the capture CPU'], [0.1, 'Fastest', 'About half a CPU core per page']];
+  U.speedHtml = function (value, attr, disabled) {
+    var known = U.SPEEDS.some(function (s) { return s[0] === value; });
+    return '<div class="speed"><span class="f">Update speed' + U.tip('How often each page is captured and redrawn on the video. Faster shows changes sooner and costs the capture service CPU; the transcoder cost hardly changes.') + '</span>' +
+      '<div class="seg" role="radiogroup" aria-label="Update speed">' + U.SPEEDS.map(function (s) {
+        return '<button type="button" role="radio" ' + attr + '="' + s[0] + '" aria-checked="' + (s[0] === value) + '" title="' + esc(s[2]) + '"' + (disabled ? ' disabled' : '') + '>' + s[1] + '<small>' + s[0] + ' s</small></button>';
+      }).join('') + (known ? '' : '<button type="button" role="radio" aria-checked="true" disabled>Custom<small>' + esc(value) + ' s</small></button>') + '</div>' +
+      '<span class="small muted">' + esc((U.SPEEDS.filter(function (s) { return s[0] === value; })[0] || [0, '', 'Set under Capture every'])[2]) + '</span></div>';
+  };
+  U.bindSpeed = function (root, attr, onPick) {
+    root.querySelectorAll('[' + attr + ']').forEach(function (b) {
+      b.onclick = function () {
+        var v = parseFloat(b.getAttribute(attr));
+        root.querySelectorAll('[' + attr + ']').forEach(function (x) { x.setAttribute('aria-checked', String(x === b)); });
+        var s = U.SPEEDS.filter(function (x) { return x[0] === v; })[0], note = b.closest('.speed').querySelector('.small');
+        if (s && note) note.textContent = s[2];
+        onPick(v);
+      };
+    });
   };
   // help that the eye can skip: a small "?" that shows the text on hover or focus, and reads it to a screen reader
   U.tip = function (text) { return '<button type="button" class="tip" aria-label="' + esc(text) + '" data-tip="' + esc(text) + '">?</button>'; };
