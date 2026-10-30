@@ -1,5 +1,5 @@
 /* URL Overlay overlay editor: a named overlay's pages placed over a live preview of a stream (the canvas), the page
-   list, and the inspector for the selected page. Edits stay in a draft until Save; a draft is kept in memory per
+   list under the overlay in the list column, and the inspector for the selected page. Edits stay in a draft until Save; a draft is kept in memory per
    overlay while the page is open, so leaving for another screen and coming back loses nothing. Placement is in
    source pixels: screen pixels / (frame width / source width), clamped to the frame.
    Also the New overlay screen, with a test capture before anything is written. */
@@ -166,7 +166,7 @@
       else if (changes()) { S.conflict = true; S.theirs = e.modified; }
       else { S.known = e.modified; U.toast('Overlay ' + S.name + ' was changed in another session. Showing the new version.'); open(S.name); return; }
     } else if (e && S.known == null) S.known = e.modified;
-    renderHead(); loadPreviewChoices(); renderBar();
+    renderHead(); loadPreviewChoices(); renderBar(); renderCaption();
   }
 
   /* ---------- the editor head: name, the templates that carry it, preview stream, menu ---------- */
@@ -358,8 +358,8 @@
   /* ---------- canvas ---------- */
   function renderStage() {
     if (S.player) { S.player.stop(); S.player = null; }
-    el.stage.innerHTML = '<div class="frame" data-frame aria-label="Canvas: pages over the preview"><video muted playsinline></video><div class="waiting" data-wait></div>' +
-      '<div class="safe" data-safe' + (S.guides ? '' : ' hidden') + '></div></div>';
+    el.stage.innerHTML = '<div class="frame" data-frame aria-label="Canvas: pages over a background stream"><video muted playsinline></video><div class="waiting" data-wait></div>' +
+      '<div class="safe" data-safe' + (S.guides ? '' : ' hidden') + '></div><span class="lbl top" data-airlbl hidden></span></div>';
     var v = el.stage.querySelector('video'), wait = el.stage.querySelector('[data-wait]');
     var url = U.hls(S.previewInfo && S.previewInfo.source && S.previewInfo.source.hls);
     if (S.preview && url && U.current() === 'overlay') {
@@ -377,10 +377,16 @@
     }
     placeBoxes(); renderCaption();
   }
+  // the stream behind the pages is only a background: whether viewers see this overlay on it is the template's doing
+  function onAirHere() { var r = S.preview && U.streamRow(S.preview); return !!(r && r.publishing && r.overlay === S.name); }
   function renderCaption() {
-    var dirty = !ro() && changes() > 0, s = src();
+    var dirty = !ro() && changes() > 0, air = onAirHere();
     el.caption.innerHTML = !S.preview ? '<span class="bdg">Blank frame</span>' :
-      dirty ? '<span class="chip-draft">Draft on ' + U.esc(S.preview) + '</span>' + U.tip('Shown on this preview only. Nothing is written until Save.') : '<span class="bdg">Saved, on ' + U.esc(S.preview) + '</span>';
+      (air ? '<span class="bdg on">On air on ' + U.esc(S.preview) + '</span>' : '<span class="bdg warn">Background only</span>' +
+        U.tip(S.preview + ' does not show ' + S.name + '. It is here to place the pages on. Viewers see an overlay only when the template a stream runs names it.')) +
+      (dirty ? '<span class="chip-draft">Unsaved</span>' + U.tip('Shown here only. Nothing is written until Save.') : '');
+    var lbl = el.stage.querySelector('[data-airlbl]');
+    if (lbl) { lbl.hidden = !S.preview || air; lbl.textContent = 'Background: ' + (S.preview || '') + '. Not on air with ' + S.name; }
   }
 
   function placeBoxes() {
@@ -488,24 +494,22 @@
   /* ---------- pages ---------- */
   function renderLayers() {
     var list = sorted();
+    el.pagesAdd.hidden = ro() || !S.draft;
     if (!list.length) {
-      el.layers.innerHTML = '<p class="empty-sm">No pages yet. Add the page with the clock and score.</p>';
+      el.layers.innerHTML = '<p class="small faint lpages-empty">No pages yet.</p>';
       return;
     }
-    el.layers.innerHTML = list.map(function (o) {
-      return '<div class="prow" data-id="' + U.esc(o.id) + '"' + (ro() ? '' : ' draggable="true"') + ' tabindex="0" role="button" aria-selected="' + (o.id === S.layer) + '">' +
-        (ro() ? '<span></span>' : '<span class="grip-h" aria-hidden="true">&#8942;&#8942;</span>') +
+    el.layers.innerHTML = list.map(function (o, i) {
+      return '<div class="prow" data-id="' + U.esc(o.id) + '"' + (ro() ? '' : ' draggable="true"') + ' tabindex="0" role="button" aria-selected="' + (o.id === S.layer) + '" title="' + (ro() ? '' : 'Drag to reorder; the top page draws on top') + '">' +
         '<div class="thumb"><img alt="" hidden></div><div style="min-width:0"><div class="nm"><span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) +
         (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + pageTag(o.id) + '</div>' +
         '<div class="sub">' + U.esc(o.type === 'webPage' ? host(o.url) : o.type) + '</div></div>' +
-        '<span class="acts" data-write><button class="btn sm icon ghost" type="button" data-mv="-1" aria-label="Move page ' + U.esc(o.id) + ' up" title="Move up">' + U.icon('up') + '</button>' +
-        '<button class="btn sm icon ghost" type="button" data-mv="1" aria-label="Move page ' + U.esc(o.id) + ' down" title="Move down">' + U.icon('down') + '</button>' +
-        '<button class="btn sm icon ghost danger-text" type="button" data-rm="' + U.esc(o.id) + '" aria-label="Remove page ' + U.esc(o.id) + '" title="Remove page (Delete)">' + U.icon('trash') + '</button></span></div>';
+        U.rowMenuHtml('page:' + o.id, 'Actions for page ' + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], '-', ['rm', 'Remove page', true]]) + '</div>';
     }).join('');
     var dragId = null;
     el.layers.querySelectorAll('.prow').forEach(function (l) {
       var id = l.getAttribute('data-id');
-      l.onclick = function (e) { if (e.target.closest('[data-rm],[data-mv]')) return; select(id); };
+      l.onclick = function (e) { if (e.target.closest('[data-rowfor]')) return; select(id); };
       l.onkeydown = function (e) { if (e.target === l && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(id); } };
       if (ro()) return;
       l.addEventListener('dragstart', function (e) { dragId = id; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', id); } catch (x) { /* old browsers */ } });
@@ -518,21 +522,30 @@
         order.splice(order.indexOf(id), 0, dragId);
         reorder(order);
       });
-      l.querySelectorAll('[data-mv]').forEach(function (b) {
-        b.onclick = function (e) {
-          e.stopPropagation();
-          var order = sorted().map(function (o) { return o.id; }), i = order.indexOf(id), j = i + (+b.getAttribute('data-mv'));
-          if (j < 0 || j >= order.length) return;
-          order[i] = order[j]; order[j] = id;
-          reorder(order);
-          var again = el.layers.querySelector('.prow[data-id="' + CSS.escape(id) + '"] [data-mv="' + b.getAttribute('data-mv') + '"]');
-          if (again) again.focus();
-        };
-      });
     });
-    el.layers.querySelectorAll('[data-rm]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); removePage(b.getAttribute('data-rm')); }; });
     showCaptures();
   }
+  function movePage(id, by) {
+    var order = sorted().map(function (o) { return o.id; }), i = order.indexOf(id), j = i + by;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    order[i] = order[j]; order[j] = id;
+    reorder(order);
+  }
+  U.rowActions.page = function (id, act) {
+    if (!byId(id) || ro()) return;
+    if (act === 'up') movePage(id, -1);
+    else if (act === 'down') movePage(id, 1);
+    else if (act === 'rm') removePage(id);
+  };
+  U.rowActions.overlay = function (name, act) {
+    if (act === 'dup') U.newOverlayFrom(name);
+    else if (act === 'addpage') {
+      if (U.current() === 'overlay' && S.name === name && S.draft) { startAdd(); return; }
+      // the flag is set only once this overlay is the one opening, so a navigation that did not happen leaves none
+      U.go('overlay:' + name);
+      if (U.current() === 'overlay' && S.name === name) { if (S.draft) startAdd(); else S.addOnOpen = name; }
+    } else if (act === 'del') deleteOverlay(name);
+  };
   // order: page ids, top first
   function reorder(order) {
     snapshot();
@@ -615,13 +628,14 @@
       var web = o.type === 'webPage', z = size(o), s = src(), past = (o.x || 0) + z.w > s.w * 0.95 || (o.y || 0) + z.h > s.h * 0.95;
       h = '<div class="pnl-h"><div><h3>' + U.esc(o.id) + '</h3>' + (web ? '<span class="capchip ' + pageDot(o.id) + '" data-capline title="' + U.esc(capLine(o.id).replace(/<[^>]+>/g, '')) + '"><span class="dot ' + pageDot(o.id) + '"></span>' + U.esc(capShort(o.id)) + '</span>' : '') +
         '</div><span class="spacer"></span><button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
-      var tabs = (web ? [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']] : [['place', 'Place']]).concat([['all', 'Overlay']]);
+      var tabs = web ? [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']] : [['place', 'Place']];
       if (!tabs.some(function (t) { return t[0] === S.inspTab; })) S.inspTab = tabs[0][0];
       h += '<div class="itabs" role="tablist" aria-label="Page settings">' + tabs.map(function (t) {
         return '<button type="button" role="tab" data-itab="' + t[0] + '" aria-selected="' + (S.inspTab === t[0]) + '" tabindex="' + (S.inspTab === t[0] ? 0 : -1) + '">' + t[1] + '</button>'; }).join('') + '</div>';
       var body = '';
       if (S.inspTab === 'page') body = fieldHtml('url', o.url, { saved: sv.url }) +
-        '<div class="grid2">' + fieldHtml('viewportWidth', o.viewportWidth, { placeholder: String(z.w), saved: sv.viewportWidth }) + fieldHtml('viewportHeight', o.viewportHeight, { placeholder: String(z.h), noHelp: true, saved: sv.viewportHeight }) + '</div>' + U.roNote();
+        '<div class="grid2">' + fieldHtml('viewportWidth', o.viewportWidth, { placeholder: String(z.w), saved: sv.viewportWidth }) + fieldHtml('viewportHeight', o.viewportHeight, { placeholder: String(z.h), noHelp: true, saved: sv.viewportHeight }) + '</div>' +
+        overlaySettings(d) + U.roNote();
       else if (S.inspTab === 'place') body = '<div class="grid2">' +
         fieldHtml('x', o.x || 0, { noHelp: true, saved: sv.x || 0 }) + fieldHtml('y', o.y || 0, { noHelp: true, saved: sv.y || 0 }) +
         fieldHtml('w', z.w, { noHelp: true, saved: sv.id ? size(sv).w : undefined }) + fieldHtml('h', z.h, { noHelp: true, saved: sv.id ? size(sv).h : undefined }) + '</div>' +
@@ -633,11 +647,10 @@
       if (web && capNote(o.id) === 'bad') h += '<section><div class="note bad" data-capnote><span class="dot bad"></span><div>' + capLine(o.id) + '</div></div></section>';
       if (body) h += '<section>' + body + '</section>';
     }
-    var sd = S.saved || {};
-    if (!o || S.inspTab === 'all') h += '<section>' + (o ? '' : '<div class="sec-h">Overlay, every page</div>') + U.speedHtml(+d.refreshRate, 'data-ospeed', ro()) + fieldHtml('refreshRate', d.refreshRate, { saved: sd.refreshRate }) + fieldHtml('evenCoords', !!d.even_coords, { saved: !!sd.even_coords }) +
-      fieldHtml('threadDrawing', d.threadDrawing !== false, { saved: sd.threadDrawing !== false }) + fieldHtml('maxDrawingTime', d.maxDrawingTime || F.maxDrawingTime.def, { saved: sd.maxDrawingTime || F.maxDrawingTime.def }) + U.roNote() + '</section>';
+    if (!o || !web) h += '<section>' + (o ? '' : '<div class="sec-h">Every page of ' + U.esc(S.name) + '</div>') + overlaySettings(d) + U.roNote() + '</section>';
     el.insp.innerHTML = h;
-    // a named speed fills in the exact value below it, so the draft, Save and Revert treat it as that field
+    el.insp.querySelectorAll('details[data-ovadv]').forEach(function (x) { x.addEventListener('toggle', function () { S.advOpen = x.open; }); });
+    // a named speed fills in the exact value beside it, so the draft, Save and Revert treat it as that field
     U.bindSpeed(el.insp, 'data-ospeed', function (v) { var i = el.insp.querySelector('[data-f=refreshRate]'); if (i) { i.value = v; i.dispatchEvent(new Event('input')); } });
     el.insp.querySelectorAll('[data-itab]').forEach(function (b) {
       b.onclick = function () { S.inspTab = b.getAttribute('data-itab'); renderInspector(); var t = el.insp.querySelector('[data-itab="' + S.inspTab + '"]'); if (t) t.focus(); if (S.inspTab === 'look' && o) captureSoon(o.id); };
@@ -655,6 +668,19 @@
     var raw = el.insp.querySelector('[data-raw]');
     if (raw && !ro()) raw.addEventListener('click', pickColor);
     if (o) bindCropper(o);
+  }
+
+  // the overlay's own settings, for every page in it: how often pages are captured, and how they are drawn
+  function overlaySettings(d) {
+    var sd = S.saved || {}, rr = d.refreshRate, draft = sd.refreshRate !== undefined && sd.refreshRate !== rr;
+    var every = ro() ? '<span class="every">every ' + U.esc(rr) + ' s</span>' :
+      '<label class="every" title="WSE setting refreshRate">every<input type="number" id="uo-f-refreshRate" data-f="refreshRate" class="num' + (draft ? ' is-draft' : '') + '" min="' + F.refreshRate.min + '" max="' + F.refreshRate.max + '" step="any" value="' + U.esc(rr) + '" aria-label="Capture every, seconds">s</label>';
+    return '<div class="ovset">' + U.speedHtml(+rr, 'data-ospeed', ro(), every) + '<div class="err" data-err-for="refreshRate"></div>' +
+      (draft ? '<div class="hint">Saved: every ' + U.esc(sd.refreshRate) + ' s</div>' : '') +
+      '<details class="adv" data-ovadv' + (S.advOpen ? ' open' : '') + '><summary>Advanced drawing</summary>' +
+      fieldHtml('evenCoords', !!d.even_coords, { saved: !!sd.even_coords }) +
+      fieldHtml('threadDrawing', d.threadDrawing !== false, { saved: sd.threadDrawing !== false }) +
+      fieldHtml('maxDrawingTime', d.maxDrawingTime || F.maxDrawingTime.def, { saved: sd.maxDrawingTime || F.maxDrawingTime.def }) + '</details></div>';
   }
 
   /* ---------- transparency and crop: the part of the captured page that is drawn ---------- */
@@ -723,7 +749,7 @@
 
   function onField(e) {
     var name = e.target.getAttribute('data-f'), f = F[name], o = byId(S.layer), v;
-    var fld = e.target.closest('.fld'), err = fld && fld.querySelector('[data-err-for]');
+    var fld = e.target.closest('.fld, .ovset'), err = fld && fld.querySelector('[data-err-for="' + name + '"]');
     if (f.scope !== 'overlay' && !o) return;
     if (f.type === 'bool') v = e.target.checked;
     else if (f.type === 'int' || f.type === 'num') {
@@ -736,7 +762,7 @@
     if (name === 'url') { var p = urlProblem(v); e.target.classList.toggle('invalid', !!p); if (err) err.textContent = p || ''; }
     if (name === 'keyColor') { var sw = el.insp.querySelector('[data-swatch]'); if (sw) sw.style.background = v; }
     snapshot('field:' + name);
-    if (f.scope === 'overlay') { S.draft[f.key] = v; if (name === 'evenCoords') renderCoords(); }
+    if (f.scope === 'overlay') { S.draft[f.key] = v; if (name === 'evenCoords') renderCoords(); if (name === 'refreshRate') U.syncSpeed(el.insp, 'data-ospeed', v); }
     else {
       if (v === null) delete o[f.key]; else o[f.key] = v;
       if (['x', 'y', 'w', 'h', 'opacity'].indexOf(name) >= 0) placeBoxes();
@@ -870,53 +896,56 @@
   }
 
   /* ---------- delete ---------- */
-  function deleteOverlay() {
-    var o = entry() || {}, live = U.liveShowing(S.name), tpls = o.templates || [];
+  function deleteOverlay(name) {
+    var o = U.overlayEntry(name) || {}, live = U.liveShowing(name), tpls = o.templates || [];
     if (tpls.length) {
-      U.toast('Templates carry ' + S.name + ': ' + tpls.join(', ') + (live.length ? ', and ' + live.join(', ') + ' show it' : '') + '. Take it off those templates first, so no stream names an overlay that does not exist.', { level: 'bad' });
+      U.toast('Templates carry ' + name + ': ' + tpls.join(', ') + (live.length ? ', and ' + live.join(', ') + ' show it' : '') + '. Take it off those templates first, so no stream names an overlay that does not exist.', { level: 'bad' });
       return;
     }
-    U.confirm('Delete overlay ' + S.name + '?', '<p>Its pages and placement are deleted. No template carries it, so no stream changes. This cannot be undone.</p>', 'Delete overlay', true).then(function (ok) {
+    U.confirm('Delete overlay ' + name + '?', '<p>Its pages and placement are deleted. No template carries it, so no stream changes. This cannot be undone.</p>', 'Delete overlay', true).then(function (ok) {
       if (!ok) return;
-      var name = S.name;
       U.api.del(ovPath(name)).then(function () {
         U.toast('Deleted overlay ' + name + '.');
         delete mem[name];
-        S.name = null; S.saved = S.draft = null;
-        return U.refreshState(true).then(function () { U.go('home:'); });
+        var here = S.name === name;
+        if (here) { S.name = null; S.saved = S.draft = null; }
+        return U.refreshState(true).then(function () { if (here) U.go('home:'); });
       }, function (e) { U.banner('ov', 'bad', 'Not deleted.', e.message); });
     });
   }
 
-  function renderAll() { renderHead(); renderStage(); renderLayers(); renderInspector(); renderBar(); loadPreviewChoices(); U.changed(); }
+  function renderAll() {
+    renderHead(); renderStage(); renderLayers(); renderInspector(); renderBar(); loadPreviewChoices(); U.changed();
+    // Add page from the list's menu, for an overlay that was not open yet
+    if (S.addOnOpen && S.addOnOpen === S.name && S.draft) { S.addOnOpen = null; startAdd(); }
+  }
 
   U.screens.overlay = {
     insp: true,
     init: function (box, insp) {
       box.innerHTML = '<div class="pnl"><div class="ed-h"><button type="button" class="btn sm ghost only-narrow" data-showlist aria-expanded="false"></button><h2 data-title></h2><span data-chips class="hrow"></span>' +
-        '<span class="spacer"></span><label class="small muted" for="uo-pv">Preview on</label><select id="uo-pv" data-preview></select>' +
+        '<span class="spacer"></span><label class="small muted" for="uo-pv">Background' + U.tip('A publishing stream to place the pages on. It does not put this overlay on that stream.') + '</label><select id="uo-pv" data-preview></select>' +
         '<label class="check small"><input type="checkbox" data-guides>Safe area</label>' +
-        '<button type="button" class="btn sm only-1200" data-togglei>' + U.icon('panel') + 'Inspector</button>' +
-        U.menuHtml('ov', 'More actions for this overlay', [['dup', 'Duplicate...'], '-', ['del', 'Delete overlay...', true]]) + '</div>' +
+        '<button type="button" class="btn sm only-1200" data-togglei>' + U.icon('panel') + 'Inspector</button></div>' +
         '<div class="canvas"><div data-stage></div><div class="canvas-bar"><span class="coords" data-coords></span><span class="spacer"></span><span class="hrow" data-caption></span></div>' +
-        '<p class="small warn-text" data-outside hidden></p></div>' +
-        '<div class="pages"><div class="pnl-h" style="min-height:40px"><h3>Pages</h3>' + U.tip('The top page draws on top. Drag a row, or use its arrows, to reorder.') + '<span class="spacer"></span>' +
-        '<button type="button" class="btn sm" data-write data-addpage>' + U.icon('plus') + 'Add page</button></div><div data-layers></div></div></div><div data-bar hidden></div>';
-      el = { stage: box.querySelector('[data-stage]'), coords: box.querySelector('[data-coords]'), preview: box.querySelector('[data-preview]'), layers: box.querySelector('[data-layers]'),
-        caption: box.querySelector('[data-caption]'), outside: box.querySelector('[data-outside]'), title: box.querySelector('[data-title]'), chips: box.querySelector('[data-chips]'),
+        '<p class="small warn-text" data-outside hidden></p></div></div><div data-bar hidden></div>';
+      // the page list lives in the list column, under the open overlay; the shell places it there
+      var pages = document.createElement('div');
+      pages.className = 'lpages';
+      pages.innerHTML = '<div data-layers></div><button type="button" class="lsub-add" data-write data-addpage>' + U.icon('plus') + 'Add page</button>';
+      U.overlayPagesNode = pages;
+      el = { stage: box.querySelector('[data-stage]'), coords: box.querySelector('[data-coords]'), preview: box.querySelector('[data-preview]'), layers: pages.querySelector('[data-layers]'),
+        pagesAdd: pages.querySelector('[data-addpage]'), caption: box.querySelector('[data-caption]'), outside: box.querySelector('[data-outside]'), title: box.querySelector('[data-title]'), chips: box.querySelector('[data-chips]'),
         listBtn: box.querySelector('[data-showlist]'), bar: box.querySelector('[data-bar]'), insp: insp, grid: U.root.querySelector('[data-grid]') };
       S.name = null; S.draft = S.saved = null; mem = {};
       el.preview.onchange = function () { setPreview(el.preview.value); };
-      box.querySelector('[data-addpage]').onclick = startAdd;
+      el.pagesAdd.onclick = startAdd;
       box.querySelector('[data-togglei]').onclick = U.toggleInsp;
       el.listBtn.onclick = function () { var on = !el.grid.classList.contains('show-left'); U.showList(on); el.listBtn.setAttribute('aria-expanded', String(on)); };
       box.querySelector('[data-guides]').onchange = function (e) {
         S.guides = e.target.checked;
         var g = el.stage.querySelector('[data-safe]'); if (g) g.hidden = !S.guides;
       };
-      U.bindMenus(box);
-      box.querySelector('[data-mi=dup]').onclick = function () { U.newOverlayFrom(S.name); };
-      box.querySelector('[data-mi=del]').onclick = deleteOverlay;
       U.listen(window, 'resize', function () { if (U.current() === 'overlay') placeBoxes(); });
       U.onShutdown(function () { if (S.player) S.player.stop(); });
     },
@@ -927,6 +956,7 @@
     },
     // the preview player stops while another screen is shown; the draft stays in memory
     hide: function () {
+      S.addOnOpen = null;
       if (S.player) { S.player.stop(); S.player = null; }
       if (S.statusTimer) S.statusTimer.stop();
       if (S.timer) S.timer.stop();

@@ -40,6 +40,10 @@ import com.wowza.wms.plugin.urloverlay.egress.AddressRules;
 public final class CaptureService
 {
 	public static final int DEFAULT_MAX_CAPTURES = 4;
+	/** The most pages the module may ask for at once; each is a Chrome of up to maxBrowserMemoryMB. */
+	public static final int MAX_CAPTURES_CEILING = 32;
+	/** What the installer's systemd unit leaves for the service itself on top of its browsers (CaptureSetup.unit). */
+	static final int SERVICE_OWN_MB = 768;
 	/**
 	 * Memory one Chrome may use, all its processes together, before it is restarted. A headless Chrome showing an
 	 * overlay page sits in the low hundreds of MB; a page that leaks grows without bound. 1 GB leaves room for a heavy
@@ -57,7 +61,12 @@ public final class CaptureService
 	private final Path workDir;
 	private final Path profilesDir;
 	private final String serverTag;
-	private final int maxCaptures;
+	private final int startMaxCaptures;
+	private volatile int maxCaptures;
+	// the most browsers the service's own memory cap holds, and that cap and its CPU limit when there are any
+	private volatile int ceiling = MAX_CAPTURES_CEILING;
+	private volatile long memoryMaxMb = -1;
+	private volatile double cpuLimit = -1;
 	private final int maxBrowserMb;
 	private final Object lock = new Object();
 	private int active = 0;
@@ -76,6 +85,7 @@ public final class CaptureService
 		this.profilesDir = workDir == null ? null : workDir.resolve("profiles");
 		this.serverTag = UUID.randomUUID().toString().substring(0, 8);
 		this.maxCaptures = maxCaptures > 0 ? maxCaptures : DEFAULT_MAX_CAPTURES;
+		this.startMaxCaptures = this.maxCaptures;
 	}
 
 	public static CaptureService get()
@@ -92,6 +102,8 @@ public final class CaptureService
 	public static CaptureService configure(Path workDir, int maxCaptures, int maxBrowserMb)
 	{
 		CaptureService s = new CaptureService(workDir.toAbsolutePath().normalize(), maxCaptures, maxBrowserMb);
+		String[] l = cgroupLimits(read(Path.of("/proc/self/cgroup")), CaptureService::read);
+		s.limits(l[0], l[1]);
 		instance = s;
 		return s;
 	}
@@ -104,6 +116,159 @@ public final class CaptureService
 	public int maxCaptures()
 	{
 		return maxCaptures;
+	}
+
+	/**
+	 * Takes the service's own limits into account: under systemd on Linux, the unit's MemoryMax and CPUQuota, read from
+	 * the cgroup v2 files memory.max ("max" or bytes) and cpu.max ("max 100000" or quota and period). More browsers than
+	 * the memory cap holds would get the whole service killed, so the limit is never raised past it.
+	 */
+	void limits(String memoryMax, String cpuMax)
+	{
+		try
+		{
+			if(memoryMax != null && !memoryMax.isBlank() && !memoryMax.trim().equals("max"))
+			{
+				memoryMaxMb = Long.parseLong(memoryMax.trim()) / (1024 * 1024);
+				ceiling = (int)Math.min(MAX_CAPTURES_CEILING, Math.max(startMaxCaptures, Math.max(1, (memoryMaxMb - SERVICE_OWN_MB) / maxBrowserMb)));
+			}
+			String[] cpu = cpuMax == null ? new String[0] : cpuMax.trim().split("\\s+");
+			if(cpu.length == 2 && !cpu[0].equals("max"))
+			{
+				cpuLimit = Double.parseDouble(cpu[0]) / Double.parseDouble(cpu[1]);
+			}
+		}
+		catch(NumberFormatException e)
+		{
+			log.warn("UrlOverlay capture: the service's cgroup limits could not be read: " + e.getMessage());
+		}
+	}
+
+	// at or above this, cgroup v1's memory.limit_in_bytes means no limit (it reads 9223372036854771712 then)
+	private static final long V1_UNLIMITED = 1L << 62;
+
+	/**
+	 * The process's memory cap and CPU limit in cgroup v2's own words ({memory.max, cpu.max}, null where unknown), from
+	 * /proc/self/cgroup and the files it points at: "0::<path>" for v2 (the unified hierarchy), or the "memory" and
+	 * "cpu" controller lines for v1 and hybrid hosts, whose memory.limit_in_bytes, cpu.cfs_quota_us and
+	 * cpu.cfs_period_us are turned into the same form. Anything absent or unreadable is null: no limit known.
+	 */
+	static String[] cgroupLimits(String self, java.util.function.Function<Path, String> read)
+	{
+		String[] out = new String[2];
+		if(self == null)
+		{
+			return out;
+		}
+		for(String line: self.split("\n"))
+		{
+			String[] p = line.trim().split(":", 3);
+			if(p.length < 3)
+			{
+				continue;
+			}
+			String path = p[2].trim();
+			if(p[0].equals("0") && p[1].isEmpty())
+			{
+				Path dir = Path.of("/sys/fs/cgroup" + path);
+				String m = read.apply(dir.resolve("memory.max")), c = read.apply(dir.resolve("cpu.max"));
+				if(out[0] == null && m != null)
+				{
+					out[0] = m.trim();
+				}
+				if(out[1] == null && c != null)
+				{
+					out[1] = c.trim();
+				}
+				continue;
+			}
+			java.util.List<String> controllers = java.util.Arrays.asList(p[1].split(","));
+			Path dir = Path.of("/sys/fs/cgroup/" + p[1] + path);
+			if(controllers.contains("memory") && out[0] == null)
+			{
+				String m = read.apply(dir.resolve("memory.limit_in_bytes"));
+				try
+				{
+					out[0] = m == null ? null : Long.parseLong(m.trim()) >= V1_UNLIMITED ? "max" : m.trim();
+				}
+				catch(NumberFormatException e)
+				{
+					out[0] = null;
+				}
+			}
+			if(controllers.contains("cpu") && out[1] == null)
+			{
+				String q = read.apply(dir.resolve("cpu.cfs_quota_us")), per = read.apply(dir.resolve("cpu.cfs_period_us"));
+				if(q != null && per != null)
+				{
+					out[1] = (q.trim().equals("-1") ? "max" : q.trim()) + " " + per.trim();
+				}
+			}
+		}
+		return out;
+	}
+
+	private static String read(Path p)
+	{
+		try
+		{
+			return java.nio.file.Files.isReadable(p) ? java.nio.file.Files.readString(p) : null;
+		}
+		catch(java.io.IOException | SecurityException e)
+		{
+			return null;
+		}
+	}
+
+	/** The most pages captured at once the service accepts: its memory cap's room, at most MAX_CAPTURES_CEILING. */
+	public int ceiling()
+	{
+		return ceiling;
+	}
+
+	/** The service's memory cap in MB, or -1 when it has none. */
+	public long memoryMaxMb()
+	{
+		return memoryMaxMb;
+	}
+
+	/** The CPU cores the service may use, or -1 when it is not limited. */
+	public double cpuLimit()
+	{
+		return cpuLimit;
+	}
+
+	/** The limit capture.properties set, which a change from the module replaces until the service restarts. */
+	public int startMaxCaptures()
+	{
+		return startMaxCaptures;
+	}
+
+	/**
+	 * Changes the number of pages captured at once. Pages already open stay open when the new limit is lower; new
+	 * ones wait until enough have closed.
+	 * @return the limit now in force
+	 */
+	public int setMaxCaptures(int n)
+	{
+		if(n < 1 || n > MAX_CAPTURES_CEILING)
+		{
+			throw new IllegalArgumentException("maxCaptures must be 1 to " + MAX_CAPTURES_CEILING + ", not " + n);
+		}
+		if(n > ceiling)
+		{
+			throw new IllegalArgumentException("The service's memory cap of " + memoryMaxMb + " MB (systemd MemoryMax) holds " + ceiling + " browsers of "
+					+ maxBrowserMb + " MB. Run the installer again with a higher maxCaptures to raise the cap, then set more pages here.");
+		}
+		synchronized(lock)
+		{
+			if(n != maxCaptures)
+			{
+				log.info("UrlOverlay capture: pages captured at once changed from " + maxCaptures + " to " + n);
+			}
+			maxCaptures = n;
+		}
+		return n;
 	}
 
 	public int activeCaptures()

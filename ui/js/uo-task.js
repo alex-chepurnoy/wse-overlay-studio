@@ -454,7 +454,7 @@
   U.screens.task = {
     init: function (b) {
       box = b;
-      box.innerHTML = '<div class="task"><ol class="tsteps" data-tsteps aria-label="Put a page on a stream"></ol><div class="tbody" data-tbody><div class="tmain" data-tmain></div><div class="tpanel tsum" data-tsum></div></div>' +
+      box.innerHTML = '<div class="task"><ol class="tsteps" data-tsteps aria-label="Create a new overlay and put it on a stream"></ol><div class="tbody" data-tbody><div class="tmain" data-tmain></div><div class="tpanel tsum" data-tsum></div></div>' +
         '<div class="tfoot" data-tfoot></div></div>';
       U.listen(window, 'resize', U.debounce(fit, 150));
       el = { steps: box.querySelector('[data-tsteps]'), body: box.querySelector('[data-tbody]'), main: box.querySelector('[data-tmain]'), sum: box.querySelector('[data-tsum]'), foot: box.querySelector('[data-tfoot]') };

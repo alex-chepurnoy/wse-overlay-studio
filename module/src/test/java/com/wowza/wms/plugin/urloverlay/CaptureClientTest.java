@@ -62,6 +62,11 @@ class CaptureClientTest
 		final java.util.concurrent.atomic.AtomicLong seq = new java.util.concurrent.atomic.AtomicLong(1);
 		final AtomicInteger frameRequests = new AtomicInteger();
 		volatile long slowMs = 0;
+		// the page limit: what it was sent, in order; above refuseAbove it answers an error; null tag is an older service
+		volatile String tag = "start-1";
+		final List<Integer> limits = new CopyOnWriteArrayList<>();
+		volatile int refuseAbove = Integer.MAX_VALUE;
+		volatile long limitsDelayMs = 0;
 		ServerSocketChannel server;
 
 		FakeService(Path socket, Color color, int protocol) throws IOException
@@ -106,7 +111,26 @@ class CaptureClientTest
 					byte[] body = null;
 					switch(m.str(Wire.OP))
 					{
-						case Wire.HELLO -> h.put("protocol", protocol);
+						case Wire.HELLO -> {
+							h.put("protocol", protocol);
+							if(tag != null)
+							{
+								h.put("serverTag", tag);
+							}
+						}
+						case Wire.LIMITS -> {
+							int n = ((Number)m.header().get("maxCaptures")).intValue();
+							sleep(limitsDelayMs);
+							limits.add(n);
+							if(n > refuseAbove)
+							{
+								h = Wire.error("over the memory cap");
+							}
+							else
+							{
+								h.put("maxCaptures", n);
+							}
+						}
 						case Wire.OPEN -> {
 							opened.add(PageRequest.fromMap(m.header()));
 							String id = "c" + ids.size();

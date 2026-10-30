@@ -327,13 +327,12 @@
     U.root.querySelectorAll('[data-menu-list]').forEach(function (l) {
       if (l === except) return;
       l.hidden = true;
-      var b = U.root.querySelector('[data-menu="' + l.getAttribute('data-menu-list') + '"]');
-      if (b) b.setAttribute('aria-expanded', 'false');
+      U.root.querySelectorAll('[data-menu="' + l.getAttribute('data-menu-list') + '"]').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
     });
   };
   // binds the menus inside box; call again after the box is re-rendered
   U.bindMenus = function (box) {
-    box.querySelectorAll('[data-menu]').forEach(function (b) {
+    box.querySelectorAll('[data-menu]:not([data-rowfor])').forEach(function (b) {
       b.onclick = function (e) {
         e.stopPropagation();
         var l = box.querySelector('[data-menu-list="' + b.getAttribute('data-menu') + '"]');
@@ -345,6 +344,38 @@
       };
     });
     box.querySelectorAll('[data-menu-list] button').forEach(function (i) { i.addEventListener('click', function () { U.closeMenus(); }); });
+  };
+  // items: [[act, label, danger, disabled], '-', ...]; for: what the actions are on, as "kind:id" (U.rowActions[kind])
+  U.rowMenuHtml = function (target, label, items) {
+    return '<button type="button" class="btn sm icon ghost rowmenu" data-write aria-haspopup="menu" aria-expanded="false" aria-label="' + esc(label) + '" title="' + esc(label) + '" data-menu="rowfloat" data-rowfor="' + esc(target) + '" data-rowitems="' +
+      esc(JSON.stringify(items)) + '">' + U.icon('more') + '</button>';
+  };
+  U.rowActions = {};
+  U.openRowMenu = function (b) {
+    var l = U.root.querySelector('[data-menu-list="rowfloat"]');
+    if (!l) { l = document.createElement('div'); l.className = 'menu-list rowfloat'; l.setAttribute('role', 'menu'); l.setAttribute('data-menu-list', 'rowfloat'); l.hidden = true; U.root.appendChild(l); }
+    var was = !l.hidden && l.getAttribute('data-for') === b.getAttribute('data-rowfor');
+    U.closeMenus();
+    if (was) return;
+    var items = JSON.parse(b.getAttribute('data-rowitems') || '[]'), target = b.getAttribute('data-rowfor');
+    l.setAttribute('data-for', target);
+    l.innerHTML = items.map(function (i) {
+      return i === '-' ? '<hr>' : '<button type="button" role="menuitem" data-rowact="' + esc(i[0]) + '"' + (i[2] ? ' class="danger"' : '') + (i[3] ? ' disabled' : '') + '>' + esc(i[1]) + '</button>';
+    }).join('');
+    l.hidden = false;
+    b.setAttribute('aria-expanded', 'true');
+    var r = b.getBoundingClientRect(), w = l.offsetWidth, h = l.offsetHeight;
+    l.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left)) + 'px';
+    l.style.top = (r.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 4) : r.bottom + 4) + 'px';
+    l.querySelectorAll('[data-rowact]').forEach(function (x) {
+      x.onclick = function (e) {
+        e.stopPropagation();
+        U.closeMenus();
+        var i = target.indexOf(':'), kind = target.slice(0, i), id = target.slice(i + 1);
+        if (U.rowActions[kind]) U.rowActions[kind](id, x.getAttribute('data-rowact'));
+      };
+    });
+    var first = l.querySelector('button:not(:disabled)'); if (first) first.focus();
   };
   U.menuHtml = function (id, label, items) {
     return '<div class="menu" data-write><button class="btn sm icon" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="' + esc(label) + '" data-menu="' + id + '">' + U.icon('more') + '</button>' +
@@ -427,20 +458,31 @@
     input: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3"/>',
     outputs: '<path d="M4 6h16M4 12h11M4 18h7"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    sub: '<path d="M6 4v9a3 3 0 0 0 3 3h9M14 12l4 4-4 4"/>',
+    web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'
   };
   U.debounce = function (fn, ms) { var t = null; return function () { var a = arguments, me = this; clearTimeout(t); t = setTimeout(function () { fn.apply(me, a); }, ms); }; };
   // how often an overlay's pages are captured, as three named speeds plus the exact value. Measured on one page:
   // 0.5 s about 12% of a CPU core, 0.25 s about 23%, 0.1 s about 54%, for the capture service
   // (docs/perf/2026-10-30-thread-drawing-and-capture-rate.md)
   U.SPEEDS = [[0.5, 'Standard', 'Scoreboards and lower thirds'], [0.25, 'Fast', 'Clocks; about twice the capture CPU'], [0.1, 'Fastest', 'About half a CPU core per page']];
-  U.speedHtml = function (value, attr, disabled) {
+  // field: the exact seconds, shown on the same line, so the named speeds and the number are one control
+  U.speedHtml = function (value, attr, disabled, field) {
     var known = U.SPEEDS.some(function (s) { return s[0] === value; });
-    return '<div class="speed"><span class="f">Update speed' + U.tip('How often each page is captured and redrawn on the video. Faster shows changes sooner and costs the capture service CPU; the transcoder cost hardly changes.') + '</span>' +
-      '<div class="seg" role="radiogroup" aria-label="Update speed">' + U.SPEEDS.map(function (s) {
-        return '<button type="button" role="radio" ' + attr + '="' + s[0] + '" aria-checked="' + (s[0] === value) + '" title="' + esc(s[2]) + '"' + (disabled ? ' disabled' : '') + '>' + s[1] + '<small>' + s[0] + ' s</small></button>';
-      }).join('') + (known ? '' : '<button type="button" role="radio" aria-checked="true" disabled>Custom<small>' + esc(value) + ' s</small></button>') + '</div>' +
-      '<span class="small muted">' + esc((U.SPEEDS.filter(function (s) { return s[0] === value; })[0] || [0, '', 'Set under Capture every'])[2]) + '</span></div>';
+    return '<div class="speed"><span class="f">Capture speed' + U.tip('How often each page is captured and redrawn on the video, for every page of this overlay. Faster shows changes sooner and costs the capture service CPU; the transcoder cost hardly changes.') + '</span>' +
+      '<div class="speed-row"><div class="seg" role="radiogroup" aria-label="Capture speed">' + U.SPEEDS.map(function (s) {
+        return '<button type="button" role="radio" ' + attr + '="' + s[0] + '" aria-checked="' + (s[0] === value) + '" title="' + esc(s[2]) + '"' + (disabled ? ' disabled' : '') + '>' + s[1] + (field ? '' : '<small>' + s[0] + ' s</small>') + '</button>';
+      }).join('') + (known || field ? '' : '<button type="button" role="radio" aria-checked="true" disabled>Custom<small>' + esc(value) + ' s</small></button>') + '</div>' + (field || '') + '</div>' +
+      '<span class="small muted" data-speednote>' + esc((U.SPEEDS.filter(function (s) { return s[0] === value; })[0] || [0, '', 'Custom'])[2]) + '</span></div>';
+  };
+  // the named speed that matches the exact value is lit, or none for a custom one
+  U.syncSpeed = function (root, attr, value) {
+    root.querySelectorAll('[' + attr + ']').forEach(function (x) { x.setAttribute('aria-checked', String(parseFloat(x.getAttribute(attr)) === value)); });
+    var s = U.SPEEDS.filter(function (x) { return x[0] === value; })[0], note = root.querySelector('[data-speednote]');
+    if (note) note.textContent = s ? s[2] : 'Custom';
   };
   U.bindSpeed = function (root, attr, onPick) {
     root.querySelectorAll('[' + attr + ']').forEach(function (b) {

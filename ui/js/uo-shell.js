@@ -134,9 +134,9 @@
     }
     renderItems();
   }
-  function item(go, dot, t, s, meta, sel, attrs) {
-    return '<li><button type="button" class="li" role="option" aria-selected="' + !!sel + '" tabindex="-1" ' + (attrs || 'data-go="' + U.esc(go) + '"') + '>' +
-      '<span class="dot ' + dot + '"></span><span style="min-width:0"><span class="t">' + t + '</span>' + (s ? '<span class="s">' + s + '</span>' : '') + '</span><span>' + (meta || '') + '</span></button></li>';
+  function item(go, dot, t, s, meta, sel, attrs, menu, cls) {
+    return '<li' + (menu ? ' class="lrow' + (cls ? ' ' + cls : '') + '"' : cls ? ' class="' + cls + '"' : '') + '><button type="button" class="li" role="option" aria-selected="' + !!sel + '" tabindex="-1" ' + (attrs || 'data-go="' + U.esc(go) + '"') + '>' +
+      '<span class="dot ' + dot + '"></span><span style="min-width:0"><span class="t">' + t + '</span>' + (s ? '<span class="s">' + s + '</span>' : '') + '</span><span>' + (meta || '') + '</span></button>' + (menu || '') + '</li>';
   }
   function matches(text) { var q = (search[U.view.tab] || '').toLowerCase(); return !q || text.toLowerCase().indexOf(q) >= 0; }
   U.attention = function (s) { return s.publishing && (!!s.restartNeeded || !!(s.overlay && !U.overlayEntry(s.overlay))); };
@@ -163,30 +163,43 @@
       (U.overlays || []).forEach(function (o) {
         var live = U.liveShowing(o.name), tpl = o.templates || [];
         var sub = o.error ? 'Cannot be read' : live.length ? 'On air on ' + live.join(', ') : tpl.length ? 'In ' + tpl.join(', ') : 'In no template';
-        if (!matches(o.name + ' ' + sub)) return;
-        h.push(item('overlay:' + o.name, o.error ? 'bad' : live.length ? 'on' : '', U.esc(o.name), U.esc(sub), unsavedFor('overlay:' + o.name), v.screen === 'overlay' && v.id === o.name));
+        var open = v.screen === 'overlay' && v.id === o.name;
+        if (!open && !matches(o.name + ' ' + sub)) return;
+        h.push(item('overlay:' + o.name, o.error ? 'bad' : live.length ? 'on' : '', U.esc(o.name), U.esc(sub), unsavedFor('overlay:' + o.name), open, null,
+          U.rowMenuHtml('overlay:' + o.name, 'Actions for ' + o.name, [['addpage', 'Add page'], ['dup', 'Duplicate...'], '-', ['del', 'Delete overlay...', true]])));
+        // the open overlay's pages sit under it, with Add page last
+        if (open) h.push('<li class="lsub-host" data-ovpages></li>');
       });
       var nu = unsavedFor('new-overlay:');
       if (v.screen === 'new-overlay' || nu) h.unshift(item('new-overlay:', '', 'New overlay', 'Not created yet', nu, v.screen === 'new-overlay'));
       if (!(U.overlays || []).length) foot.innerHTML = '<p class="small faint lfoot">An overlay holds the pages to burn in, for example the scoring vendor\'s clock and score.</p>';
     } else if (tab === 'templates') {
-      var order = U.state && U.state.appTemplates ? String(U.state.appTemplates).split(',').filter(Boolean).length : null;
-      if (matches('Template order ' + U.app)) h.push(item('order:', '', 'Template order for ' + U.esc(U.app), (order != null ? order + ' entr' + (order === 1 ? 'y' : 'ies') + ', ' : '') + 'applies after an application restart', unsavedFor('order:'), v.screen === 'order'));
       var nt = unsavedFor('template:');
-      if ((v.screen === 'template' && !v.id) || nt) h.push(item('template:', '', 'New template', 'Not created yet', nt, v.screen === 'template' && !v.id));
+      if ((v.screen === 'template' && !v.id) || nt) h.push(item('template:', '', 'New master template', 'Not created yet', nt, v.screen === 'template' && !v.id));
       var list = (U.templates || []).filter(function (t) { return t && !t.error && !U.copyBase(t) && !t.vif; });
       var mine = list.filter(function (t) { return t.overlay || t.managed; }), other = list.filter(function (t) { return !(t.overlay || t.managed); });
-      function tplItem(t) {
-        var users = U.streamsUsing(t.name), live = users.filter(function (s) { return s.publishing; });
-        var sub = (t.overlay ? t.overlay : 'No overlay') + ', used by ' + users.length + (t.shipped ? ', ships with WSE' : '');
-        if (!matches(t.name + ' ' + sub)) return '';
-        return item('template:' + t.name, live.length ? 'on' : '', U.esc(t.name), U.esc(sub), unsavedFor('template:' + t.name), v.screen === 'template' && v.id === t.name);
+      function copyItem(c) {
+        var s = U.streamRow(c.name), sel = v.screen === 'template' && v.id === c.name;
+        return item('template:' + c.name, s && s.publishing ? 'live' : '', U.icon('sub') + U.esc(c.name), 'Copy for stream ' + U.esc(c.name) + (s && s.publishing ? ', publishing' : ''), '', sel, null,
+          U.rowMenuHtml('copy:' + c.name, 'Actions for the copy ' + c.name, [['update', 'Update from ' + U.copyBase(c)], ['stream', 'Open stream ' + c.name]]), 'lsub');
       }
-      var a = mine.map(tplItem).join(''), b = other.map(tplItem).join('');
-      if (a) h.push('<li class="lgroup">With URL Overlay</li>' + a);
+      function tplItem(t, master) {
+        var users = U.streamsUsing(t.name), live = users.filter(function (s) { return s.publishing; });
+        var copies = (U.templates || []).filter(function (c) { return c && U.copyBase(c) === t.name; });
+        var sub = (t.overlay ? t.overlay : 'No overlay') + (master ? ', ' + copies.length + ' stream cop' + (copies.length === 1 ? 'y' : 'ies') : t.shipped ? ', ships with WSE' : '');
+        if (!matches(t.name + ' ' + sub + ' ' + copies.map(function (c) { return c.name; }).join(' '))) return '';
+        return item('template:' + t.name, live.length ? 'on' : '', U.esc(t.name), U.esc(sub), unsavedFor('template:' + t.name), v.screen === 'template' && v.id === t.name, null,
+          U.rowMenuHtml('template:' + t.name, 'Actions for ' + t.name, master ? [['dup', 'Duplicate...'], '-', ['del', 'Delete template...', true, !t.managed]] : [['dup', 'New master from this one']])) +
+          copies.map(copyItem).join('');
+      }
+      var a = mine.map(function (t) { return tplItem(t, true); }).join(''), b = other.map(function (t) { return tplItem(t, false); }).join('');
+      if (a) h.push('<li class="lgroup">Master templates' + U.tip('A master is where a template is edited. A stream runs its own copy of a master, made when it is put on the stream, so editing a master changes no stream until its copy is updated from it.') + '</li>' + a);
       if (b) h.push('<li class="lgroup">Other templates on this server</li>' + b);
     }
+    var pages = U.overlayPagesNode, a = document.activeElement, kept = pages && a && pages.contains(a) ? a : null;
     box.innerHTML = h.join('') || '<li class="small faint" style="padding:8px 12px">Nothing matches.</li>';
+    var host = box.querySelector('[data-ovpages]');
+    if (host && pages) { host.appendChild(pages); if (kept && pages.contains(kept)) kept.focus({ preventScroll: true }); }
     var items = box.querySelectorAll('.li'), stop = box.querySelector('.li[aria-selected="true"]') || items[0];
     if (stop) stop.tabIndex = 0;
   }
@@ -333,17 +346,57 @@
     U.choose('How URL Overlay works', '<p>A camera publishes a stream to a Wowza application. The application\'s transcoder loads a ' +
       '<strong>transcoder template</strong> for the stream, which decodes it, draws the overlay and makes the outputs viewers watch, ' +
       'for example <code>stream_720p</code>. An <strong>overlay</strong> holds the web pages to draw; a template names the overlay it draws.</p>' +
+      '<p>You edit a <strong>master template</strong>. Putting it on a stream gives that stream its own copy, so a stream changes only when its copy is updated from the master.</p>' +
       '<p>Nothing is written while you edit. Each screen has one save bar at the bottom, for that screen\'s object only. Unsaved work stays while this page is open.</p>' +
       '<h4>Keyboard</h4><div class="shortcuts">' + rows.map(function (r) {
         return '<span>' + r[0].split(/(\+|, )/).map(function (k) { return k === '+' || k === ', ' ? k : '<span class="kbd">' + U.esc(k) + '</span>'; }).join('') + '</span><span>' + U.esc(r[1]) + '</span>';
-      }).join('') + '</div><p class="hint" style="margin-top:8px">Shortcuts other than Ctrl+S work when the cursor is not in a text field.</p>' +
-      '<label class="check" style="margin-top:12px"><input type="checkbox" data-keys-toggle' + (root.getAttribute('data-keys') === 'on' ? ' checked' : '') + '>Show WSE setting names under the fields</label>',
+      }).join('') + '</div><p class="hint" style="margin-top:8px">Shortcuts other than Ctrl+S work when the cursor is not in a text field.</p>',
       [{ label: 'Close', value: null, kind: 'primary' }]);
-    var t = root.querySelector('[data-keys-toggle]');
-    if (t) t.onchange = function () {
-      if (t.checked) root.setAttribute('data-keys', 'on'); else root.removeAttribute('data-keys');
-      U.store.set('keys', t.checked ? 'on' : 'off');
+  }
+
+  /* ---------- settings ---------- */
+  function settings() {
+    var order = U.state && U.state.appTemplates ? String(U.state.appTemplates).split(',').filter(Boolean) : [];
+    U.choose('Settings', '<section class="set"><div class="set-h">Capture service<span class="small faint">Every application on this server</span></div>' +
+      '<div class="set-row"><div><b>Pages captured at once</b><div class="hint" data-limnote>Reading...</div></div>' +
+      '<div class="hrow" data-write><input type="number" class="num" data-lim min="1" max="32" style="width:80px" aria-label="Pages captured at once" disabled><button type="button" class="btn sm" data-limset disabled>Apply</button></div></div>' +
+      '<p class="err" data-limerr hidden></p></section>' +
+      '<section class="set"><div class="set-h">Template order for ' + U.esc(U.app || '') + '<span class="small faint">This application</span></div>' +
+      '<div class="set-row"><div><div class="mono small">' + (order.length ? order.map(U.esc).join(', ') : 'Not set') + '</div><div class="hint">WSE tries these in order for each stream and uses the first that exists. It reads the list when the application starts.</div></div>' +
+      '<button type="button" class="btn sm" data-goorder>Edit</button></div></section>' +
+      '<section class="set"><div class="set-h">This browser</div><label class="check"><input type="checkbox" data-keys-toggle' + (root.getAttribute('data-keys') === 'on' ? ' checked' : '') + '>Show WSE setting names under the fields</label></section>',
+      [{ label: 'Close', value: null, kind: 'primary' }]);
+    var all = root.querySelectorAll('.modal'), m = all[all.length - 1];
+    if (!m) return;
+    var close = function () { var b = m.querySelector('.foot .btn'); if (b) b.click(); };
+    m.querySelector('[data-goorder]').onclick = function () { close(); U.go('order:', { tab: 'templates' }); };
+    var t = m.querySelector('[data-keys-toggle]');
+    t.onchange = function () { if (t.checked) root.setAttribute('data-keys', 'on'); else root.removeAttribute('data-keys'); U.store.set('keys', t.checked ? 'on' : 'off'); };
+    var inp = m.querySelector('[data-lim]'), set = m.querySelector('[data-limset]'), note = m.querySelector('[data-limnote]'), err = m.querySelector('[data-limerr]');
+    function show(r) {
+      if (!r.running) { note.textContent = 'The capture service is not running, so the limit cannot be read or changed now.'; return; }
+      err.hidden = !r.refused;
+      if (r.refused) err.textContent = 'When the capture service last started it would not take ' + r.set + ' and runs at ' + r.limit + ': ' + r.refused;
+      inp.value = r.limit; inp.max = r.ceiling; inp.disabled = !!U.readOnly; set.disabled = true;
+      note.textContent = r.active + ' open now. Each is one Chrome of up to ' + (r.maxBrowserMemoryMB || '?') + ' MB.' +
+        (r.set != null ? ' Set here; the service starts with ' + r.startLimit + ' from capture.properties and is given this one.' : ' From capture.properties.') + ' 1 to ' + r.ceiling + '.' +
+        (r.memoryMaxMB != null ? ' The service is held to ' + Math.round(r.memoryMaxMB / 102.4) / 10 + ' GB' + (r.cpuLimit != null ? ' and ' + r.cpuLimit + ' CPU cores' : '') +
+          ' by its systemd unit, which is what caps it at ' + r.ceiling + '; running the installer again with a higher maxCaptures raises that.' : '');
+    }
+    U.api.get('/capture/limit').then(show, function (e) { note.textContent = 'Not read: ' + e.message; });
+    inp.oninput = function () { var n = +inp.value; set.disabled = !(n >= 1 && n <= +inp.max && n === Math.round(n)); };
+    set.onclick = function () {
+      set.disabled = true; err.hidden = true;
+      U.api.post('/capture/limit', { maxCaptures: +inp.value }).then(function (r) { show(r); U.toast('Pages captured at once: ' + r.limit + '. No restart was needed.'); U.loadInfo().then(renderStrip, function () {}); },
+        function (e) { err.textContent = e.message; err.hidden = false; set.disabled = false; });
     };
+  }
+
+  /* ---------- the Manager page around the plugin takes its theme, the navbar excepted ---------- */
+  function hostTheme(theme) {
+    var h = document.documentElement;
+    h.classList.add('uo-host');
+    h.setAttribute('data-uo-theme', theme);
   }
 
   /* ---------- the Manager navbar: sticky parts sit below it when it is fixed ---------- */
@@ -391,13 +444,14 @@
       all.forEach(function (x) { x.tabIndex = -1; }); all[i].tabIndex = 0; all[i].focus();
       return;
     }
-    if (el.left.contains(a)) return;
+    if (el.left.contains(a) && !(a.classList && a.classList.contains('prow'))) return;
     if (scr && scr.key) scr.key(e, false);
   }
 
   function onClick(e) {
     var t = e.target.closest && e.target.closest('button, [data-go], .scrim');
     if (!t || !root.contains(t)) { U.closeMenus(); return; }
+    if (t.hasAttribute('data-rowfor')) { e.preventDefault(); e.stopPropagation(); U.openRowMenu(t); return; }
     if (!t.closest('.menu')) U.closeMenus();
     if (t.hasAttribute('data-close-after')) closeDrawer();
     if (t.hasAttribute('data-go')) { e.preventDefault(); U.go(t.getAttribute('data-go')); return; }
@@ -427,16 +481,26 @@
     var stored = U.store.get('theme');
     var theme = stored === 'dark' || stored === 'light' ? stored : 'light';
     r.setAttribute('data-theme', theme);
+    hostTheme(theme);
+    var unhost = function () { document.documentElement.classList.remove('uo-host'); document.documentElement.removeAttribute('data-uo-theme'); };
+    U.onShutdown(unhost);
+    // the Manager swaps its page out some time after the address changes; the colors go back the moment it does
+    var gone = new MutationObserver(function () { if (!U.alive()) { unhost(); gone.disconnect(); } });
+    gone.observe(document.body, { childList: true, subtree: true });
+    U.onShutdown(function () { gone.disconnect(); });
     var tb = r.querySelector('[data-act=theme]');
     tb.innerHTML = U.icon(theme === 'dark' ? 'sun' : 'moon'); tb.setAttribute('aria-pressed', String(theme === 'dark'));
     tb.onclick = function () {
       var dark = r.getAttribute('data-theme') !== 'dark';
       r.setAttribute('data-theme', dark ? 'dark' : 'light');
+      hostTheme(dark ? 'dark' : 'light');
       tb.innerHTML = U.icon(dark ? 'sun' : 'moon'); tb.setAttribute('aria-pressed', String(dark));
       U.store.set('theme', dark ? 'dark' : 'light');
     };
     if (U.store.get('keys') === 'on') r.setAttribute('data-keys', 'on');
     r.querySelector('[data-act=help]').onclick = help;
+    var sb = r.querySelector('[data-act=settings]');
+    sb.innerHTML = U.icon('gear'); sb.onclick = settings;
     el.tabSelect.onchange = function () { setTab(el.tabSelect.value); };
     el.app.onchange = function () {
       var want = el.app.value, un = U.unsaved();

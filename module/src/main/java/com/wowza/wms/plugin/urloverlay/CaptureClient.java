@@ -208,6 +208,17 @@ public final class CaptureClient
 		return m;
 	}
 
+	/**
+	 * Sets the number of pages the service captures at once and keeps it for its next start.
+	 * @return the service's answer: ok and maxCaptures, or ok false and the error
+	 */
+	public Message setLimit(int maxCaptures) throws ServiceDown
+	{
+		Map<String, Object> h = Wire.header(Wire.LIMITS);
+		h.put("maxCaptures", maxCaptures);
+		return call(h, 5000);
+	}
+
 	public String serviceVersion()
 	{
 		synchronized(lock)
@@ -259,6 +270,7 @@ public final class CaptureClient
 				downMessage = null;
 				backoffMs = firstBackoffMs;
 			}
+			resendLimit(answer.str("serverTag"), out, in);
 			return c;
 		}
 		catch(ServiceDown e)
@@ -269,6 +281,33 @@ public final class CaptureClient
 		{
 			closeQuietly(c);
 			throw down(notRunning());
+		}
+	}
+
+	/**
+	 * A service that started again reads capture.properties, so the limit set from the page goes back to it, once per
+	 * service start (its serverTag; an older service has none and is given it on every connection). Under
+	 * CaptureLimit.LOCK, so a change from the page cannot cross an older value sent here. A refusal is kept for the
+	 * page and logged once; the service then runs at its capture.properties value.
+	 */
+	private void resendLimit(String tag, OutputStream out, InputStream in) throws IOException
+	{
+		synchronized(CaptureLimit.LOCK)
+		{
+			Integer limit = CaptureLimit.wanted();
+			if(limit == null || (tag != null && tag.equals(CaptureLimit.sentTo())))
+			{
+				return;
+			}
+			Map<String, Object> l = Wire.header(Wire.LIMITS);
+			l.put("maxCaptures", limit);
+			Wire.write(out, l, null);
+			Message a = Wire.read(in);
+			if(a == null)
+			{
+				throw new IOException("closed");
+			}
+			CaptureLimit.sent(tag, a.ok() ? null : String.valueOf(a.header().get("error")));
 		}
 	}
 

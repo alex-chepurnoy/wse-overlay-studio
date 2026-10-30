@@ -11,6 +11,7 @@ import com.wowza.wms.plugin.urloverlay.egress.EgressRules;
 import com.wowza.wms.plugin.urloverlay.rest.AppModuleConfig;
 import com.wowza.wms.plugin.urloverlay.rest.AppStateConfig;
 import com.wowza.wms.plugin.urloverlay.rest.CaptureConfig;
+import com.wowza.wms.plugin.urloverlay.rest.CaptureLimitConfig;
 import com.wowza.wms.plugin.urloverlay.rest.InfoConfig;
 import com.wowza.wms.plugin.urloverlay.rest.ObjectConfig;
 import com.wowza.wms.plugin.urloverlay.rest.ObjectsConfig;
@@ -48,7 +49,8 @@ public class UrlOverlayServer implements IServerNotify2
 			TemplateStarterConfig.class, TemplateValidateConfig.class, TemplateAssignConfig.class, OverlaysConfig.class,
 			NamedOverlayConfig.class, NamedOverlayCaptureConfig.class, TemplateOverlayConfig.class, TemplateCopiesConfig.class, AppStreamsConfig.class,
 			AppStateConfig.class, NamedOverlayPreviewConfig.class, AppModuleConfig.class, TemplatesBuildConfig.class, TemplateSpecConfig.class,
-			TemplateUseConfig.class, ImagesConfig.class, StreamRestartConfig.class, TemplateOrderConfig.class, SnapshotConfig.class };
+			TemplateUseConfig.class, ImagesConfig.class, StreamRestartConfig.class, TemplateOrderConfig.class, SnapshotConfig.class,
+			CaptureLimitConfig.class };
 
 	public static final Class<UrlOverlayServer> CLASS = UrlOverlayServer.class;
 	public static String MODULE_NAME = CLASS.getSimpleName();
