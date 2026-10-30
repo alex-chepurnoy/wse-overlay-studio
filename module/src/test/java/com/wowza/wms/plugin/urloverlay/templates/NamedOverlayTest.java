@@ -114,9 +114,17 @@ class NamedOverlayTest
 		assertEquals("Scoreboard", validate(dir.resolve("cam1.xml")).overlay());
 		assertEquals(List.of("scoreboard-720p", "cam1").stream().sorted().toList(), TemplateFiles.templatesUsing(dir, "Scoreboard"));
 		assertEquals(List.of(Map.of("template", "cam1", "stream", "cam1")), TemplateFiles.copiesOf(dir, "scoreboard-720p"));
+		// a fresh copy matches its master; the list reads which master it names from its description
+		assertEquals(Boolean.TRUE, TemplateFiles.copyIsCurrent(dir, "scoreboard-720p", "cam1"));
+		assertEquals("scoreboard-720p", TemplateFiles.copyBase("cam1.xml", validate(dir.resolve("cam1.xml")).description()));
+		assertEquals(null, TemplateFiles.copyBase("cam2.xml", validate(dir.resolve("cam1.xml")).description()), "a file that is not the stream it names is no copy");
+		assertEquals(null, TemplateFiles.copyIsCurrent(dir, "no-such-master", "cam1"));
 
 		// setting it again replaces, it does not add a second property
 		TemplateFiles.setOverlay(dir, "scoreboard-720p", "Lower", List.of());
+		assertEquals(Boolean.FALSE, TemplateFiles.copyIsCurrent(dir, "scoreboard-720p", "cam1"), "the master saved since: the copy differs");
+		TemplateFiles.copyForStream(dir, "scoreboard-720p", "cam1", true);
+		assertEquals(Boolean.TRUE, TemplateFiles.copyIsCurrent(dir, "scoreboard-720p", "cam1"), "updated from the master: current again");
 		String twice = Files.readString(dir.resolve("scoreboard-720p.xml"));
 		assertEquals(1, twice.split("<Name>urlOverlay</Name>", -1).length - 1);
 		assertEquals(List.of(), validate(dir.resolve("scoreboard-720p.xml")).overlayEncodes());

@@ -138,6 +138,13 @@ public final class TemplateFiles
 	 */
 	public static synchronized Path copyForStream(Path templatesDir, String sourceTemplate, String stream, boolean overwrite) throws Refused, IOException
 	{
+		String dst = safeName(stream);
+		return write(templatesDir, dst, copyXml(templatesDir, sourceTemplate, dst).getBytes(StandardCharsets.UTF_8), overwrite);
+	}
+
+	// what copyForStream writes for stream from sourceTemplate as it is now: the same file with its description marked
+	private static String copyXml(Path templatesDir, String sourceTemplate, String stream) throws Refused, IOException
+	{
 		String src = safeName(sourceTemplate);
 		String dst = safeName(stream);
 		Path from = templatesDir.resolve(src + ".xml");
@@ -156,7 +163,35 @@ public final class TemplateFiles
 		{
 			xml = xml.replaceFirst("<Transcode>", "<Transcode>\n\t\t<Description>" + Matcher.quoteReplacement(escape(marked)) + "</Description>");
 		}
-		return write(templatesDir, dst, xml.getBytes(StandardCharsets.UTF_8), overwrite);
+		return xml;
+	}
+
+	/**
+	 * Whether a stream's copy is still what an update from its master would write, or null when the master is gone.
+	 * Any difference counts: the master saved since, or the copy changed by hand.
+	 */
+	public static Boolean copyIsCurrent(Path templatesDir, String base, String stream) throws IOException
+	{
+		try
+		{
+			Path copy = templatesDir.resolve(safeName(stream) + ".xml");
+			if(!Files.isRegularFile(templatesDir.resolve(safeName(base) + ".xml")) || !Files.isRegularFile(copy))
+			{
+				return null;
+			}
+			return copyXml(templatesDir, base, stream).equals(Files.readString(copy, StandardCharsets.UTF_8));
+		}
+		catch(Refused e)
+		{
+			return null;
+		}
+	}
+
+	/** The master a copy names, when the file is the copy for the stream it names; null for any other template. */
+	public static String copyBase(String fileName, String description)
+	{
+		Matcher m = description == null ? null : COPY_OF.matcher(description);
+		return m != null && m.find() && fileName.equals(m.group(2) + ".xml") ? m.group(1) : null;
 	}
 
 	private static final Pattern COPY_OF = Pattern.compile("copy of ([A-Za-z0-9._-]+) for stream ([A-Za-z0-9._-]+)\\.");

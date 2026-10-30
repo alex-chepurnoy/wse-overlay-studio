@@ -818,3 +818,32 @@ html.uo-host #uo-root { border-radius: 0; }
 .uo-plugin .lyr .ly-outs { padding-left: calc(90px + var(--s-3)); }
 .uo-plugin .lyr .lyc-more { padding-left: calc(90px + var(--s-3)); }
 .uo-plugin [data-tb] > * + * { margin-top: var(--s-4); }
+
+/* ---------- stream: the template's menu, playback addresses ---------- */
+.uo-plugin .pn .nk { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.uo-plugin .pn .nk .rowmenu { width: 22px; height: 22px; margin: -2px -6px -2px 0; }
+.uo-plugin .pn-tpl .btn.sm { margin-top: 4px; justify-self: start; }
+.uo-plugin .sh .rowmenu { margin-left: -4px; }
+.uo-plugin .play { margin-top: var(--s-4); }
+.uo-plugin .play-k { margin-bottom: var(--s-2); }
+.uo-plugin ul.play-l { list-style: none; margin: 0 0 var(--s-2); padding: 0; border-top: 1px solid var(--border); }
+.uo-plugin ul.play-l li { display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr) auto; gap: var(--s-2); align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.uo-plugin ul.play-l li.sel .pl-n { color: var(--text); }
+.uo-plugin ul.play-l .pl-n { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.uo-plugin ul.play-l code { display: block; background: none; padding: 0; font-size: 11px; color: var(--text-2); word-break: break-all; user-select: all; }
+.uo-plugin .side .verdict { font-size: 13px; }
+/* a copy that no longer matches its master: Update sits beside its menu */
+.uo-plugin .lrow > .rowupd { position: absolute; right: 38px; top: 6px; height: 24px; }
+.uo-plugin .lsub.behind > .li { padding-right: 112px; }
+/* the template uses its width: Decode and Encode side by side under the hardware bar, labels above in Decode */
+.uo-plugin .tb { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: var(--s-4); align-items: start; }
+.uo-plugin .tb > .tb-top { grid-column: 1 / -1; }
+.uo-plugin .tb > .tb-box:nth-child(2) .tb-line { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.uo-plugin .tb > .tb-box:nth-child(2) .tb-line > .f { padding-top: 0; }
+.uo-plugin .tb > .tb-box:nth-child(2) .tb-val select { width: 100%; flex: 1; min-width: 0; }
+.uo-plugin .tb > .tb-box:nth-child(2) .tb-val > .hrow { width: 100%; flex-wrap: nowrap; }
+.uo-plugin .tb > .tb-box:nth-child(2) .tb-indent { padding-left: var(--s-4); }
+.uo-plugin .tb > .tb-box:nth-child(2) .tb-bh .small { flex-basis: 100%; }
+.uo-plugin .tb > .tb-box:nth-child(2) .lyr .lyc-row > .f { width: 64px; }
+.uo-plugin .tb > .tb-box:nth-child(2) .lyr .ly-outs, .uo-plugin .tb > .tb-box:nth-child(2) .lyr .lyc-more { padding-left: calc(64px + var(--s-3)); }
+@media (max-width: 1300px) { .uo-plugin .tb { grid-template-columns: minmax(0, 1fr); } }
