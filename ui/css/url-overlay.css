@@ -100,6 +100,8 @@
 .uo-plugin input[type="file"] { font-size: 12px; }
 .uo-plugin .fld { display: grid; gap: 4px; margin-bottom: var(--s-3); }
 .uo-plugin .fld:last-child { margin-bottom: 0; }
+.uo-plugin .fld:has(> label.check) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
+.uo-plugin .fld:has(> label.check) > .hint, .uo-plugin .fld:has(> label.check) > .err { flex-basis: 100%; }
 .uo-plugin label.f, .uo-plugin span.f { display: block; font-size: 12px; font-weight: 600; color: var(--text-2); }
 .uo-plugin label.check { display: flex; align-items: center; font-weight: 500; font-size: 13px; color: var(--text); cursor: pointer; }
 .uo-plugin .hint { font-size: 12px; color: var(--text-3); }
@@ -191,8 +193,8 @@
 .uo-plugin .banner .x { background: none; border: 0; color: var(--text-2); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
 
 /* ---------- grid: list column, center, inspector ---------- */
-.uo-plugin .uo-grid { display: grid; grid-template-columns: 256px minmax(0, 1fr); gap: var(--s-4); margin-top: var(--s-4); align-items: start; }
-.uo-plugin .uo-grid.has-insp { grid-template-columns: 256px minmax(0, 1fr) 300px; }
+.uo-plugin .uo-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--s-4); margin-top: var(--s-4); align-items: start; }
+.uo-plugin .uo-grid.has-insp { grid-template-columns: 300px minmax(0, 1fr) 320px; }
 .uo-plugin .uo-grid.no-left { grid-template-columns: minmax(0, 1fr); }
 /* the list column and the inspector keep one size whatever screen or tab is open, and the center never shrinks below
    them, so moving around the page does not make it jump */
@@ -217,7 +219,24 @@
 .uo-plugin .li .dot { margin-top: 6px; }
 .uo-plugin .li .t { font-weight: 600; display: block; overflow-wrap: anywhere; }
 .uo-plugin .li .s { font-size: 12px; color: var(--text-2); display: block; overflow-wrap: anywhere; }
-.uo-plugin .lgroup { padding: var(--s-3) var(--s-3) var(--s-1); font-size: 12px; font-weight: 600; color: var(--text-3); }
+.uo-plugin .lgroup { padding: var(--s-3) var(--s-3) var(--s-1); font-size: 12px; font-weight: 600; color: var(--text-3); display: flex; align-items: center; }
+/* a row with its own menu: the menu sits on the row's right, beside the row's button */
+.uo-plugin .lrow { position: relative; }
+.uo-plugin .lrow > .li { padding-right: 40px; }
+.uo-plugin .lrow > .rowmenu { position: absolute; right: 6px; top: 6px; opacity: .55; }
+.uo-plugin .lrow:hover > .rowmenu, .uo-plugin .lrow > .rowmenu:focus-visible, .uo-plugin .lrow > .rowmenu[aria-expanded="true"], .uo-plugin .lrow:has(> .li[aria-selected="true"]) > .rowmenu { opacity: 1; }
+.uo-plugin .prow .rowmenu { opacity: .55; }
+.uo-plugin .prow:hover .rowmenu, .uo-plugin .prow[aria-selected="true"] .rowmenu, .uo-plugin .prow .rowmenu[aria-expanded="true"] { opacity: 1; }
+/* a master's stream copies, and the open overlay's pages, sit indented under their parent */
+.uo-plugin .lsub > .li { padding-left: 28px; grid-template-columns: 8px minmax(0, 1fr) auto; }
+.uo-plugin .lsub > .li .t { font-weight: 500; display: flex; align-items: center; gap: 4px; }
+.uo-plugin .lsub > .li .t svg { width: 13px; height: 13px; color: var(--text-3); flex: none; }
+.uo-plugin .lsub > .rowmenu { top: 4px; }
+.uo-plugin .lsub-host { margin: 0 0 var(--s-2) 20px; padding-left: var(--s-2); border-left: 1px solid var(--border); }
+.uo-plugin .lpages-empty { padding: 6px var(--s-3); }
+.uo-plugin .lsub-add { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px var(--s-3); border: 0; border-radius: var(--r-md); background: none; color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; }
+.uo-plugin .lsub-add:hover { background: var(--surface-2); color: var(--text); }
+.uo-plugin .lsub-add svg { width: 14px; height: 14px; }
 .uo-plugin .lfoot { padding: 0 var(--s-4) var(--s-4); }
 .uo-plugin .ladd { display: flex; gap: var(--s-2); padding: 0 var(--s-3) var(--s-3); }
 
@@ -240,14 +259,14 @@
 
 /* ---------- home ---------- */
 .uo-plugin .home-h { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-3); flex-wrap: wrap; }
-.uo-plugin .srow { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto auto; gap: var(--s-3); align-items: center; width: 100%; padding: var(--s-3) var(--s-4); border: 0; border-bottom: 1px solid var(--gray-100); background: none; text-align: left; cursor: pointer; color: var(--text); }
+.uo-plugin .srow { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto; gap: var(--s-3); align-items: center; width: 100%; padding: var(--s-3) var(--s-4); border: 0; border-bottom: 1px solid var(--gray-100); background: none; text-align: left; cursor: pointer; color: var(--text); }
 .uo-plugin .srow:last-child { border-bottom: 0; }
 .uo-plugin .srow:hover { background: var(--surface-2); }
 .uo-plugin .srow .nm { font-weight: 600; overflow-wrap: anywhere; }
 .uo-plugin .srow .ov { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
 .uo-plugin .srow .outs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .uo-plugin .srow .vw { font-size: 13px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
-.uo-plugin .srow-h { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto auto; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text-3); }
+.uo-plugin .srow-h { display: grid; grid-template-columns: 8px minmax(120px, 1fr) minmax(120px, 1fr) minmax(0, 2fr) auto; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text-3); }
 .uo-plugin .ochip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .uo-plugin .ochip b { color: var(--text); font-weight: 600; }
 .uo-plugin .offrow { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-4); font-size: 13px; color: var(--text-2); }
@@ -312,10 +331,11 @@
 .uo-plugin .frame .safe { position: absolute; inset: 5%; border: 1px dashed rgba(255, 255, 255, .55); pointer-events: none; }
 .uo-plugin .frame .safe::after { content: "Title safe"; position: absolute; left: 4px; top: 50%; font-size: 10px; color: rgba(255, 255, 255, .7); }
 .uo-plugin .canvas { padding: var(--s-4); }
-/* the picture fits the window height with the page list still in view: the height left after the header, the editor
-   head and about four rows of pages, never under 220 px */
-.uo-plugin .canvas .frame { width: min(100%, calc(max(220px, 100vh - var(--uo-top) - 360px) * var(--ar, 1.7778))); margin: 0 auto; }
-.uo-plugin .canvas .canvas-bar, .uo-plugin .canvas > p { max-width: min(100%, calc(max(220px, 100vh - var(--uo-top) - 360px) * var(--ar, 1.7778))); margin-left: auto; margin-right: auto; }
+/* the picture fills the center's width, unless the window is too short for it: then it fits the height left after
+   the header, the editor head and the bar under the picture, never under 220 px */
+.uo-plugin .canvas .frame { width: min(100%, calc(max(220px, 100vh - var(--uo-top) - 250px) * var(--ar, 1.7778))); margin: 0 auto; }
+.uo-plugin .canvas .canvas-bar, .uo-plugin .canvas > p { max-width: min(100%, calc(max(220px, 100vh - var(--uo-top) - 250px) * var(--ar, 1.7778))); margin-left: auto; margin-right: auto; }
+.uo-plugin .frame .lbl.top { top: 8px; bottom: auto; background: rgba(138, 82, 0, .85); }
 .uo-plugin .tip { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 4px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); color: var(--text-2); font-size: 10px; font-weight: 700; line-height: 1; cursor: help; position: relative; vertical-align: middle; }
 .uo-plugin .ck[data-tip] { position: relative; cursor: help; }
 .uo-plugin .ck.warn { border-color: var(--amber-line, #e9c46a); }
@@ -353,16 +373,15 @@
 .uo-plugin .ed-h { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; min-height: 48px; }
 .uo-plugin .ed-h select { width: auto; max-width: 180px; }
 .uo-plugin .pages { border-top: 1px solid var(--border); }
-.uo-plugin .prow { display: grid; grid-template-columns: 16px 48px minmax(0, 1fr) auto; gap: var(--s-3); align-items: center; padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--gray-100); cursor: pointer; }
-.uo-plugin .prow:last-child { border-bottom: 0; }
+.uo-plugin .prow { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: var(--s-2); align-items: center; padding: 6px var(--s-2) 6px var(--s-3); border-radius: var(--r-md); cursor: pointer; }
 .uo-plugin .prow:hover { background: var(--surface-2); }
-.uo-plugin .prow[aria-selected="true"] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--gray-800); }
+.uo-plugin .prow[aria-selected="true"] { background: var(--gray-100); box-shadow: inset 2px 0 0 var(--accent); }
 .uo-plugin .prow.drop { box-shadow: inset 0 2px 0 var(--focus); }
 .uo-plugin .prow .grip-h { color: var(--text-3); cursor: grab; font-size: 11px; letter-spacing: -2px; user-select: none; }
 .uo-plugin .prow .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
 .uo-plugin .prow .sub { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uo-plugin .prow .acts { display: flex; gap: 2px; }
-.uo-plugin .thumb { width: 48px; height: 27px; border-radius: var(--r-sm); background: conic-gradient(#bbb 25%, #ddd 0 50%, #bbb 0 75%, #ddd 0) 0 0/8px 8px; overflow: hidden; }
+.uo-plugin .thumb { width: 40px; height: 23px; border-radius: var(--r-sm); background: conic-gradient(#bbb 25%, #ddd 0 50%, #bbb 0 75%, #ddd 0) 0 0/8px 8px; overflow: hidden; }
 .uo-plugin .thumb img { width: 100%; height: 100%; display: block; }
 .uo-plugin .uo-insp section { padding: var(--s-4); border-bottom: 1px solid var(--border); }
 .uo-plugin .uo-insp section:last-child { border-bottom: 0; }
@@ -535,6 +554,7 @@
 
 /* ---------- menus ---------- */
 .uo-plugin .menu { position: relative; display: inline-flex; }
+.uo-plugin .menu-list.rowfloat { position: fixed; right: auto; top: 0; left: 0; z-index: 1065; }
 .uo-plugin .menu-list { position: absolute; right: 0; top: calc(100% + 4px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-3); min-width: 200px; padding: var(--s-1); z-index: 40; }
 .uo-plugin .menu-list button { display: flex; width: 100%; gap: var(--s-2); border: 0; background: none; padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer; text-align: left; color: var(--text); font-size: 13px; }
 .uo-plugin .menu-list button:hover, .uo-plugin .menu-list button:focus-visible { background: var(--surface-2); }
@@ -570,11 +590,9 @@
   .uo-plugin .uo-head { gap: var(--s-3); }
   .uo-plugin .si { padding: 0 var(--s-2); }
   .uo-plugin .si .wide, .uo-plugin .appl { display: none; }
-  .uo-plugin .uo-grid { grid-template-columns: 248px minmax(0, 1fr); }
-  /* in the overlay editor the list column folds away so the canvas keeps its width; "Overlays (n)" brings it back */
-  .uo-plugin .uo-grid.has-insp { grid-template-columns: minmax(0, 1fr) 300px; }
-  .uo-plugin .uo-grid.has-insp .uo-left { display: none; }
-  .uo-plugin .uo-grid.has-insp.show-left { grid-template-columns: 232px minmax(0, 1fr) 300px; }
+  .uo-plugin .uo-grid { grid-template-columns: 280px minmax(0, 1fr); }
+  .uo-plugin .uo-grid.has-insp { grid-template-columns: 280px minmax(0, 1fr) 300px; }
+  .uo-plugin .uo-grid.has-insp.show-left { grid-template-columns: 280px minmax(0, 1fr) 300px; }
   .uo-plugin .uo-grid.has-insp.show-left .uo-left { display: block; }
   .uo-plugin .pipe > .pn-in { flex-basis: 140px; }
   .uo-plugin .pipe > .pn-tpl { flex-basis: 230px; }
@@ -605,7 +623,11 @@
 
 /* ---------- On air: row actions, the page changed in place, first visit ---------- */
 .uo-plugin .srow .nm.linkbtn { text-align: left; font-weight: 600; color: var(--text); }
-.uo-plugin .srow .acts { text-align: right; }
+.uo-plugin .srow .ov .linkbtn { color: var(--text); font-weight: 500; }
+.uo-plugin .ochips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.uo-plugin .ochips:hover .ochip { border-color: var(--border-strong); }
+.uo-plugin .ochips:hover { text-decoration: none; }
+.uo-plugin .ochips:disabled { cursor: default; }
 .uo-plugin .srow.editing { background: color-mix(in srgb, var(--focus) 7%, var(--surface)); }
 .uo-plugin .srow-edit { padding: var(--s-2) var(--s-4) var(--s-3); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--focus) 7%, var(--surface)); display: flex; flex-direction: column; gap: 6px; }
 .uo-plugin .srow-edit .row { display: flex; gap: 8px; align-items: center; }
@@ -619,6 +641,13 @@
 .uo-plugin .speed .seg small { font-size: 11px; color: var(--text-3); font-weight: 400; }
 .uo-plugin .speed .seg button[aria-checked=true] { background: var(--ink); color: var(--ink-text); }
 .uo-plugin .speed .seg button[aria-checked=true] small { color: inherit; opacity: .8; }
+.uo-plugin .speed-row { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.uo-plugin .speed-row .seg button { height: 32px; justify-content: center; }
+.uo-plugin .every { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); white-space: nowrap; }
+.uo-plugin .every input { width: 72px; }
+.uo-plugin .ovset { margin-top: var(--s-4); padding-top: var(--s-3); border-top: 1px solid var(--border); }
+.uo-plugin .ovset details.adv { margin-top: var(--s-3); }
+.uo-plugin .ovset details.adv > summary { font-size: 13px; color: var(--text-2); }
 
 /* ---------- the task: put a page on a stream ---------- */
 .uo-plugin .task { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: var(--s-3); height: calc(100vh - 170px); min-height: 520px; }
@@ -720,3 +749,72 @@
   .uo-plugin .task { height: auto; }
   .uo-plugin ol.tsteps .s { display: none; }
 }
+
+/* ---------- the master template: hardware on top, then Decode and Encode ---------- */
+.uo-plugin .tb { display: flex; flex-direction: column; gap: var(--s-4); }
+.uo-plugin .tb-top { display: flex; align-items: flex-end; gap: var(--s-5); flex-wrap: wrap; padding: var(--s-3) var(--s-4); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
+.uo-plugin .tb-top .tb-name { margin: 0; width: min(340px, 100%); }
+.uo-plugin .tb-hw { display: flex; flex-direction: column; gap: 4px; }
+.uo-plugin .inl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); white-space: nowrap; }
+.uo-plugin .inl input { width: 64px; }
+.uo-plugin ol.tb-flow { list-style: none; margin: 0 0 0 auto; padding: 0; display: flex; gap: 4px; }
+.uo-plugin ol.tb-flow li { display: flex; flex-direction: column; padding: 4px 10px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+.uo-plugin ol.tb-flow li + li { position: relative; margin-left: 12px; }
+.uo-plugin ol.tb-flow li + li::before { content: ""; position: absolute; left: -12px; top: 50%; width: 10px; border-top: 1px solid var(--border-strong); }
+.uo-plugin ol.tb-flow b { font-size: 11px; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.uo-plugin .tb-box { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+.uo-plugin .tb-bh { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.uo-plugin .tb-bh h3 { font-size: 15px; }
+.uo-plugin .tb-ic svg { width: 16px; height: 16px; color: var(--text-2); display: block; }
+.uo-plugin .hwc { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--gray-100); font-size: 12px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.uo-plugin .hwc svg, .uo-plugin .hwc-s svg { width: 12px; height: 12px; }
+.uo-plugin .hwc-s { display: inline-flex; align-items: center; gap: 4px; font-style: normal; }
+.uo-plugin .tb-line { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: var(--s-3); align-items: start; padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--gray-100); }
+.uo-plugin .tb-line > .f { padding-top: 7px; display: flex; align-items: center; }
+.uo-plugin .tb-val { min-width: 0; display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-start; }
+.uo-plugin .tb-val.hrow { flex-direction: row; align-items: center; gap: var(--s-4); }
+.uo-plugin .tb-val select { width: 240px; }
+.uo-plugin .tb-indent { padding: 0 var(--s-4) var(--s-3) calc(150px + var(--s-4) + var(--s-3)); }
+.uo-plugin .ly-thumb.sm { width: 32px; height: 32px; border-radius: var(--r-md); }
+.uo-plugin .ly-thumb.sm svg { width: 16px; height: 16px; }
+.uo-plugin .tb-box .b-sum { margin: var(--s-3) var(--s-4) 0; }
+.uo-plugin .tb-box .oc-list { padding: var(--s-3) var(--s-4) var(--s-4); gap: 0; }
+/* outputs and layers are lines with a rule between them, not boxes inside the box */
+.uo-plugin .tb-box .oc { border-width: 1px 0 0; border-radius: 0; }
+.uo-plugin .tb-box .oc:first-child { border-top: 0; }
+.uo-plugin .tb-box .oc.oc-open { background: var(--surface-2); border-radius: var(--r-md); border: 1px solid var(--border); margin: 4px 0; }
+.uo-plugin .tb-box .oc.ov { box-shadow: inset 3px 0 0 var(--green); }
+.uo-plugin .tb-box .oc-add { border: 0; padding: var(--s-3) 0 0; }
+.uo-plugin .tb-box .b-play { padding: var(--s-3) var(--s-4) var(--s-4); border-top: 1px solid var(--border); }
+.uo-plugin .lyr { border: 0; border-top: 1px solid var(--gray-100); border-radius: 0; padding: var(--s-2) 0; width: 100%; }
+.uo-plugin .lyr:first-of-type { border-top: 0; }
+@media (max-width: 1250px) { .uo-plugin ol.tb-flow { margin-left: 0; } .uo-plugin .tb-line { grid-template-columns: minmax(0, 1fr); } .uo-plugin .tb-indent { padding-left: var(--s-4); } }
+
+/* ---------- settings ---------- */
+.uo-plugin section.set { padding: var(--s-3) 0; border-bottom: 1px solid var(--border); }
+.uo-plugin section.set:first-child { padding-top: 0; }
+.uo-plugin section.set:last-child { border-bottom: 0; padding-bottom: 0; }
+.uo-plugin .set-h { display: flex; align-items: baseline; gap: var(--s-2); font-weight: 600; margin-bottom: var(--s-2); }
+.uo-plugin .set-row { display: flex; align-items: center; gap: var(--s-3); justify-content: space-between; }
+.uo-plugin .set-row > div:first-child { min-width: 0; }
+
+/* ---------- scrollbars in the plugin's colors ---------- */
+.uo-plugin, .uo-plugin * { scrollbar-width: thin; scrollbar-color: var(--gray-300) transparent; }
+.uo-plugin ::-webkit-scrollbar { width: 10px; height: 10px; }
+.uo-plugin ::-webkit-scrollbar-track { background: transparent; }
+.uo-plugin ::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+.uo-plugin ::-webkit-scrollbar-thumb:hover { background-color: var(--gray-400); }
+
+/* ---------- the Manager page around the plugin takes its theme; its navbar keeps its own ---------- */
+html.uo-host body { background: #f1f2f4; }
+html.uo-host[data-uo-theme="dark"] { color-scheme: dark; }
+html.uo-host[data-uo-theme="dark"] body { background: #0f1318; }
+html.uo-host[data-uo-theme="dark"] body > footer, html.uo-host[data-uo-theme="dark"] footer { color: #8a95a3; }
+html.uo-host[data-uo-theme="dark"] footer a { color: #a3adb9; }
+html.uo-host #uo-root { border-radius: 0; }
+.uo-plugin .tb-box .b-sum { padding: 0; border: 0; background: none; }
+.uo-plugin .lyr .lyc-row { justify-content: flex-start; gap: var(--s-3); }
+.uo-plugin .lyr .lyc-row > .f { width: 90px; flex: none; }
+.uo-plugin .lyr .ly-outs { padding-left: calc(90px + var(--s-3)); }
+.uo-plugin .lyr .lyc-more { padding-left: calc(90px + var(--s-3)); }
+.uo-plugin [data-tb] > * + * { margin-top: var(--s-4); }

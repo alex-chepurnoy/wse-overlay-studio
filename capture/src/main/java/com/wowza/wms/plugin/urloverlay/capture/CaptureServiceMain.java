@@ -76,7 +76,7 @@ public final class CaptureServiceMain
 		service.reapOrphans();
 		BrowserEnvironment.refreshInBackground();
 
-		CaptureHandler handler = new CaptureHandler(CaptureHandler.browsers(), h -> serviceStatus(service));
+		CaptureHandler handler = new CaptureHandler(CaptureHandler.browsers(), h -> serviceStatus(service), service::setMaxCaptures);
 		ScheduledExecutorService sweep = Executors.newSingleThreadScheduledExecutor(r -> Thread.ofPlatform().daemon().name("capture-idle").unstarted(r));
 		sweep.scheduleWithFixedDelay(() -> {
 			int n = handler.closeIdle(System.currentTimeMillis());
@@ -115,6 +115,10 @@ public final class CaptureServiceMain
 		m.put("sandboxProblem", s.sandboxProblem());
 		m.put("active", s.activeCaptures());
 		m.put("limit", s.maxCaptures());
+		m.put("startLimit", s.startMaxCaptures());
+		m.put("limitCeiling", s.ceiling());
+		m.put("memoryMaxMB", s.memoryMaxMb() < 0 ? null : s.memoryMaxMb());
+		m.put("cpuLimit", s.cpuLimit() < 0 ? null : s.cpuLimit());
 		m.put("maxBrowserMemoryMB", s.maxBrowserMb());
 		m.put("recentBlocks", s.recentBlocks());
 		m.put("chromeServiceBlocks", s.chromeServiceBlocks());

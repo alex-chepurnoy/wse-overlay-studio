@@ -75,12 +75,20 @@ public final class CaptureHandler
 
 	private final Pages pages;
 	private final Function<Map<String, Object>, Map<String, Object>> serviceStatus;
+	private final java.util.function.IntUnaryOperator setLimit;
 	private final Map<String, Handle> handles = new ConcurrentHashMap<>();
 
 	public CaptureHandler(Pages pages, Function<Map<String, Object>, Map<String, Object>> serviceStatus)
 	{
+		this(pages, serviceStatus, null);
+	}
+
+	/** @param setLimit sets the number of pages captured at once and answers the limit in force; null refuses LIMITS */
+	public CaptureHandler(Pages pages, Function<Map<String, Object>, Map<String, Object>> serviceStatus, java.util.function.IntUnaryOperator setLimit)
+	{
 		this.pages = pages;
 		this.serviceStatus = serviceStatus;
+		this.setLimit = setLimit;
 	}
 
 	/** The answer to one request. Never throws: a failure is an answer with ok false and a message. */
@@ -97,6 +105,7 @@ public final class CaptureHandler
 				case Wire.FRAME -> frame(m);
 				case Wire.STATUS -> status();
 				case Wire.CLOSE -> close(m);
+				case Wire.LIMITS -> limits(m);
 				default -> new Message(Wire.error("Unknown operation " + op));
 			};
 		}
@@ -113,6 +122,8 @@ public final class CaptureHandler
 		Map<String, Object> h = mismatch == null ? Wire.ok() : Wire.error(mismatch);
 		h.put("protocol", Wire.PROTOCOL);
 		h.put("version", CaptureVersion.VERSION);
+		// new each time the service starts, so the module knows when to give it the page limit again
+		h.put("serverTag", CaptureService.get().serverTag());
 		return new Message(h);
 	}
 
@@ -190,6 +201,23 @@ public final class CaptureHandler
 		out.put("reloads", h.reloads().get());
 		out.put("status", h.page().quickStatus());
 		return new Message(out, png == null ? new byte[0] : png);
+	}
+
+	private Message limits(Message m)
+	{
+		Object n = m.header().get("maxCaptures");
+		if(setLimit == null)
+		{
+			return new Message(Wire.error("This capture service does not change its limits"));
+		}
+		// checked as a double: a huge number must not wrap into range when it is made an int
+		if(!(n instanceof Number num) || num.doubleValue() != Math.rint(num.doubleValue()) || num.doubleValue() < 1 || num.doubleValue() > CaptureService.MAX_CAPTURES_CEILING)
+		{
+			return new Message(Wire.error("maxCaptures must be a whole number from 1 to " + CaptureService.MAX_CAPTURES_CEILING));
+		}
+		Map<String, Object> h = Wire.ok();
+		h.put("maxCaptures", setLimit.applyAsInt(num.intValue()));
+		return new Message(h);
 	}
 
 	private Message status()

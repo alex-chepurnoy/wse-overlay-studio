@@ -39,6 +39,8 @@ public final class Wire
 	public static final String FRAME = "frame";
 	public static final String STATUS = "status";
 	public static final String CLOSE = "close";
+	/** Sets the number of pages captured at once, "maxCaptures"; an older service answers "Unknown operation". */
+	public static final String LIMITS = "limits";
 
 	private Wire()
 	{
