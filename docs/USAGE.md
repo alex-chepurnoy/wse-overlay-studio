@@ -219,10 +219,24 @@ larger of `maxCaptures` and the number of pages the server is sized for; run the
 
 A new install, and `--pages auto`, set `maxCaptures` from the server: a quarter of its cores at about 16% of a core per
 page, and a quarter of its memory at 128 MB per page, whichever is smaller, from 2 to 32. WSE's own transcoding is
-given the rest. The per-page figures were measured with 1.15.0 on an 8-core server, one page at the Fast rate (0.1 s);
-a page at the Standard rate (0.5 s) costs about a quarter of that, so a server whose pages are mostly Standard can take
-more. Examples: 2 cores, 3 pages; 4 cores, 6; 8 cores and 16 GB, 12; 16 cores and 64 GB, 25. A reinstall without
-`--pages` keeps the number set.
+given the rest. Examples: 2 cores, 3 pages; 4 cores, 6; 8 cores and 16 GB, 12; 16 cores and 64 GB, 25. A reinstall
+without `--pages` keeps the number set.
+
+What a page costs depends on how often it changes and its size far more than on the capture rate. Measured with 1.15.0
+on an 8-core server, 1920 x 1080 pages, 12 at once:
+
+| Pages | CPU, all 12 | Per page | Memory per page |
+|---|---|---|---|
+| A clock that changes once a second, Standard or Fast | 0.54 core | 0.045 core | 105 MB |
+| Text that changes every 0.1 s, Fast | 4.85 cores | 0.40 core | 109 MB |
+| A 60 fps animation, Fast | 5.56 cores | 0.46 core | 124 MB |
+| A 60 fps animation, Standard | 1.90 cores | 0.16 core | 66 MB |
+
+So 12 overlays that change now and then, such as scoreboards and lower thirds, use under a tenth of such a server,
+while 12 that change many times a second at Fast would use more than half of it. On Linux the systemd unit caps the
+service's CPU (`CPUQuota`, 2 cores unless the server is sized for more than 12 pages), so heavy pages get fewer frames
+rather than taking CPU from WSE: those 12 changing every 0.1 s, held to 2 cores, delivered 39% of their frames. Set
+fewer pages, or Standard, for pages that animate all the time.
 
 A number set in **Settings** in the page is kept in `conf.modules/urloverlay/capture-limit.json` and replaces
 `maxCaptures` while WSE runs; the installer reports it as the one in force, and `--pages` removes it. On Linux the
