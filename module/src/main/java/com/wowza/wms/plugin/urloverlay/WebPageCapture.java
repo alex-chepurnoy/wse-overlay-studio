@@ -568,7 +568,7 @@ public class WebPageCapture
 		synchronized(lock)
 		{
 			Map<String, Object> m = new LinkedHashMap<>(status);
-			m.put("lastCaptureAt", lastCaptureAt == null ? m.get("lastCaptureAt") : lastCaptureAt.toString());
+			m.put("lastCaptureAt", latest(lastCaptureAt, m.get("lastCaptureAt")));
 			// where a frame's time goes, service to draw
 			Map<String, Object> t = new LinkedHashMap<>();
 			t.put("intervalMs", intervalMs);
@@ -584,6 +584,25 @@ public class WebPageCapture
 			m.put("timing", t);
 			return m;
 		}
+	}
+
+	/**
+	 * The later of when this side last got a new frame and when the service last confirmed its frame: a screencast of a
+	 * page that does not change sends no new frame, and the service then reports the last one as still current.
+	 */
+	static String latest(Instant received, Object serviceSaid)
+	{
+		Instant said = null;
+		try
+		{
+			said = serviceSaid == null ? null : Instant.parse(serviceSaid.toString());
+		}
+		catch(java.time.format.DateTimeParseException e)
+		{
+			// an older service's or an unreadable time: this side's own
+		}
+		Instant t = received == null ? said : said == null || received.isAfter(said) ? received : said;
+		return t == null ? null : t.toString();
 	}
 
 	public BufferedImage lastRawImage()

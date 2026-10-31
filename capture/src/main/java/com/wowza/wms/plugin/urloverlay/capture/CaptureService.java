@@ -50,6 +50,12 @@ public final class CaptureService
 	 * page and keeps the default four browsers within 4 GB.
 	 */
 	public static final int DEFAULT_MAX_BROWSER_MB = 1024;
+	/**
+	 * Pages one Chrome holds. Sharing saves most of a Chrome's memory per page (16 pages in one Chrome measured about
+	 * 40 MB each); fewer per Chrome means fewer pages lost when one Chrome exits.
+	 */
+	public static final int DEFAULT_PAGES_PER_BROWSER = 4;
+	public static final int MAX_PAGES_PER_BROWSER = 16;
 	private static final int MAX_RECENT_BLOCKS = 50;
 	private static final long RSS_CACHE_MS = 5000;
 	// status polls every few seconds; a WMI query on Windows takes about a second
@@ -68,6 +74,7 @@ public final class CaptureService
 	private volatile long memoryMaxMb = -1;
 	private volatile double cpuLimit = -1;
 	private final int maxBrowserMb;
+	private volatile int pagesPerBrowser = DEFAULT_PAGES_PER_BROWSER;
 	private final Object lock = new Object();
 	private int active = 0;
 	private final Deque<Map<String, Object>> recentBlocks = new ArrayDeque<>();
@@ -99,6 +106,17 @@ public final class CaptureService
 	public int maxBrowserMb()
 	{
 		return maxBrowserMb;
+	}
+
+	public int pagesPerBrowser()
+	{
+		return pagesPerBrowser;
+	}
+
+	/** Sets the pages one Chrome holds, 1 to MAX_PAGES_PER_BROWSER; Chromes already running keep what they hold. */
+	public void pagesPerBrowser(int n)
+	{
+		pagesPerBrowser = Math.max(1, Math.min(MAX_PAGES_PER_BROWSER, n));
 	}
 
 	/** Called once at service start with the capture.properties values. */

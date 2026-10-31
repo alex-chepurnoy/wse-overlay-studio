@@ -17,8 +17,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Where Chrome and chromedriver are and which versions they are, for the info endpoint and for a clear error when
- * they do not match. Read once in the background at server start. Chrome's version is read from file metadata on
+ * Where Chrome is, which version, and whether it is chrome-headless-shell, for the info endpoint. Read once in the
+ * background at server start. Chrome's version is read from file metadata on
  * Windows, because running chrome.exe --version there opens a browser window instead of printing.
  */
 public final class BrowserEnvironment
@@ -26,7 +26,6 @@ public final class BrowserEnvironment
 	private static final Pattern VERSION = Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)");
 
 	private static volatile Map<String, Object> chrome = Map.of("found", false, "state", "checking");
-	private static volatile Map<String, Object> chromedriver = Map.of("found", false, "state", "checking");
 
 	private BrowserEnvironment()
 	{
@@ -41,38 +40,22 @@ public final class BrowserEnvironment
 
 	public static void refresh()
 	{
-		String chromePath = CaptureSettings.chromePath() != null ? CaptureSettings.chromePath() : findChrome();
+		String chromePath = CaptureSettings.chromePath();
 		Map<String, Object> c = new LinkedHashMap<>();
 		c.put("path", chromePath);
 		c.put("found", chromePath != null && new File(chromePath).isFile());
 		c.put("version", chromePath == null ? null : chromeVersion(chromePath));
-		Map<String, Object> d = new LinkedHashMap<>();
-		String driverPath = null;
-		try
+		c.put("headlessShell", CaptureSettings.isHeadlessShell(chromePath));
+		if(chromePath == null)
 		{
-			driverPath = CaptureSettings.requireChromeDriver().getPath();
+			c.put("error", "No Chrome configured (" + ServiceConfig.CHROME + " in the capture service's configuration)");
 		}
-		catch(IllegalStateException e)
-		{
-			d.put("error", e.getMessage());
-		}
-		d.put("path", driverPath);
-		d.put("found", driverPath != null);
-		String driverVersion = driverPath == null ? null : firstVersion(run(List.of(driverPath, "--version")));
-		d.put("version", driverVersion);
-		d.put("matchesChrome", sameMajor((String)c.get("version"), driverVersion));
 		chrome = c;
-		chromedriver = d;
 	}
 
 	public static Map<String, Object> chrome()
 	{
 		return chrome;
-	}
-
-	public static Map<String, Object> chromedriver()
-	{
-		return chromedriver;
 	}
 
 	/** @return true or false when both versions are known, null otherwise */
@@ -93,32 +76,6 @@ public final class BrowserEnvironment
 			if(m.find())
 			{
 				return m.group();
-			}
-		}
-		return null;
-	}
-
-	private static String findChrome()
-	{
-		List<String> candidates = new ArrayList<>();
-		if(CaptureService.isWindows())
-		{
-			candidates.add("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe");
-			candidates.add("C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe");
-		}
-		else
-		{
-			candidates.add("/usr/bin/google-chrome");
-			candidates.add("/usr/bin/google-chrome-stable");
-			candidates.add("/usr/bin/chromium");
-			candidates.add("/usr/bin/chromium-browser");
-			candidates.add("/opt/google/chrome/chrome");
-		}
-		for(String c: candidates)
-		{
-			if(new File(c).isFile())
-			{
-				return c;
 			}
 		}
 		return null;

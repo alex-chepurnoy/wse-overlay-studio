@@ -7,51 +7,50 @@ package com.wowza.wms.plugin.urloverlay.capture;
 import java.io.File;
 
 /**
- * Where Chrome and chromedriver are, from the capture service's configuration. The chromedriver path is always
- * explicit: without it no browser is opened, so Selenium Manager never runs and never downloads a driver.
+ * Where Chrome is, from the capture service's configuration. The service starts it itself and drives it over DevTools;
+ * the chromedriver setting of earlier versions is still accepted and no longer used.
  */
 public final class CaptureSettings
 {
-	public static final String PROP_CHROMEDRIVER_PATH = ServiceConfig.CHROMEDRIVER;
-
-	private static volatile String chromeDriverPath = null;
 	private static volatile String chromePath = null;
 
 	private CaptureSettings()
 	{
 	}
 
-	public static void configure(String driverPath, String browserPath)
+	public static void configure(String browserPath)
 	{
-		chromeDriverPath = blankToNull(driverPath);
 		chromePath = blankToNull(browserPath);
 	}
 
 	/**
-	 * @return the chromedriver executable to use
+	 * @return the Chrome binary to start: Chrome for Testing, or chrome-headless-shell
 	 * @throws IllegalStateException if none is configured or the file does not exist
 	 */
-	public static File requireChromeDriver()
+	public static String requireChrome()
 	{
-		String path = chromeDriverPath;
+		String path = chromePath;
 		if(path == null)
 		{
-			throw new IllegalStateException("No chromedriver configured. Set " + PROP_CHROMEDRIVER_PATH + " in the capture service's configuration to the chromedriver matching its Chrome.");
+			throw new IllegalStateException("No Chrome configured. Set " + ServiceConfig.CHROME + " in the capture service's configuration to the Chrome it runs.");
 		}
-		File file = new File(path);
-		if(!file.isFile())
+		if(!new File(path).isFile())
 		{
-			throw new IllegalStateException("chromedriver not found at " + path + " (" + PROP_CHROMEDRIVER_PATH + " in the capture service's configuration)");
+			throw new IllegalStateException("Chrome not found at " + path + " (" + ServiceConfig.CHROME + " in the capture service's configuration)");
 		}
-		return file;
+		return path;
 	}
 
-	/**
-	 * @return the Chrome binary to use, or null to let ChromeDriver find the installed Chrome
-	 */
+	/** The configured Chrome binary, or null. */
 	public static String chromePath()
 	{
 		return chromePath;
+	}
+
+	/** True for chrome-headless-shell, which is always headless and takes no --headless switch. */
+	static boolean isHeadlessShell(String path)
+	{
+		return path != null && new File(path).getName().toLowerCase(java.util.Locale.ROOT).startsWith("chrome-headless-shell");
 	}
 
 	private static String blankToNull(String s)

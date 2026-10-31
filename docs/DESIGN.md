@@ -10,7 +10,7 @@ the network rules for captured pages, how templates are written, and what the in
 | `UrlOverlayServer` | WSE, server listener | Registers the REST resources per `UrlOverlayServer`; reads the egress rules and the capture socket from `Server.xml` |
 | `UrlOverlayModule` | WSE, application module | Transcoder listeners, per-stream state, draws overlay frames into each transcoder session, records outputs and status |
 | `CaptureClient`, `WebPageCapture` (module side) | WSE | A handle on one capture in the service: fetches frames, keeps the last good one, reopens after a service restart |
-| Capture service | Own JVM (Java 21), own account | Chrome and chromedriver through Selenium, sandbox always on, launch limits, memory cap, profiles, the egress proxy; frames over a Unix socket |
+| Capture service | Own JVM (Java 21), own account | Chrome over DevTools (chrome-headless-shell on Linux), shared by up to `pagesPerBrowser` pages, sandbox always on, launch limits, memory cap, profiles, the egress proxy; frames by screencast or screenshots over a Unix socket |
 | `EgressGuard` | Capture service, one per capture | Local HTTP and CONNECT proxy Chrome must use; allows or blocks each connection by the resolved address |
 | `UrlOverlayBridge` | WSE Manager | Forwards the page's calls to WSE REST server side, with the signed-in user's credentials |
 | Plugin page | Browser, inside WSE Manager | All UI; plays HLS previews with its own copy of hls.js |
@@ -145,7 +145,8 @@ does not stop the Manager from writing the REST password into plugin pages.
 Chrome that cannot start sandboxed fails its captures with the reason. The systemd unit leaves out the settings that
 would break Chrome's sandbox (`RestrictNamespaces`, `PrivateUsers`, `MemoryDenyWriteExecute`, `SystemCallFilter`).
 Where AppArmor 4 restricts unprivileged user namespaces (Ubuntu 23.10 and later), the installer adds
-`/etc/apparmor.d/wse-url-overlay-chrome`, granting `userns` to `chrome-for-testing/*/chrome-linux64/chrome` only.
+`/etc/apparmor.d/wse-url-overlay-chrome`, granting `userns` to `chrome-for-testing/*/chrome-headless-shell-linux64/chrome-headless-shell`
+and, for installs from before the headless shell, `chrome-for-testing/*/chrome-linux64/chrome`, and nothing else.
 
 **Access.** WSE's user reaches the socket by file permissions alone. On Linux the socket's folder is group
 `wse-url-overlay`, mode 0770; WSE running as root connects already, and a WSE running as another user (the owner of
@@ -153,10 +154,17 @@ Where AppArmor 4 restricts unprivileged user namespaces (Ubuntu 23.10 and later)
 
 **Browsers.** Captures are pooled by page (URL, browser size, key color, background): every layer showing the same
 page, on any stream, uses one browser, kept open 15 s after its last user so an edit reuses it. Layers sharing a page
-reload it at the shortest `reloadRate` any of them asks for. At most `maxCaptures` browsers (4); one above
-`maxBrowserMemoryMB` (1024) is restarted. Each chromedriver call times out after 40 s and a page load after 30 s. A
-crashed browser reopens with backoff up to 60 s. Captures nobody asked a frame of for a minute are closed, so a WSE
-that stopped does not keep browsers open. Each browser gets a fresh profile, deleted on close.
+reload it at the shortest `reloadRate` any of them asks for. At most `maxCaptures` pages (4). One Chrome holds up to
+`pagesPerBrowser` pages (4) with the same network rules, each in a browser context of its own with its own egress proxy
+and storage, as a window of its own. A Chrome over `maxBrowserMemoryMB` (1024) per page it holds restarts the page with
+the largest JavaScript heap and takes no new pages until it has emptied and closed. Each DevTools call times out after
+15 s (a message not sent within 10 s ends the connection) and a page load after 30 s; a page that does not answer is
+opened again. A crashed page or Chrome reopens with backoff up to 60 s. Pages get no JavaScript dialogs: `alert`,
+`confirm` and `prompt` return what a dismissed one does, because a dialog the old document opens as a reload starts
+cannot be answered and would block the page. Each page is captured by screencast when it repaints at most 1.5 times per
+capture interval, and by screenshots when faster, probed again every 5 minutes. Captures nobody asked a frame of for a
+minute are closed, so a WSE that stopped does not keep browsers open. Each Chrome gets a fresh profile, deleted on
+close.
 
 **Chrome switches.** Headless, a fixed window size with the viewport pinned through DevTools, scrollbars hidden,
 `--disable-gpu`, background networking, sync, extensions, component update and similar background traffic off,
@@ -256,7 +264,7 @@ setup program, `install.cmd` and `install.sh` all run this jar.
 3. Discover applications from disk (every virtual host's `conf/<app>/Application.xml`). Live applications are
    selectable; VOD applications are not; applications that have the module are not offered again. An unattended run
    (`--yes`) changes no application unless `--appName` or `--all-live-apps` names them.
-4. Download Chrome for Testing and its chromedriver (below), unless paths are given or `--no-download`.
+4. Download Chrome (below), unless a path is given or `--no-download`.
 5. Set up the capture service: program, settings, account, unit or Windows service, AppArmor profile.
 6. Back up each file before its first edit (`<file>.urloverlay-<yyyyMMdd-HHmmss>.bak`), recording its SHA-256.
 7. `Server.xml`: the server listener and `UrlOverlayServer`, `UrlOverlayAllowPrivateNetworks`,
@@ -299,11 +307,11 @@ and `uninstall.sh --yes` on removal. Packages are not code signed.
 
 The installer reads Google's Stable list
 (`https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json`) and downloads
-the `win64` or `linux64` Chrome and chromedriver zips from `storage.googleapis.com`, over HTTPS only, with every
+the `win64` Chrome for Testing zip, or the `linux64` chrome-headless-shell zip, from `storage.googleapis.com`, over HTTPS only, with every
 redirect checked against those hosts. Google publishes no checksums for these files, so the hosts are the integrity
 guard. The zips unpack straight into the version folder; a `.complete` file written last marks it whole, and an
 incomplete folder is removed and unpacked again. Zip entries that would land outside the folder are refused. A complete
-pair already on disk is reused, so a reinstall downloads nothing. The installer stops the capture service, and waits
+Chrome already on disk is reused, so a reinstall downloads nothing. The installer stops the capture service, and waits
 for its Chrome processes to end, before it changes any Chrome folder.
 
 `UpdateChrome` runs daily: a systemd timer `WowzaURLOverlayChromeUpdate.timer` (`OnCalendar=daily`,
@@ -311,9 +319,12 @@ for its Chrome processes to end, before it changes any Chrome folder.
 4-hour random delay on Windows. Each run:
 
 1. Stops if `capture.properties` says `autoUpdate=false` or names a Chrome outside the Chrome folder.
-2. Stops if the Chrome in use is the newest Stable.
-3. Downloads the new pair next to the current one; a failure here changes nothing.
-4. Sets ownership, rewrites only the `chrome` and `chromedriver` lines of `capture.properties`, restarts the service,
+2. Stops if the Chrome in use is the newest Stable, except on Linux when it is still Chrome for Testing from before
+   1.15.0: that install moves to the headless shell of the same version, once; a move that failed is tried again only
+   for the next Stable version.
+3. Downloads the new Chrome next to the current one; a failure here changes nothing.
+4. Sets ownership, rewrites only the `chrome` line of `capture.properties` (dropping a `chromedriver` line left by an
+   earlier version), restarts the service,
    and waits up to 90 s for it to report, through its socket, Chrome at the new path.
 5. On failure puts `capture.properties` back byte for byte and restarts on the previous Chrome.
 6. On success keeps the new and the previous version and deletes older ones.

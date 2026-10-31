@@ -6,26 +6,9 @@ URL Overlay for Wowza Streaming Engine ships the components below. Each is used 
 
 | Component | Version | License | Where it goes |
 |---|---|---|---|
-| Selenium (api, chrome-driver, chromium-driver, http, java, json, manager, os, remote-driver, support) | 4.21.0 | Apache License 2.0 | Capture service `lib/` |
-| Failsafe | 3.3.2 | Apache License 2.0 | Capture service `lib/` |
-| Apache Commons Exec | 1.4.0 | Apache License 2.0 | Capture service `lib/` |
-| Guava | 33.2.0-jre | Apache License 2.0 | Capture service `lib/` |
 | hls.js | 1.6.16 | Apache License 2.0 | `manager/wse-plugins/server/url-overlay/vendor/` |
 
 The full Apache License 2.0 text is in `licenses/apache-2.0.txt`.
-
-`selenium-manager-4.21.0.jar` contains the Selenium Manager programs for Linux, macOS and Windows, also under the Apache
-License 2.0. The capture service hands Selenium the chromedriver path itself.
-
-### NOTICE: Apache Commons Exec
-
-```
-Apache Commons Exec
-Copyright 2005-2024 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (https://www.apache.org/).
-```
 
 ### NOTICE: hls.js
 
@@ -52,7 +35,7 @@ none of it is shipped.
 
 | Component | Source | Terms |
 |---|---|---|
-| Chrome for Testing and chromedriver | `storage.googleapis.com`, version from `googlechromelabs.github.io/chrome-for-testing` | Google's terms for Chrome for Testing. Skip the download with `--no-download` and `--chrome`/`--chromedriver` to use your own |
+| Chrome for Testing (Windows) and chrome-headless-shell (Linux) | `storage.googleapis.com`, version from `googlechromelabs.github.io/chrome-for-testing` | Google's terms for Chrome for Testing. Skip the download with `--no-download` and `--chrome` to use your own |
 
 ## Used from Wowza Streaming Engine, not shipped
 

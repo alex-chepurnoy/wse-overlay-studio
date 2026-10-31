@@ -42,10 +42,10 @@ public final class Main
 			"  --appName <a,b>        Applications to add the module to (name, or vhost/name), no prompt",
 			"  --all-live-apps        Add the module to every live application, no prompt",
 			"  --remove-app <a,b>     Take the module out of these applications only",
-			"  --chrome <path>        Chrome or Chromium for the capture service",
-			"  --chromedriver <path>  chromedriver matching that Chrome",
-			"                         Without both, Install downloads Chrome for Testing and its chromedriver (about 220 MB)",
-			"                         from Google into the capture service's Chrome folder, unless its settings already name a chromedriver",
+			"  --chrome <path>        Chrome or Chromium for the capture service. Without it, Install downloads Chrome from Google's",
+			"                         Chrome for Testing service into the capture service's Chrome folder (chrome-headless-shell on",
+			"                         Linux, Chrome for Testing on Windows), unless its settings already name a Chrome chosen by hand",
+			"  --chromedriver <path>  Accepted for scripts written for earlier versions, and ignored: the service needs no chromedriver",
 			"  --no-download          Do not download Chrome; set the paths yourself",
 			"  --dry-run              Print every change and write nothing",
 			"  --yes                  No prompts. Without --appName or --all-live-apps no application is changed",
@@ -99,6 +99,7 @@ public final class Main
 						case "--appName" -> o.apps = Arrays.asList(v.split("\\s*,\\s*"));
 						case "--remove-app" -> o.removeApps = Arrays.asList(v.split("\\s*,\\s*"));
 						case "--chrome" -> o.chrome = v;
+						// earlier versions needed it; read so their scripts still run, and not used
 						default -> o.chromedriver = v;
 					}
 				}
@@ -369,15 +370,19 @@ public final class Main
 		}
 		Map<String, String> props = s.properties();
 
-		// Chrome: given paths win; else the Stable pair, reused when already complete on disk, downloaded otherwise, unless
-		// the capture service's settings already name a chromedriver of the admin's own, or --no-download
+		// Chrome: a given path wins; else the Stable build, reused when already complete on disk, downloaded otherwise, unless
+		// the capture service's settings already name a Chrome of the admin's own, or --no-download
 		InstallSession.ServerChrome sc = s.serverChrome();
 		boolean adminSet = sc.set();
-		boolean download = o.chrome == null && o.chromedriver == null && !o.noDownload && !adminSet;
+		boolean download = o.chrome == null && !o.noDownload && !adminSet;
+		if(o.chromedriver != null)
+		{
+			out.println("Note: --chromedriver is ignored; the capture service drives Chrome itself and needs no chromedriver. Without --chrome, Chrome is downloaded.");
+		}
 		String platform = download ? ChromeDownload.platform() : null;
 		if(download && platform == null)
 		{
-			out.println("Chrome for Testing has no build for this OS and architecture; pass --chrome and --chromedriver.");
+			out.println("Chrome for Testing has no build for this OS and architecture; pass --chrome.");
 		}
 		// the checks come first, so nothing is downloaded for a run that cannot finish
 		if(!o.dryRun)
@@ -402,7 +407,7 @@ public final class Main
 					pair = ChromeFolders.complete(s.capture.chromeRoot(), b.version(), platform);
 					if(pair == null)
 					{
-						out.println("Would download Chrome for Testing " + b.version() + " and its chromedriver (about 220 MB) into " + s.capture.chromeRoot());
+						out.println("Would download " + ChromeDownload.download(platform) + " " + b.version() + " from Chrome for Testing into " + s.capture.chromeRoot());
 					}
 				}
 				else
@@ -410,7 +415,7 @@ public final class Main
 					ChromeFolders.Result r = ChromeFolders.ensure(s.capture.chromeRoot(), b, s.configuredChrome(), s.sys, http, out, null, () -> false, () -> {
 						Plain.changed = true;
 						s.stopCaptureForChrome();
-						out.println("Downloading Chrome for Testing " + b.version() + " and its chromedriver (about 220 MB)...");
+						out.println("Downloading " + ChromeDownload.download(platform) + " " + b.version() + " from Chrome for Testing...");
 					});
 					pair = r.pair();
 					fetched = r.downloaded();
@@ -419,8 +424,8 @@ public final class Main
 			catch(IOException | RuntimeException e)
 			{
 				s.startCaptureIfStopped();
-				out.println("Chrome was not downloaded: " + Plain.say(e) + ". Pages cannot be captured until Chrome and chromedriver are set:"
-						+ " run the installer again when this server can reach googlechromelabs.github.io and storage.googleapis.com, or pass --chrome and --chromedriver.");
+				out.println("Chrome was not downloaded: " + Plain.say(e) + ". Pages cannot be captured until Chrome is set:"
+						+ " run the installer again when this server can reach googlechromelabs.github.io and storage.googleapis.com, or pass --chrome.");
 			}
 			catch(InterruptedException e)
 			{
@@ -429,22 +434,16 @@ public final class Main
 				throw new IOException("the Chrome download was interrupted", e);
 			}
 		}
-		// what the capture service will use: the pair, the given paths, the ones its settings name, or what is found
+		// what the capture service will use: the download, the given path, the one its settings name, or what is found
 		// a path given or already set is kept as written, even before the file is there; otherwise what is found on this system
 		Path chrome = pair != null ? pair.chrome() : o.chrome != null ? Paths.get(o.chrome) : !isEmpty(sc.chrome()) ? Paths.get(sc.chrome()) : Preflight.chrome(null);
-		Path driver = pair != null ? pair.driver()
-				: o.chromedriver != null ? Paths.get(o.chromedriver) : !isEmpty(sc.driver()) ? Paths.get(sc.driver()) : Preflight.chromedriver(null);
 		String cv = pair != null ? pair.version() : chrome != null && Files.isRegularFile(chrome) ? Preflight.chromeVersion(chrome) : null;
-		String dv = pair != null ? pair.version() : driver != null && Files.isRegularFile(driver) ? Preflight.chromedriverVersion(driver) : null;
-		if(adminSet && o.chrome == null && o.chromedriver == null)
+		if(adminSet && o.chrome == null)
 		{
-			out.println("The capture service's settings already name a chromedriver; it is kept and nothing is downloaded.");
+			out.println("The capture service's settings already name a Chrome chosen by hand; it is kept and nothing is downloaded.");
 		}
 		out.println("Chrome:       " + (chrome == null ? "not found (pages cannot be captured until it is installed; README, Chrome)"
 				: chrome + (cv == null ? "" : " " + cv) + (Files.isRegularFile(chrome) ? "" : " (not there yet)")));
-		out.println("chromedriver: " + (driver == null ? "not found (pass --chromedriver; README, Chrome)" : driver + (dv == null ? "" : " " + dv)
-				+ (Files.isRegularFile(driver) ? "" : " (not there yet)")
-				+ (cv != null && dv != null && !Preflight.sameMajor(cv, dv) ? " DOES NOT MATCH Chrome " + cv : "")));
 		Boolean fonts = Preflight.fonts();
 		if(Boolean.FALSE.equals(fonts))
 		{
@@ -454,7 +453,7 @@ public final class Main
 		{
 			out.println(s.bridgeSkipped());
 		}
-		CaptureSetup.Config cfg = s.captureConfig(chrome, driver);
+		CaptureSetup.Config cfg = s.captureConfig(chrome);
 		boolean captureNeeded = s.captureNeeded(cfg);
 		List<Installer.Op> ops = s.planInstall(chosen, props);
 		if(!s.persistentPluginDir)

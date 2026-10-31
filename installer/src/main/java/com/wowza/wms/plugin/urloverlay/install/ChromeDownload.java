@@ -26,10 +26,10 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Chrome for Testing and the chromedriver built for it, fetched at install time from Google's Chrome for Testing
- * service. The pair always matches and does not update itself, so a Chrome update on the server can never leave the
- * service with a chromedriver for another version. The zips unpack to chrome-win64/chrome.exe and chromedriver-win64/chromedriver.exe; chrome-linux64/chrome and
- * chromedriver-linux64/chromedriver.
+ * The capture service's Chrome, fetched at install time from Google's Chrome for Testing service: Chrome for Testing on
+ * Windows, and chrome-headless-shell on Linux, which draws the same pages with the same CPU and 40 to 50% less memory
+ * per page, as measured with 16 pages in one Chrome. Neither updates itself; the daily update (ChromeUpdate) moves to a
+ * newer build. The zips unpack to chrome-win64/chrome.exe and chrome-headless-shell-linux64/chrome-headless-shell.
  * <p>
  * Google publishes no checksum for these files, so the integrity guard is where they come from: the list only from
  * googlechromelabs.github.io and the zips only from storage.googleapis.com, both over HTTPS, with every redirect checked
@@ -40,7 +40,7 @@ final class ChromeDownload
 	/** Google's list of the current Chrome for Testing builds per channel, with download URLs per platform. */
 	static final String LIST = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
 	/**
-	 * Written last into a version folder, once both programs are unpacked: a folder without it is incomplete and is
+	 * Written last into a version folder, once Chrome is unpacked: a folder without it is incomplete and is
 	 * cleaned and unpacked again. The folder itself is never renamed after unpacking, because on Windows a scanner
 	 * (antivirus or the search indexer) holding a freshly written file makes the rename fail with access denied.
 	 */
@@ -67,20 +67,20 @@ final class ChromeDownload
 				&& (u.getPort() == -1 || u.getPort() == 443);
 	}
 
-	/** One build: its version and, for this OS, where to get Chrome and chromedriver. */
-	record Build(String version, String platform, String chromeUrl, String driverUrl)
+	/** One build: its version and, for this OS, where to get its Chrome. */
+	record Build(String version, String platform, String chromeUrl)
 	{
 	}
 
-	/** The extracted pair. */
-	record Pair(Path dir, Path chrome, Path driver, String version)
+	/** The unpacked Chrome: its version folder and its program. */
+	record Pair(Path dir, Path chrome, String version)
 	{
 	}
 
-	/** Download progress: which file (1 or 2), its bytes so far, and its size, -1 when the server does not say. */
+	/** Download progress: the bytes so far, and the size, -1 when the server does not say. */
 	interface Progress
 	{
-		void update(int file, String name, long done, long total);
+		void update(String name, long done, long total);
 	}
 
 	static String platform()
@@ -153,19 +153,31 @@ final class ChromeDownload
 		{
 			throw new IOException("The Chrome for Testing list gives an unexpected version: " + version);
 		}
-		Build b = new Build(version, platform, url((List<Object>)downloads.get("chrome"), platform), url((List<Object>)downloads.get("chromedriver"), platform));
-		for(String u: List.of(b.chromeUrl(), b.driverUrl()))
+		String kind = download(platform);
+		Object list = downloads.get(kind);
+		if(!(list instanceof List))
 		{
-			if(!src.downloadAllowed().test(URI.create(u)))
-			{
-				throw new IOException("Refused " + u + ": Chrome for Testing is only fetched from Google's own addresses over HTTPS");
-			}
+			throw new IOException("The Chrome for Testing list has no " + kind + " downloads");
+		}
+		Build b = new Build(version, platform, url((List<Object>)list, kind, platform));
+		if(!src.downloadAllowed().test(URI.create(b.chromeUrl())))
+		{
+			throw new IOException("Refused " + b.chromeUrl() + ": Chrome for Testing is only fetched from Google's own addresses over HTTPS");
 		}
 		return b;
 	}
 
+	/**
+	 * Which of the list's downloads the capture service gets: chrome on Windows, chrome-headless-shell elsewhere. The list
+	 * also has chromedriver, which the service no longer uses.
+	 */
+	static String download(String platform)
+	{
+		return platform.startsWith("win") ? "chrome" : "chrome-headless-shell";
+	}
+
 	@SuppressWarnings("unchecked")
-	private static String url(List<Object> list, String platform) throws IOException
+	private static String url(List<Object> list, String kind, String platform) throws IOException
 	{
 		for(Object o: list)
 		{
@@ -175,26 +187,22 @@ final class ChromeDownload
 				return String.valueOf(m.get("url"));
 			}
 		}
-		throw new IOException("No " + platform + " download in the Chrome for Testing list");
+		throw new IOException("No " + platform + " " + kind + " download in the Chrome for Testing list");
 	}
 
-	/** The pair already unpacked and complete for this version under chromeRoot, or null. */
+	/** The Chrome already unpacked and complete for this version under chromeRoot, or null. */
 	static Pair existing(Path chromeRoot, String version, String platform)
 	{
 		Path dir = chromeRoot.resolve(version);
-		Path chrome = chromeIn(dir, platform), driver = driverIn(dir, platform);
-		return Files.isRegularFile(dir.resolve(COMPLETE)) && Files.isRegularFile(chrome) && Files.isRegularFile(driver) ? new Pair(dir, chrome, driver, version)
-				: null;
+		Path chrome = chromeIn(dir, platform);
+		return Files.isRegularFile(dir.resolve(COMPLETE)) && Files.isRegularFile(chrome) ? new Pair(dir, chrome, version) : null;
 	}
 
+	/** The program in a version folder: chrome-win64/chrome.exe, or chrome-headless-shell-linux64/chrome-headless-shell. */
 	static Path chromeIn(Path dir, String platform)
 	{
-		return dir.resolve("chrome-" + platform).resolve(platform.startsWith("win") ? "chrome.exe" : "chrome");
-	}
-
-	static Path driverIn(Path dir, String platform)
-	{
-		return dir.resolve("chromedriver-" + platform).resolve(platform.startsWith("win") ? "chromedriver.exe" : "chromedriver");
+		String kind = download(platform);
+		return dir.resolve(kind + "-" + platform).resolve(platform.startsWith("win") ? kind + ".exe" : kind);
 	}
 
 	static Pair fetch(HttpClient http, Path dir, Build b, PrintStream out) throws IOException, InterruptedException
@@ -203,7 +211,7 @@ final class ChromeDownload
 	}
 
 	/**
-	 * Downloads both zips and unpacks them straight into dir, then writes the completion marker. ChromeFolders picks dir:
+	 * Downloads the zip and unpacks it straight into dir, then writes the completion marker. ChromeFolders picks dir:
 	 * one nothing uses, absent or already cleared. On failure or cancel the folder is removed again; when that is not
 	 * possible (a scanner still holds a file) it stays without its marker and a later run cleans it.
 	 * @param progress told about each block received; may be null
@@ -216,33 +224,28 @@ final class ChromeDownload
 		Files.createDirectories(dir);
 		try
 		{
-			int n = 0;
-			for(String url: List.of(b.chromeUrl(), b.driverUrl()))
+			String url = b.chromeUrl();
+			out.println("  downloading " + url);
+			Path zip = dir.resolve("Chrome.zip.download");
+			HttpResponse<InputStream> r = send(http, URI.create(url), source.downloadAllowed(), Duration.ofMinutes(15), HttpResponse.BodyHandlers.ofInputStream());
+			try(InputStream in = r.body())
 			{
-				n++;
-				String name = n == 1 ? "Chrome" : "chromedriver";
-				out.println("  downloading " + url);
-				Path zip = dir.resolve(name + ".zip.download");
-				HttpResponse<InputStream> r = send(http, URI.create(url), source.downloadAllowed(), Duration.ofMinutes(15), HttpResponse.BodyHandlers.ofInputStream());
-				try(InputStream in = r.body())
+				if(r.statusCode() != 200)
 				{
-					if(r.statusCode() != 200)
-					{
-						throw new IOException(url + " answered " + r.statusCode());
-					}
-					long total = r.headers().firstValueAsLong("content-length").orElse(-1);
-					copy(in, zip, n, name, total, progress, cancelled);
+					throw new IOException(url + " answered " + r.statusCode());
 				}
-				unzip(zip, dir);
-				deleteQuietly(zip);
+				long total = r.headers().firstValueAsLong("content-length").orElse(-1);
+				copy(in, zip, "Chrome", total, progress, cancelled);
 			}
-			if(!Files.isRegularFile(chromeIn(dir, b.platform())) || !Files.isRegularFile(driverIn(dir, b.platform())))
+			unzip(zip, dir);
+			deleteQuietly(zip);
+			Path chrome = chromeIn(dir, b.platform());
+			if(!Files.isRegularFile(chrome))
 			{
-				throw new IOException("The downloads do not hold " + chromeIn(dir, b.platform()).getFileName() + " and "
-						+ driverIn(dir, b.platform()).getFileName() + " where expected");
+				throw new IOException("The download does not hold " + chrome.getFileName() + " where expected");
 			}
 			Files.writeString(dir.resolve(COMPLETE), b.version() + System.lineSeparator(), StandardCharsets.UTF_8);
-			return new Pair(dir, chromeIn(dir, b.platform()), driverIn(dir, b.platform()), b.version());
+			return new Pair(dir, chrome, b.version());
 		}
 		catch(IOException | InterruptedException | RuntimeException e)
 		{
@@ -258,7 +261,7 @@ final class ChromeDownload
 		}
 	}
 
-	private static void copy(InputStream in, Path zip, int file, String name, long total, Progress progress, BooleanSupplier cancelled) throws IOException
+	private static void copy(InputStream in, Path zip, String name, long total, Progress progress, BooleanSupplier cancelled) throws IOException
 	{
 		byte[] buf = new byte[64 * 1024];
 		long done = 0;
@@ -274,7 +277,7 @@ final class ChromeDownload
 				done += k;
 				if(progress != null)
 				{
-					progress.update(file, name, done, total);
+					progress.update(name, done, total);
 				}
 			}
 		}

@@ -1,7 +1,7 @@
 // The installer: plain JDK, no WSE classes, so it runs on the WSE-bundled JRE before WSE knows about the module.
 // Its jar carries the payload: the module jar, the plugin page, the starter templates, the Manager bridge's class files
-// (bridge/, which go into <manager>/temp) and the capture service with its libraries (capture/). Selenium belongs to the
-// capture service and never goes into WSE's lib/.
+// (bridge/, which go into <manager>/temp) and the capture service with its libraries (capture/), which it has none of
+// now. A library of the capture service never goes into WSE's lib/.
 // Java 17 bytecode and the repositories come from the root build.
 
 base {

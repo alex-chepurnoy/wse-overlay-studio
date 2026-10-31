@@ -109,7 +109,6 @@ final class SetupWindow
 	final JRadioButton existing = new JRadioButton("Use a Chrome already on this computer");
 	final JRadioButton skip = new JRadioButton("Skip for now (web pages cannot be drawn until Chrome is set up)");
 	final JTextField chromePath = new JTextField(36);
-	final JTextField driverPath = new JTextField(36);
 	private final JLabel downloadNote = new JLabel();
 	private final JLabel chromeKept = new JLabel();
 	private final JPanel chromeChoices = new JPanel();
@@ -214,26 +213,22 @@ final class SetupWindow
 		chromeChoices.add(left(downloadNote, 26));
 		chromeChoices.add(Box.createVerticalStrut(12));
 		chromeChoices.add(left(existing, 0));
-		for(int k = 0; k < 2; k++)
-		{
-			JTextField f = k == 0 ? chromePath : driverPath;
-			JLabel l = new JLabel(k == 0 ? "Chrome:" : "ChromeDriver:");
-			l.setPreferredSize(new Dimension(90, l.getPreferredSize().height));
-			JButton b = new JButton("Browse...");
-			b.addActionListener(e -> {
-				JFileChooser fc = new JFileChooser();
-				if(fc.showOpenDialog(root) == JFileChooser.APPROVE_OPTION)
-				{
-					f.setText(fc.getSelectedFile().toString());
-					existing.setSelected(true);
-				}
-			});
-			JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-			row.add(l);
-			row.add(f);
-			row.add(b);
-			chromeChoices.add(left(row, 20));
-		}
+		JLabel label = new JLabel("Chrome:");
+		label.setPreferredSize(new Dimension(90, label.getPreferredSize().height));
+		JButton pick = new JButton("Browse...");
+		pick.addActionListener(e -> {
+			JFileChooser fc = new JFileChooser();
+			if(fc.showOpenDialog(root) == JFileChooser.APPROVE_OPTION)
+			{
+				chromePath.setText(fc.getSelectedFile().toString());
+				existing.setSelected(true);
+			}
+		});
+		JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+		row.add(label);
+		row.add(chromePath);
+		row.add(pick);
+		chromeChoices.add(left(row, 20));
 		chromeChoices.add(Box.createVerticalStrut(12));
 		chromeChoices.add(left(skip, 0));
 		p.add(chromeKept, BorderLayout.NORTH);
@@ -383,10 +378,10 @@ final class SetupWindow
 			chromeKept.setText("<html><body style='width:600px'>Chrome is already set up for this Wowza Streaming Engine and is kept:<br><br>" + esc(s.alreadySet())
 					+ "</body></html>");
 		}
-		download.setText("Download Chrome from Google (recommended, about 220 MB)");
+		download.setText("Download Chrome from Google (recommended)");
 		download.setEnabled(s.downloadProblem() == null);
 		downloadNote.setText("<html><body style='width:520px'>" + (s.downloadProblem() != null ? "Cannot download now: " + esc(s.downloadProblem())
-				: "A copy kept only for URL Overlay, with its matching driver" + (s.downloadVersion() == null ? "" : ", version " + s.downloadVersion())
+				: "A copy kept only for URL Overlay" + (s.downloadVersion() == null ? "" : ", version " + s.downloadVersion())
 						+ ".<br>A daily check installs newer versions; to turn it off, add autoUpdate=false to capture.properties.")
 				+ "</body></html>");
 		(choice == ChromeChoice.DOWNLOAD && s.downloadProblem() == null ? download : choice == ChromeChoice.EXISTING ? existing : skip).setSelected(true);
@@ -717,9 +712,9 @@ final class SetupWindow
 				}
 				case "chrome" -> {
 					choice = w.chromeChoice();
-					if(choice == ChromeChoice.EXISTING && (w.chromePath.getText().isBlank() || w.driverPath.getText().isBlank()))
+					if(choice == ChromeChoice.EXISTING && w.chromePath.getText().isBlank())
 					{
-						JOptionPane.showMessageDialog(frame, "Give both Chrome and ChromeDriver, or choose another option.", TITLE, JOptionPane.INFORMATION_MESSAGE);
+						JOptionPane.showMessageDialog(frame, "Give the Chrome to use, or choose another option.", TITLE, JOptionPane.INFORMATION_MESSAGE);
 						return;
 					}
 					review();
@@ -865,30 +860,23 @@ final class SetupWindow
 				}
 				return serverChrome;
 			}, sc -> {
-				String kept = sc.set() ? sc.driver() + (sc.chrome() == null || sc.chrome().isEmpty() ? "" : "\n" + sc.chrome()) : null;
+				String kept = sc.set() ? sc.chrome() : null;
 				w.showChrome(new ChromeState(kept, build == null ? null : build.version(), buildProblem), choice);
 			});
 		}
 
-		/** The Chrome the capture service gets, from the Chrome screen: chrome and chromedriver, either may be null. */
-		private Path[] chromePaths()
+		/** The Chrome the capture service gets, from the Chrome screen; may be null. */
+		private Path chromePath()
 		{
 			if(serverChrome != null && serverChrome.set())
 			{
-				return new Path[] { serverChrome.chrome() == null || serverChrome.chrome().isBlank() ? null : Paths.get(serverChrome.chrome()), Paths.get(serverChrome.driver()) };
+				return Paths.get(serverChrome.chrome());
 			}
 			return switch(choice)
 			{
-				case EXISTING -> new Path[] { Paths.get(w.chromePath.getText().trim()), Paths.get(w.driverPath.getText().trim()) };
-				case DOWNLOAD -> {
-					if(build == null)
-					{
-						yield new Path[] { null, null };
-					}
-					Path dir = session.capture.chromeRoot().resolve(build.version());
-					yield new Path[] { ChromeDownload.chromeIn(dir, build.platform()), ChromeDownload.driverIn(dir, build.platform()) };
-				}
-				default -> new Path[] { null, null };
+				case EXISTING -> Paths.get(w.chromePath.getText().trim());
+				case DOWNLOAD -> build == null ? null : ChromeDownload.chromeIn(session.capture.chromeRoot().resolve(build.version()), build.platform());
+				default -> null;
 			};
 		}
 
@@ -901,12 +889,12 @@ final class SetupWindow
 		{
 			screen = "review";
 			Map<String, String> props = session.properties();
-			Path[] chrome = chromePaths();
+			Path chrome = chromePath();
 			boolean dl = downloading();
 			background(() -> {
 				InstallSession.Problem p = session.installBlocker(chosen, dl);
 				List<Installer.Op> ops = session.planQuietly(chosen, props);
-				boolean capture = session.captureNeeded(session.captureConfig(chrome[0], chrome[1]));
+				boolean capture = session.captureNeeded(session.captureConfig(chrome));
 				return new Object[] { p, describe(ops, session.home, List.of()), session.touchesBridge(ops), capture };
 			}, r -> {
 				InstallSession.Problem p = (InstallSession.Problem)r[0];
@@ -1054,7 +1042,7 @@ final class SetupWindow
 			l.add(apps.isEmpty() ? "No application is changed now; turn URL Overlay on for one later in Wowza Streaming Engine Manager"
 					: "Turn URL Overlay on for: " + String.join(", ", apps));
 			l.add(chromeKept ? "Keep the Chrome this server already uses"
-					: downloadVersion != null ? "Download Chrome for Testing " + downloadVersion + " from Google (about 220 MB)"
+					: downloadVersion != null ? "Download Chrome for Testing " + downloadVersion + " from Google"
 					: choice == ChromeChoice.EXISTING ? "Use the Chrome you chose" : "Leave Chrome to be set up later");
 			l.add("Add the URL Overlay page to Wowza Streaming Engine Manager");
 			return l;
@@ -1082,7 +1070,7 @@ final class SetupWindow
 			boolean dl = downloading();
 			boolean restart = w.restartManager.isVisible() && w.restartManager.isSelected();
 			Map<String, String> props = session.properties();
-			Path[] chosenChrome = chromePaths();
+			Path chosenChrome = chromePath();
 			Plain.changed = false;
 			Plain.detail = new PrintStream(report, true, StandardCharsets.UTF_8);
 			w.showProgress(dl ? "Downloading Chrome..." : "Applying changes...", dl ? 0 : -1, "", dl);
@@ -1121,10 +1109,10 @@ final class SetupWindow
 						try
 						{
 							ChromeFolders.Result r = ChromeFolders.ensure(s.capture.chromeRoot(), build, s.configuredChrome(), s.sys, ChromeDownload.client(), live,
-									(file, name, done, total) -> publish(new Object[] { file, name, done, total }), cancelDownload::get, () -> {
+									(name, done, total) -> publish(new Object[] { name, done, total }), cancelDownload::get, () -> {
 										Plain.changed = true;
 										s.stopCaptureForChrome();
-										live.println("Downloading Chrome for Testing " + build.version() + " and its chromedriver (about 220 MB)...");
+										live.println("Downloading " + ChromeDownload.download(build.platform()) + " " + build.version() + " from Chrome for Testing...");
 									});
 							pair = r.pair();
 							fetched = r.downloaded();
@@ -1143,7 +1131,7 @@ final class SetupWindow
 					SwingUtilities.invokeLater(() -> w.showProgress("Setting up the capture service and applying changes...", -1, null, false));
 					List<Installer.Op> ops = s.planInstall(chosen, props);
 					Installer.print(live, ops, false);
-					CaptureSetup.Config cfg = s.captureConfig(pair != null ? pair.chrome() : chosenChrome[0], pair != null ? pair.driver() : chosenChrome[1]);
+					CaptureSetup.Config cfg = s.captureConfig(pair != null ? pair.chrome() : chosenChrome);
 					try
 					{
 						InstallSession.Installed done = s.applyInstall(ops, chosen, cfg);
@@ -1190,9 +1178,9 @@ final class SetupWindow
 				protected void process(List<Object[]> chunks)
 				{
 					Object[] c = chunks.get(chunks.size() - 1);
-					long done = (Long)c[2], total = (Long)c[3];
+					long done = (Long)c[1], total = (Long)c[2];
 					String mb = total > 0 ? (done >> 20) + " of " + (total >> 20) + " MB" : (done >> 20) + " MB";
-					w.showProgress("Downloading " + c[1] + " (" + c[0] + " of 2): " + mb, total > 0 ? (int)(done * 1000 / total) : -1, null, true);
+					w.showProgress("Downloading " + c[0] + ": " + mb, total > 0 ? (int)(done * 1000 / total) : -1, null, true);
 				}
 
 				@Override

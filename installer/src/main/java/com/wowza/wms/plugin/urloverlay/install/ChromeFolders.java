@@ -21,12 +21,15 @@ import java.util.function.Predicate;
  * upgrade, repair and the daily update all go through {@link #ensure}:
  * <ol>
  * <li>a complete folder of the version (its marker written last) is used as it is: no download;</li>
- * <li>a folder with both programs that report the version but no marker (an older run, or a marker lost) is adopted:
- * the marker is written, no download;</li>
- * <li>otherwise the service is stopped first, and the pair is unpacked into the version folder when nothing uses it and
+ * <li>a folder whose Chrome reports the version but has no marker (an older run, or a marker lost) is adopted: the
+ * marker is written, no download;</li>
+ * <li>otherwise the service is stopped first, and Chrome is unpacked into the version folder when nothing uses it and
  * it can be cleared, else into a fresh sibling, &lt;version&gt;-2 and so on.</li>
  * </ol>
- * A folder is in use when capture.properties points into it or a process runs from it.
+ * A folder is in use when capture.properties points into it or a process runs from it. A folder from an earlier version
+ * of the installer holds chrome-linux64/chrome and chromedriver-linux64 on Linux, not the headless shell: it is neither
+ * complete nor adopted for the headless shell, so the headless shell goes into a sibling while capture.properties
+ * still points into it, and the daily update deletes it later with the other old versions.
  */
 final class ChromeFolders
 {
@@ -70,16 +73,16 @@ final class ChromeFolders
 
 	static ChromeDownload.Pair pairIn(Path dir, String version, String platform)
 	{
-		return new ChromeDownload.Pair(dir, ChromeDownload.chromeIn(dir, platform), ChromeDownload.driverIn(dir, platform), version);
+		return new ChromeDownload.Pair(dir, ChromeDownload.chromeIn(dir, platform), version);
 	}
 
-	/** A complete folder of this version: marker and both programs. */
+	/** A complete folder of this version: marker and Chrome. */
 	static ChromeDownload.Pair complete(Path root, String version, String platform)
 	{
 		for(Path d: candidates(root, version))
 		{
 			ChromeDownload.Pair p = pairIn(d, version, platform);
-			if(Files.isRegularFile(d.resolve(ChromeDownload.COMPLETE)) && Files.isRegularFile(p.chrome()) && Files.isRegularFile(p.driver()))
+			if(Files.isRegularFile(d.resolve(ChromeDownload.COMPLETE)) && Files.isRegularFile(p.chrome()))
 			{
 				return p;
 			}
@@ -88,20 +91,20 @@ final class ChromeFolders
 	}
 
 	/**
-	 * A folder of this version without its marker whose Chrome and chromedriver both report exactly this version:
-	 * Chrome by the &lt;version&gt;.manifest file Chrome for Testing keeps next to chrome.exe on Windows (no window opens)
-	 * and chrome --version on Linux; chromedriver by chromedriver --version. The marker is written, and the pair used.
+	 * A folder of this version without its marker whose Chrome reports exactly this version: by the
+	 * &lt;version&gt;.manifest file Chrome for Testing keeps next to chrome.exe on Windows (no window opens), and by
+	 * chrome-headless-shell --version on Linux. The marker is written, and the folder used.
 	 */
 	static ChromeDownload.Pair adopt(Path root, String version, String platform, PrintStream out)
 	{
 		for(Path d: candidates(root, version))
 		{
 			ChromeDownload.Pair p = pairIn(d, version, platform);
-			if(!Files.isRegularFile(p.chrome()) || !Files.isRegularFile(p.driver()))
+			if(!Files.isRegularFile(p.chrome()))
 			{
 				continue;
 			}
-			if(version.equals(versionOf(p.chrome(), true)) && version.equals(versionOf(p.driver(), false)))
+			if(version.equals(versionOf(p.chrome())))
 			{
 				try
 				{
@@ -118,14 +121,14 @@ final class ChromeFolders
 		return null;
 	}
 
-	static String versionOf(Path exe, boolean chrome)
+	static String versionOf(Path chrome)
 	{
 		var t = testVersionOf;
 		if(t != null)
 		{
-			return t.apply(exe);
+			return t.apply(chrome);
 		}
-		return chrome ? Preflight.chromeVersion(exe) : Preflight.chromedriverVersion(exe);
+		return Preflight.chromeVersion(chrome);
 	}
 
 	/** True when capture.properties points into dir, or a process runs from it. */
@@ -151,7 +154,7 @@ final class ChromeFolders
 			}
 			if(inUse.test(d))
 			{
-				out.println(d + " is incomplete and in use; it is left as it is.");
+				out.println(d + " is in use and does not hold this Chrome; it is left as it is, and Chrome goes next to it.");
 				continue;
 			}
 			try

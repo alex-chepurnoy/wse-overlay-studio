@@ -479,7 +479,7 @@
   // how often an overlay's pages are captured, as three named speeds plus the exact value. Measured on one page:
   // 0.5 s about 12% of a CPU core, 0.25 s about 23%, 0.1 s about 54%, for the capture service
   // (docs/perf/2026-10-30-thread-drawing-and-capture-rate.md)
-  U.SPEEDS = [[0.5, 'Standard', 'Scoreboards and lower thirds'], [0.25, 'Fast', 'Clocks; about twice the capture CPU'], [0.1, 'Fastest', 'About half a CPU core per page']];
+  U.SPEEDS = [[0.5, 'Standard', 'Scoreboards and lower thirds'], [0.25, 'Fast', 'Clocks and counters'], [0.1, 'Fastest', 'Tickers; costs most on pages that animate all the time']];
   // field: the exact seconds, shown on the same line, so the named speeds and the number are one control
   U.speedHtml = function (value, attr, disabled, field) {
     var known = U.SPEEDS.some(function (s) { return s[0] === value; });

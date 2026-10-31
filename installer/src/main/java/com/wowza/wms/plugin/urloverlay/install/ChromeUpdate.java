@@ -33,7 +33,9 @@ import com.wowza.wms.plugin.urloverlay.capture.Wire;
  * the one in use (same host and redirect checks, same completion marker), points capture.properties at it, restarts the
  * service and checks that it runs and reports that Chrome. Any failure puts capture.properties back, restarts the service
  * on the previous Chrome and exits non-zero. The current and the previous version are kept; older ones are deleted. Each
- * run leaves chrome-update.json next to capture.properties, which the module shows on the Server view.
+ * run leaves chrome-update.json next to capture.properties, which the module shows on the Server view. A Linux install
+ * still on Chrome for Testing (chrome-linux64/chrome, from an earlier version of the installer) is moved to
+ * chrome-headless-shell the same way, even when its version is the newest.
  * <p>
  * Integrity: Google publishes no checksums for Chrome for Testing, so the files are trusted for coming over HTTPS from
  * googlechromelabs.github.io (the list) and storage.googleapis.com (the zips) only, the rule ChromeDownload enforces.
@@ -363,13 +365,29 @@ final class ChromeUpdate
 			Thread.currentThread().interrupt();
 			return failed("The check was interrupted. Nothing was changed.", current, null);
 		}
-		if(compare(b.version(), current) <= 0)
+		// an install from before the headless shell runs chrome-linux64/chrome: it moves to the headless shell even when
+		// its version is the newest
+		boolean moving = !abs.equals(ChromeDownload.chromeIn(root.resolve(currentFolder), platform));
+		if(moving && b.version().equals(readState().get(MOVE_FAILED)))
+		{
+			// tried for this Stable version already and it did not run here, so nothing is restarted for it again; the next
+			// Stable version is tried
+			String msg = "Chrome " + current + " stays in use: " + ChromeDownload.download(platform) + " " + b.version()
+					+ " did not run here when it was tried. The next Stable version is tried. Nothing was changed.";
+			out.println(msg);
+			// a put-back that failed is still the news, and stays on the Server view until a run changes something
+			Object earlier = readState().get("message");
+			writeState("failed", earlier != null && earlier.toString().contains("Putting Chrome") ? earlier.toString() : msg, current, null, b.version(), null);
+			return 0;
+		}
+		if(compare(b.version(), current) <= 0 && !moving)
 		{
 			out.println("Chrome " + current + " is the newest Stable. Nothing was changed.");
 			writeState("current", null, current, null, b.version(), null);
 			return 0;
 		}
-		out.println("Chrome " + current + " is in use; Stable is " + b.version() + ". Getting it...");
+		out.println(moving ? "Chrome " + current + " is in use from " + abs.getParent().getFileName() + "; getting " + ChromeDownload.download(platform) + " "
+				+ b.version() + " in its place..." : "Chrome " + current + " is in use; Stable is " + b.version() + ". Getting it...");
 		ChromeDownload.Pair pair;
 		boolean fetched;
 		try
@@ -401,13 +419,39 @@ final class ChromeUpdate
 					+ (back == null ? "Chrome " + current + " was put back and the service runs on it." : "Putting Chrome " + current + " back also failed: " + back + ".");
 			out.println(msg);
 			writeState("failed", msg, current, null, b.version(), null);
+			if(moving)
+			{
+				markMoveFailed(b.version());
+			}
 			return back == null ? 5 : 6;
 		}
 		List<String> removed = keepTwo(pair.dir().getFileName().toString(), currentFolder);
-		String msg = "Chrome " + b.version() + " is in use; " + current + " is kept as the previous version" + (removed.isEmpty() ? "." : ", and " + String.join(", ", removed) + " removed.");
+		String msg = "Chrome " + b.version() + (moving ? " (" + ChromeDownload.download(platform) + ")" : "") + " is in use; " + (moving ? "the Chrome in " + currentFolder : current)
+				+ " is kept as the previous version" + (removed.isEmpty() ? "." : ", and " + String.join(", ", removed) + " removed.");
 		out.println(msg);
 		writeState("updated", null, b.version(), current, b.version(), now());
 		return 0;
+	}
+
+	/** The state key naming the version whose move to the headless shell failed. */
+	static final String MOVE_FAILED = "moveFailedFor";
+
+	private void markMoveFailed(String version)
+	{
+		Map<String, Object> s = readState();
+		s.put(MOVE_FAILED, version);
+		Path f = l.configDir().resolve(STATE);
+		try
+		{
+			Path tmp = f.resolveSibling(STATE + ".tmp");
+			Files.writeString(tmp, Json.write(s), StandardCharsets.UTF_8);
+			Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+			sys.posix(f, "rw-r--r--", "root", "root");
+		}
+		catch(IOException e)
+		{
+			out.println("The update state could not be written: " + Plain.say(e));
+		}
 	}
 
 	private int failed(String msg, String current, String latest)
@@ -440,7 +484,7 @@ final class ChromeUpdate
 					}
 				}
 			}
-			Files.write(l.config(), withChrome(new String(config, StandardCharsets.UTF_8), pair.chrome(), pair.driver()).getBytes(StandardCharsets.UTF_8));
+			Files.write(l.config(), withChrome(new String(config, StandardCharsets.UTF_8), pair.chrome()).getBytes(StandardCharsets.UTF_8));
 		}
 		catch(IOException | RuntimeException e)
 		{
@@ -450,11 +494,14 @@ final class ChromeUpdate
 		return verify(pair.chrome());
 	}
 
-	/** The settings text with chrome and chromedriver replaced, every other line as it was. */
-	static String withChrome(String text, Path chrome, Path driver)
+	/**
+	 * The settings text with chrome replaced, and the chromedriver line of an earlier version, which the service no longer
+	 * uses, left out; every other line as it was.
+	 */
+	static String withChrome(String text, Path chrome)
 	{
 		StringBuilder b = new StringBuilder();
-		boolean c = false, d = false;
+		boolean c = false;
 		for(String line: text.split("\n", -1))
 		{
 			String t = line.stripLeading();
@@ -465,8 +512,7 @@ final class ChromeUpdate
 			}
 			else if(t.startsWith("chromedriver=") || t.startsWith("chromedriver ="))
 			{
-				line = "chromedriver=" + escape(driver);
-				d = true;
+				continue;
 			}
 			b.append(line).append('\n');
 		}
@@ -474,10 +520,6 @@ final class ChromeUpdate
 		if(!c)
 		{
 			s += (s.endsWith("\n") ? "" : "\n") + "chrome=" + escape(chrome) + "\n";
-		}
-		if(!d)
-		{
-			s += (s.endsWith("\n") ? "" : "\n") + "chromedriver=" + escape(driver) + "\n";
 		}
 		return s;
 	}

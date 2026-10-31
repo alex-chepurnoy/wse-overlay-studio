@@ -161,28 +161,6 @@ final class Preflight
 		return firstVersion(run(chrome.toString(), "--version"));
 	}
 
-	static Path chromedriver(String given)
-	{
-		if(given != null)
-		{
-			return Files.isRegularFile(Paths.get(given)) ? Paths.get(given) : null;
-		}
-		String exe = WINDOWS ? "chromedriver.exe" : "chromedriver";
-		for(String dir: System.getenv().getOrDefault("PATH", "").split(File.pathSeparator))
-		{
-			if(!dir.isBlank() && Files.isRegularFile(Paths.get(dir, exe)))
-			{
-				return Paths.get(dir, exe);
-			}
-		}
-		return null;
-	}
-
-	static String chromedriverVersion(Path driver)
-	{
-		return driver == null ? null : firstVersion(run(driver.toString(), "--version"));
-	}
-
 	/** Linux only: fonts Chrome can render with. */
 	static Boolean fonts()
 	{
@@ -202,11 +180,6 @@ final class Preflight
 		}
 		java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+\\.\\d+\\.\\d+\\.\\d+)").matcher(s);
 		return m.find() ? m.group(1) : null;
-	}
-
-	static boolean sameMajor(String a, String b)
-	{
-		return a != null && b != null && a.split("\\.")[0].equals(b.split("\\.")[0]);
 	}
 
 	private static int compareVersions(String a, String b)

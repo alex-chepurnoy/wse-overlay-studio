@@ -5,17 +5,14 @@
 package com.wowza.wms.plugin.urloverlay.capture;
 
 import java.awt.Color;
-import java.io.File;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -23,23 +20,16 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.IntSupplier;
 
-
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.OutputType;
-import org.openqa.selenium.TakesScreenshot;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeDriverService;
-import org.openqa.selenium.chrome.ChromeOptions;
-
 import com.wowza.wms.plugin.urloverlay.egress.AddressRules;
 import com.wowza.wms.plugin.urloverlay.egress.EgressRules;
 import com.wowza.wms.plugin.urloverlay.egress.EgressGuard;
 
 /**
- * One headless Chrome for one webPage overlay object. Opened lazily, it loads the url through its own EgressGuard
- * proxy, captures screenshots, optionally reloads, and reports its health. A browser that dies is closed and
- * reopened with exponential backoff (1, 2, 4 ... 60 s). Once closed it never opens a browser again.
+ * One webPage overlay object's page, in a Chrome it shares with up to pagesPerBrowser others (ChromeGroups), driven over
+ * DevTools. Opened lazily, it loads the url through its own EgressGuard proxy, keeps its latest frame fresh by screencast
+ * or by screenshots, whichever costs less for how the page paints, optionally reloads, and reports its health. A page
+ * that is lost (its renderer crashed, or its Chrome exited) is closed and reopened with exponential backoff (1, 2, 4 ...
+ * 60 s). Once closed it never opens a page again.
  */
 public class WebPageCapture
 {
@@ -47,16 +37,25 @@ public class WebPageCapture
 	static final long MAX_BACKOFF_MS = 60_000;
 	private static final long BLOCKED_RETRY_MS = 30_000;
 
-	// the default of 300s would let a hung page hold a shared reload thread for 5 minutes
+	// a hung page must not hold a reload thread for long
 	static final Duration PAGE_LOAD_TIMEOUT = Duration.ofSeconds(30);
-	/**
-	 * The longest any one call to chromedriver may take, a screenshot included. Selenium 4.21's default read timeout is
-	 * 3 minutes (ClientConfig.defaultConfig), long enough for a hung page to hold this capture's lock and stall every
-	 * layer showing it. Longer than PAGE_LOAD_TIMEOUT, so a slow load still ends with chromedriver's own timeout.
-	 */
-	static final Duration CALL_TIMEOUT = Duration.ofSeconds(40);
-	/** How often a running browser's memory is measured against maxBrowserMemoryMB. */
+	/** The longest any one DevTools call for this page may take, other than a page load. */
+	static final Duration CALL_TIMEOUT = Duration.ofSeconds(15);
+	/** How often a running page's memory and address are checked. */
 	static final long MEMORY_CHECK_MS = 10_000;
+
+	/** How a page's frames are taken. */
+	public enum Mode { screenshots, screencast }
+
+	// not final: tests shorten them
+	/** How long a probe counts the page's repaints, without a cap. */
+	static long PROBE_MS = 2000;
+	/** How often a page is probed again; pages change how they paint. */
+	static final long PROBE_EVERY_MS = 5 * 60_000;
+	/** A page that repaints more often than this per capture interval is captured by screenshots. */
+	static final double CAST_MAX_REPAINTS_PER_INTERVAL = 1.5;
+	/** A screencast that has sent nothing this long after it started falls back to screenshots. */
+	static long CAST_FIRST_FRAME_MS = 5000;
 
 	public enum State { idle, starting, running, reloading, error, blocked, closed }
 
@@ -85,6 +84,13 @@ public class WebPageCapture
 		}
 	}
 
+	// screencast acknowledgments: tiny sends, on a scheduler of their own so nothing slow ever delays them
+	private static final ScheduledExecutorService ACKS = Executors.newSingleThreadScheduledExecutor(r -> {
+		Thread thread = new Thread(r, "WebPageAck");
+		thread.setDaemon(true);
+		return thread;
+	});
+
 	private static final ScheduledExecutorService reloadExecutor = Executors.newScheduledThreadPool(2, r -> {
 		Thread thread = new Thread(r, "WebPageReload");
 		thread.setDaemon(true);
@@ -106,23 +112,46 @@ public class WebPageCapture
 
 	/** Open captures by page and rules; a page left by its last user stays open this long in case it is used again. */
 	public static final long SHARE_GRACE_MS = 15000;
-	public static final CapturePool<Key, WebPageCapture> POOL = new CapturePool<>(k -> new WebPageCapture(k.settings(), k.rules().rules(), () -> -1, null),
+	public static final CapturePool<Key, WebPageCapture> POOL = new CapturePool<>(k -> new WebPageCapture(k.settings(), k.rules().rules(), () -> -1, null).sharedOn(k.rules()),
 			WebPageCapture::close, SHARE_GRACE_MS, reloadExecutor);
 
 	private final Log log = Log.get();
 	private final Object lock = new Object();
 	private final Settings settings;
 	private final AddressRules rules;
+	// what this page's Chrome is shared on; the rules themselves unless the pool says what they were built from
+	private volatile Object rulesKey;
 	private volatile IntSupplier pageDelay;
 	private final java.util.List<Runnable> reloadListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
 	private final String captureId = UUID.randomUUID().toString().substring(0, 8);
 
-	// a WebDriver, kept as Object like the rest of the plugin so the selenium jar is only needed when a webPage is drawn
-	private Object webDriver = null;
-	private Object driverService = null;
+	// the page in its Chrome, while it is open
+	private PageDriver webDriver = null;
+	private ChromeGroups.Group group = null;
 	private EgressGuard guard = null;
-	private Path profileDir = null;
 	private boolean slotHeld = false;
+	// how frames are taken now, and the probe that decides it
+	private Mode mode = Mode.screenshots;
+	private boolean probeDue = false;
+	private boolean probing = false;
+	private long probeEndsAt = 0;
+	private int probeFrames = 0;
+	private long nextProbeAt = 0;
+	private double repaintsPerSecond = -1;
+	private long castStartedAt = 0;
+	// a screencast is running on the page
+	private boolean casting = false;
+	private boolean skipFirstProbeFrame = false;
+	// a probe frame not passed on yet, because one was passed on less than an interval ago; kept at the probe's end
+	private byte[] probeHeld = null;
+	private long probeStartedAt = 0;
+	// finishReload is stopping the screencast; a new one waits until that is sent
+	private boolean stoppingCast = false;
+	private boolean castHasFrame = false;
+	// the capped screencast's acknowledgment: one per interval, for the latest frame
+	private boolean ackPending = false;
+	private int latestFrameSession = 0;
+	private long lastAckAt = 0;
 	// a thread is starting Chrome outside the lock; frames meanwhile are the last one
 	private boolean opening = false;
 	private volatile long memoryCheckedAt = 0;
@@ -162,11 +191,22 @@ public class WebPageCapture
 	{
 		this.settings = settings;
 		this.rules = rules;
+		this.rulesKey = rules;
 		this.pageDelay = pageDelay;
 		if(onReloaded != null)
 		{
 			reloadListeners.add(onReloaded);
 		}
+	}
+
+	/**
+	 * Shares a Chrome only with pages whose egress settings equal these. The pool passes the module's settings record,
+	 * which compares by value; the AddressRules built from it do not.
+	 */
+	WebPageCapture sharedOn(Object key)
+	{
+		rulesKey = key;
+		return this;
 	}
 
 	/** The wait after load used by the layer that set it last; layers sharing a page share its timing. */
@@ -216,8 +256,8 @@ public class WebPageCapture
 	 */
 	public byte[] capture(long maxAgeMs) throws Exception
 	{
-		boolean open = false, check = false;
-		Object driver = null;
+		boolean open = false;
+		PageDriver driver = null;
 		synchronized(lock)
 		{
 			if(closed)
@@ -253,18 +293,14 @@ public class WebPageCapture
 			}
 			if(!open)
 			{
-				// one screenshot at a time; another caller meanwhile gets the last one
-				if(shooting)
+				// a screencast keeps the frame fresh by itself; one screenshot at a time, and another caller meanwhile gets
+				// the last one
+				if(mode == Mode.screencast || probing || shooting)
 				{
 					return lastPng;
 				}
 				shooting = true;
 				driver = webDriver;
-				if(System.currentTimeMillis() - memoryCheckedAt >= MEMORY_CHECK_MS)
-				{
-					memoryCheckedAt = System.currentTimeMillis();
-					check = true;
-				}
 			}
 		}
 		if(open)
@@ -273,15 +309,9 @@ public class WebPageCapture
 		}
 		// Chrome is asked outside the lock: a screenshot takes 50 to 300 ms, and frame answers, status and closing
 		// must not wait on it
-		byte[] shot;
-		String off = null;
 		try
 		{
-			shot = screenshot(driver);
-			if(check)
-			{
-				off = offPage(driver);
-			}
+			return screenshot(driver);
 		}
 		finally
 		{
@@ -290,44 +320,76 @@ public class WebPageCapture
 				shooting = false;
 			}
 		}
-		if(!check)
+	}
+
+	/**
+	 * Checks a running page every MEMORY_CHECK_MS: that it is still on its own address, and that its Chrome is within its
+	 * memory limit. Runs on the capture's loop, outside the lock.
+	 */
+	private void checkPage()
+	{
+		PageDriver driver;
+		ChromeGroups.Group g;
+		synchronized(lock)
 		{
-			return shot;
+			long now = System.currentTimeMillis();
+			if(closed || webDriver == null || reloading || now - memoryCheckedAt < MEMORY_CHECK_MS)
+			{
+				return;
+			}
+			memoryCheckedAt = now;
+			driver = webDriver;
+			g = group;
 		}
+		Object href;
+		try
+		{
+			href = driver.evaluate("location.href", CALL_TIMEOUT.toMillis());
+		}
+		catch(java.util.concurrent.TimeoutException e)
+		{
+			// a page that does not answer is hung: a screencast would only keep showing its last frame
+			synchronized(lock)
+			{
+				if(webDriver == driver && !closed)
+				{
+					fail(new java.util.concurrent.TimeoutException("The page did not answer in " + CALL_TIMEOUT.toSeconds() + " s and was opened again"));
+				}
+			}
+			return;
+		}
+		catch(Exception e)
+		{
+			href = null;
+		}
+		String off = href instanceof String u ? offPageAddress(u) : null;
 		if(off != null)
 		{
 			reloadNow("the browser was on " + off + ", not the page");
 		}
-		// measured outside the lock: listing processes can take a second on Windows
-		Path profile;
-		synchronized(lock)
+		ChromeBrowser chrome = g == null ? null : g.chrome();
+		if(chrome == null)
 		{
-			profile = profileDir;
+			return;
 		}
-		CaptureService service = CaptureService.get();
-		checkMemory(service.findBrowser(profile).map(service::treeRss).orElse(-1L));
-		return lastPng();
+		// measured outside the lock: listing processes can take a second on Windows
+		long rss = CaptureService.get().treeRss(chrome.process());
+		ChromeGroups groups = ChromeGroups.get();
+		int pages = Math.max(1, groups.pages(g).size());
+		WebPageCapture charged = groups.memoryVictim(g, rss, WebPageCapture::heapBytes);
+		// the page charged with a Chrome over its limit is measured against one page's share of it, the others not at all
+		checkMemory(charged == this ? rss / pages : -1L);
 	}
 
-	/**
-	 * Where the browser is when it is not on a web page: Chrome's new tab page, a blank or error page, or anything else
-	 * that is not http or https. A page that redirects to another web address is still on a web page. Null when it is,
-	 * or when the address cannot be read. Asked without the lock; a reload under way is left alone by reloadNow.
-	 */
-	private String offPage(Object driver)
+	/** This page's JavaScript heap in bytes, or -1. */
+	private long heapBytes()
 	{
-		if(driver == null)
+		PageDriver driver;
+		synchronized(lock)
 		{
-			return null;
+			driver = webDriver;
 		}
-		try
-		{
-			return offPageAddress(((WebDriver)driver).getCurrentUrl());
-		}
-		catch(Exception e)
-		{
-			return null;
-		}
+		return driver == null ? -1 : driver.heapBytes();
 	}
 
 	/** The address when it is not a web page (http or https), else null. */
@@ -432,6 +494,12 @@ public class WebPageCapture
 				return false;
 			}
 			log.warn("UrlOverlay capture: " + why + " for " + settings.label());
+			if(group != null)
+			{
+				// the page opens again in another Chrome; this one closes once its other pages have moved too, which frees
+				// whatever its browser process holds that belongs to no page
+				ChromeGroups.get().drain(group, "over its memory limit");
+			}
 			shutdownBrowser();
 			memoryRestarts++;
 			restartTimes.add(now);
@@ -444,25 +512,37 @@ public class WebPageCapture
 		return true;
 	}
 
-	/** Stands in a driver for one, for tests of what happens to a running browser. */
-	void attachForTest(Object driver)
+	/** Stands in a page for a browser's, for tests of what happens to a running page. It is probed at once. */
+	void attachForTest(PageDriver driver)
 	{
 		synchronized(lock)
 		{
 			webDriver = driver;
+			watch(driver);
+		}
+	}
+
+	/** As attachForTest, for a page kept on screenshots: no probe. */
+	void attachForScreenshots(PageDriver driver)
+	{
+		synchronized(lock)
+		{
+			webDriver = driver;
+			watch(driver);
+			nextProbeAt = Long.MAX_VALUE;
 		}
 	}
 
 	// Caller must hold lock.
 	// Takes a screenshot of driver without the lock, then records it under the lock, unless the browser was closed or
 	// replaced meanwhile.
-	private byte[] screenshot(Object driver)
+	private byte[] screenshot(PageDriver driver)
 	{
 		long t0 = System.nanoTime();
 		byte[] png;
 		try
 		{
-			png = ((TakesScreenshot)driver).getScreenshotAs(OutputType.BYTES);
+			png = driver.screenshot(CALL_TIMEOUT.toMillis());
 		}
 		catch(Exception e)
 		{
@@ -482,6 +562,15 @@ public class WebPageCapture
 				return lastPng;
 			}
 			lastCaptureMs = (System.nanoTime() - t0) / 1_000_000;
+			keep(png);
+			return lastPng;
+		}
+	}
+
+	// Caller must hold lock. Records a new frame, from a screenshot or the screencast.
+	private void keep(byte[] png)
+	{
+		{
 			lastCaptureAt = Instant.now();
 			lastPng = png;
 			seq++;
@@ -497,7 +586,6 @@ public class WebPageCapture
 				log.warn("UrlOverlay capture: capture is " + size[0] + "x" + size[1] + ", expected " + w + "x" + h
 						+ "; it will be scaled to fit for " + settings.label());
 			}
-			return lastPng;
 		}
 	}
 
@@ -545,10 +633,13 @@ public class WebPageCapture
 			if(!closed)
 			{
 				webDriver = b.driver;
-				driverService = b.service;
+				group = b.group;
 				guard = b.guard;
-				profileDir = b.profileDir;
 				slotHeld = b.slotHeld;
+				watch(b.driver);
+				// the first frame is a screenshot; the probe then picks how the frames after it are taken
+				mode = Mode.screenshots;
+				probeDue = true;
 				b = null;
 			}
 		}
@@ -559,6 +650,21 @@ public class WebPageCapture
 			return null;
 		}
 		return capture(maxAgeMs);
+	}
+
+	// Caller must hold lock. A page that is lost (its renderer crashed, or its Chrome went away) fails, which closes it
+	// and opens it again after the backoff. Handled off the DevTools thread that reports it.
+	private void watch(PageDriver driver)
+	{
+		driver.onLost(why -> NAVIGATE.execute(() -> {
+			synchronized(lock)
+			{
+				if(webDriver == driver && !closed)
+				{
+					fail(new IllegalStateException(why));
+				}
+			}
+		}));
 	}
 
 	/**
@@ -614,7 +720,7 @@ public class WebPageCapture
 	public Map<String, Object> status()
 	{
 		Map<String, Object> m = new java.util.LinkedHashMap<>();
-		Path profile;
+		ChromeGroups.Group g;
 		synchronized(lock)
 		{
 			m.put("state", state.name());
@@ -627,16 +733,29 @@ public class WebPageCapture
 			m.put("retryInMs", webDriver == null && nextOpenAt > System.currentTimeMillis() ? nextOpenAt - System.currentTimeMillis() : null);
 			m.put("sandbox", "on");
 			m.put("memoryRestarts", memoryRestarts);
-			profile = profileDir;
+			putMode(m);
+			g = group;
 		}
 		Map<String, Object> chrome = new java.util.LinkedHashMap<>();
-		Optional<ProcessHandle> browser = CaptureService.get().findBrowser(profile);
-		chrome.put("state", browser.isPresent() ? "alive" : (profile == null ? "none" : "exited"));
-		chrome.put("pid", browser.map(ProcessHandle::pid).orElse(null));
-		long rss = browser.map(p -> CaptureService.get().treeRss(p)).orElse(-1L);
-		chrome.put("rssBytes", rss < 0 ? null : rss);
+		ChromeBrowser browser = g == null ? null : g.chrome();
+		boolean alive = browser != null && browser.alive();
+		chrome.put("state", alive ? "alive" : (g == null ? "none" : "exited"));
+		chrome.put("pid", alive ? browser.process().pid() : null);
+		long rss = alive ? CaptureService.get().treeRss(browser.process()) : -1L;
+		int pages = g == null ? 1 : Math.max(1, ChromeGroups.get().pages(g).size());
+		// this page's even share of the Chrome it is in, and the whole of it
+		chrome.put("rssBytes", rss < 0 ? null : rss / pages);
+		chrome.put("browserRssBytes", rss < 0 ? null : rss);
+		chrome.put("pagesInBrowser", g == null ? null : pages);
 		m.put("chrome", chrome);
 		return m;
+	}
+
+	// Caller must hold lock.
+	private void putMode(Map<String, Object> m)
+	{
+		m.put("captureMode", webDriver == null ? null : probing ? "probing" : mode.name());
+		m.put("repaintsPerSecond", repaintsPerSecond < 0 ? null : Math.round(repaintsPerSecond * 10) / 10.0);
 	}
 
 	/** The last screenshot as Chrome encoded it, or null. */
@@ -704,10 +823,19 @@ public class WebPageCapture
 		}
 	}
 
-	/** How often the background loop takes a screenshot, from the overlay's refresh; at least 50 ms. */
+	/** How often the page's frame is renewed, from the overlay's refresh; at least 50 ms. */
 	public void interval(long ms)
 	{
-		intervalMs = Math.max(50, ms);
+		long v = Math.max(50, ms);
+		synchronized(lock)
+		{
+			if(v != intervalMs && webDriver != null)
+			{
+				// which mode costs less depends on the interval
+				probeDue = true;
+			}
+			intervalMs = v;
+		}
 	}
 
 	/**
@@ -741,12 +869,22 @@ public class WebPageCapture
 			try
 			{
 				capture(0);
+				tick();
+				checkPage();
 			}
 			catch(Exception e)
 			{
 				// recorded in status by capture; the next attempt waits for the backoff
 			}
 			long rest = intervalMs - (System.currentTimeMillis() - t0);
+			synchronized(lock)
+			{
+				// a probe ends on time, whatever the interval
+				if(probing)
+				{
+					rest = Math.min(rest, probeEndsAt - System.currentTimeMillis());
+				}
+			}
 			try
 			{
 				Thread.sleep(Math.max(10, rest));
@@ -756,6 +894,203 @@ public class WebPageCapture
 				return;
 			}
 		}
+	}
+
+	/**
+	 * Moves the page's capture mode along, once per loop: starts a probe when one is due, ends it and picks the mode,
+	 * falls back to screenshots when a screencast sends nothing, and keeps a running screencast's frame current: when it
+	 * sends nothing the page has not changed. DevTools is asked outside the lock.
+	 */
+	private void tick()
+	{
+		PageDriver driver;
+		boolean start = false, stop = false;
+		int w = settings.viewportWidth(), h = settings.viewportHeight();
+		synchronized(lock)
+		{
+			driver = webDriver;
+			long now = System.currentTimeMillis();
+			if(closed || driver == null || reloading)
+			{
+				return;
+			}
+			if(probing)
+			{
+				if(now < probeEndsAt)
+				{
+					return;
+				}
+				probing = false;
+				if(probeHeld != null)
+				{
+					keep(probeHeld);
+					probeHeld = null;
+				}
+				// over the time the probe really ran, which a slow loop can stretch past PROBE_MS
+				repaintsPerSecond = probeFrames * 1000.0 / Math.max(PROBE_MS, now - probeStartedAt);
+				nextProbeAt = now + PROBE_EVERY_MS;
+				Mode was = mode;
+				if(repaintsPerSecond * intervalMs / 1000.0 <= CAST_MAX_REPAINTS_PER_INTERVAL)
+				{
+					// castHasFrame and castStartedAt stay as the screencast left them: a page that does not change sends no
+					// frame during a probe of a screencast already running, and that is no reason to fall back
+					mode = Mode.screencast;
+					lastAckAt = now;
+					lastCaptureMs = -1;
+				}
+				else
+				{
+					mode = Mode.screenshots;
+					stop = true;
+					casting = false;
+				}
+				if(mode != was)
+				{
+					log.info("UrlOverlay capture: " + settings.label() + " repaints " + Math.round(repaintsPerSecond * 10) / 10.0 + " times a second; capturing it by "
+							+ mode + " every " + intervalMs + " ms");
+				}
+			}
+			else if(probeDue || now >= nextProbeAt)
+			{
+				if(stoppingCast)
+				{
+					return;
+				}
+				probeDue = false;
+				probing = true;
+				probeFrames = 0;
+				probeHeld = null;
+				probeStartedAt = now;
+				probeEndsAt = now + PROBE_MS;
+				if(!casting)
+				{
+					casting = true;
+					start = true;
+					castStartedAt = now;
+					castHasFrame = false;
+					// a new screencast sends one frame at once, whether or not the page repaints
+					skipFirstProbeFrame = true;
+				}
+			}
+			else if(mode == Mode.screencast)
+			{
+				if(!castHasFrame && now - castStartedAt >= CAST_FIRST_FRAME_MS)
+				{
+					log.warn("UrlOverlay capture: the screencast of " + settings.label() + " sent nothing in " + CAST_FIRST_FRAME_MS / 1000 + " s; using screenshots");
+					mode = Mode.screenshots;
+					casting = false;
+					stop = true;
+				}
+				else if(castHasFrame)
+				{
+					// the last frame is still the page: a screencast sends one whenever it changes
+					lastCaptureAt = Instant.now();
+					state = State.running;
+				}
+			}
+		}
+		if(stop)
+		{
+			driver.stopScreencast();
+		}
+		if(start)
+		{
+			try
+			{
+				driver.startScreencast(w, h, f -> onFrame(driver, f));
+			}
+			catch(Exception e)
+			{
+				synchronized(lock)
+				{
+					if(webDriver == driver && !closed)
+					{
+						// screenshots work without it
+						log.warn("UrlOverlay capture: no screencast for " + settings.label() + " (" + summarize(e) + "); using screenshots");
+						casting = false;
+						probing = false;
+						mode = Mode.screenshots;
+						nextProbeAt = System.currentTimeMillis() + PROBE_EVERY_MS;
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * A screencast frame. It is kept unless the page is reloading. While probing every frame is acknowledged at once, so
+	 * Chrome sends one for every repaint; after that one acknowledgment per interval, for the latest frame, caps the rate.
+	 */
+	private void onFrame(PageDriver driver, PageDriver.Frame f)
+	{
+		int ackNow = -1;
+		synchronized(lock)
+		{
+			if(closed || webDriver != driver || !casting)
+			{
+				return;
+			}
+			long now = System.currentTimeMillis();
+			// while probing, frames come as fast as the page repaints; at most one per interval is kept, so the module is
+			// not sent more than it asked for
+			if(!reloading)
+			{
+				if(!probing || !castHasFrame || now - capturedAtMs >= intervalMs)
+				{
+					keep(f.png());
+					lastCaptureMs = -1;
+					castHasFrame = true;
+					probeHeld = null;
+				}
+				else
+				{
+					// the page's latest picture is never thrown away: a page that settles during the probe sends no more
+					probeHeld = f.png();
+				}
+			}
+			if(probing || mode != Mode.screencast)
+			{
+				if(skipFirstProbeFrame)
+				{
+					skipFirstProbeFrame = false;
+				}
+				else
+				{
+					probeFrames++;
+				}
+				ackNow = f.sessionId();
+			}
+			else
+			{
+				latestFrameSession = f.sessionId();
+				if(!ackPending)
+				{
+					ackPending = true;
+					long wait = Math.max(0, intervalMs - (System.currentTimeMillis() - lastAckAt));
+					ACKS.schedule(() -> ack(driver), wait, TimeUnit.MILLISECONDS);
+				}
+			}
+		}
+		if(ackNow >= 0)
+		{
+			driver.ackFrame(ackNow);
+		}
+	}
+
+	private void ack(PageDriver driver)
+	{
+		int sid;
+		synchronized(lock)
+		{
+			ackPending = false;
+			if(closed || webDriver != driver || !casting)
+			{
+				return;
+			}
+			sid = latestFrameSession;
+			lastAckAt = System.currentTimeMillis();
+		}
+		driver.ackFrame(sid);
 	}
 
 	/** Status without looking up Chrome's processes, for every frame answer: that lookup can take a second on Windows. */
@@ -775,6 +1110,7 @@ public class WebPageCapture
 			m.put("sandbox", "on");
 			m.put("memoryRestarts", memoryRestarts);
 			m.put("intervalMs", intervalMs);
+			putMode(m);
 		}
 		return m;
 	}
@@ -833,22 +1169,20 @@ public class WebPageCapture
 		return d;
 	}
 
-	// One Chrome with what keeps it running: its driver service, egress proxy, profile and browser slot.
+	// One open page with what keeps it running: its Chrome group, egress proxy and page slot.
 	private static final class Browser
 	{
-		Object driver;
-		Object service;
+		PageDriver driver;
+		ChromeGroups.Group group;
 		EgressGuard guard;
-		Path profileDir;
 		boolean slotHeld;
 	}
 
-	// Starts Chrome and loads the page; on failure frees whatever it had taken. Runs without the lock.
+	// Opens the page in a Chrome with room for it and loads it; on failure frees whatever it had taken. Runs without the
+	// lock.
 	private Browser openBrowser() throws Exception
 	{
-		// Resolve the driver before anything else, so a missing one fails here instead of falling through to
-		// Selenium Manager, which would download a driver.
-		File driver = CaptureSettings.requireChromeDriver();
+		String chrome = CaptureSettings.requireChrome();
 		CaptureService service = CaptureService.get();
 		if(!service.tryAcquire())
 		{
@@ -860,26 +1194,32 @@ public class WebPageCapture
 		{
 			b.guard = new EgressGuard(rules, captureId, this::onBlocked);
 			int proxyPort = b.guard.start();
-			b.profileDir = service.newProfileDir(captureId);
-			log.info("UrlOverlay capture: opening browser for " + settings.label() + " (" + captureId + ")");
+			log.info("UrlOverlay capture: opening " + settings.label() + " (" + captureId + ")");
+			b.group = ChromeGroups.get().join(this, rules, rulesKey, g -> startChrome(g, chrome));
+			BrowserPage page;
 			try
 			{
-				launch(b, driver, proxyPort);
-				service.sandboxStarted(null);
+				page = b.group.chrome().openPage(proxyPort, settings.viewportWidth(), settings.viewportHeight());
 			}
 			catch(Exception e)
 			{
-				String why = CaptureService.sandboxStartFailure(summarize(e), CaptureService.isLinux(), CaptureService.restrictUserns());
-				service.sandboxStarted(why);
-				throw new IllegalStateException(why, e);
+				// a Chrome that cannot open a page is no use to the next one either
+				ChromeGroups.get().drain(b.group, "it could not open a page: " + summarize(e));
+				throw e;
 			}
-			((WebDriver)b.driver).get(settings.url());
+			b.driver = page;
+			int w = settings.viewportWidth(), h = settings.viewportHeight();
+			if(w > 0 && h > 0)
+			{
+				page.viewport(w, h);
+			}
+			page.navigate(settings.url(), PAGE_LOAD_TIMEOUT.toMillis());
 			int delay = pageDelay.getAsInt();
 			if(delay > 0)
 			{
 				Thread.sleep(delay);
 			}
-			applyTransparentBackground(b.driver);
+			applyTransparentBackground(page);
 			return b;
 		}
 		catch(Exception e)
@@ -889,41 +1229,51 @@ public class WebPageCapture
 		}
 	}
 
-	private void launch(Browser b, File driverFile, int proxyPort)
+	/**
+	 * Starts the Chrome for a new group: its own profile, and a browser-wide guard with the group's rules for Chrome's own
+	 * traffic. A Chrome that does not start is reported as the sandbox problem it almost always is.
+	 */
+	private ChromeBrowser startChrome(ChromeGroups.Group g, String chrome) throws Exception
 	{
-		ChromeOptions options = new ChromeOptions();
-		if(CaptureSettings.chromePath() != null)
+		CaptureService service = CaptureService.get();
+		g.guard = new EgressGuard(g.rules, "chrome-" + g.id, (host, d) -> {
+			if(AddressRules.RULE_CHROME_SERVICE.equals(d.rule()))
+			{
+				service.countChromeServiceBlock();
+			}
+			else
+			{
+				service.recordBlock("Chrome " + g.id, host, d);
+			}
+		});
+		int proxyPort = g.guard.start();
+		g.profileDir = service.newProfileDir("b-" + g.id);
+		log.info("UrlOverlay capture: starting Chrome " + g.id);
+		try
 		{
-			options.setBinary(CaptureSettings.chromePath());
+			List<String> switches = chromeArguments(settings, proxyPort, g.profileDir, CaptureService.isLinux());
+			if(CaptureSettings.isHeadlessShell(chrome))
+			{
+				// chrome-headless-shell is headless by itself and has no other mode
+				switches.remove("--headless=new");
+			}
+			ChromeBrowser b = ChromeBrowser.start(chrome, switches, g.profileDir);
+			service.sandboxStarted(null);
+			return b;
 		}
-		options.addArguments(chromeArguments(settings, proxyPort, b.profileDir, CaptureService.isLinux()));
-		ChromeDriverService service = new ChromeDriverService.Builder().usingDriverExecutable(driverFile).build();
-		b.service = service;
-		ChromeDriver chromeDriver = new ChromeDriver(service, options, clientConfig());
-		b.driver = chromeDriver;
-		chromeDriver.manage().timeouts().pageLoadTimeout(PAGE_LOAD_TIMEOUT);
-		chromeDriver.manage().timeouts().scriptTimeout(Duration.ofSeconds(10));
-		int w = settings.viewportWidth(), h = settings.viewportHeight();
-		if(w > 0 && h > 0)
+		catch(Exception e)
 		{
-			// --window-size sizes the window, not the page: headless Chrome's viewport comes out smaller, and display
-			// scaling can double it. Pin the viewport itself so a capture is exactly width x height.
-			Map<String, Object> metrics = new HashMap<>();
-			metrics.put("width", w);
-			metrics.put("height", h);
-			metrics.put("deviceScaleFactor", 1);
-			metrics.put("mobile", false);
-			chromeDriver.executeCdpCommand("Emulation.setDeviceMetricsOverride", metrics);
+			String why = CaptureService.sandboxStartFailure(summarize(e), CaptureService.isLinux(), CaptureService.restrictUserns());
+			service.sandboxStarted(why);
+			throw new IllegalStateException(why, e);
 		}
 	}
 
-	/** How the service talks to chromedriver: no call waits longer than CALL_TIMEOUT. */
-	static org.openqa.selenium.remote.http.ClientConfig clientConfig()
-	{
-		return org.openqa.selenium.remote.http.ClientConfig.defaultConfig().readTimeout(CALL_TIMEOUT);
-	}
-
-	/** The Chrome switches for one capture. There is never a --no-sandbox: the service has no way to ask for one. */
+	/**
+	 * The switches for a Chrome holding pages; proxyPort is its browser-wide guard, for Chrome's own traffic. Each page's
+	 * own traffic goes through its own guard, set on its browser context. There is never a --no-sandbox: the service has
+	 * no way to ask for one.
+	 */
 	static List<String> chromeArguments(Settings s, int proxyPort, Path profileDir, boolean linux)
 	{
 		List<String> a = new ArrayList<>();
@@ -1014,40 +1364,43 @@ public class WebPageCapture
 	{
 		Browser b = new Browser();
 		b.driver = webDriver;
-		b.service = driverService;
+		b.group = group;
 		b.guard = guard;
-		b.profileDir = profileDir;
 		b.slotHeld = slotHeld;
 		webDriver = null;
-		driverService = null;
+		group = null;
 		guard = null;
-		profileDir = null;
 		slotHeld = false;
 		reloading = false;
+		casting = false;
+		probing = false;
+		probeDue = false;
+		ackPending = false;
+		probeHeld = null;
+		stoppingCast = false;
+		mode = Mode.screenshots;
 		release(b);
 	}
 
-	/** Quits the driver, kills anything left in the profile's process tree, removes the profile, frees the slot. */
+	/** Closes the page (its context and renderer), leaves its Chrome group, closes its guard, frees the slot. */
 	private void release(Browser b)
 	{
 		if(b.driver != null)
 		{
 			try
 			{
-				((WebDriver)b.driver).quit();
+				b.driver.close();
 			}
 			catch(Exception e)
 			{
-				log.warn("UrlOverlay capture: error closing browser for " + settings.label() + ": " + summarize(e));
+				log.warn("UrlOverlay capture: error closing the page " + settings.label() + ": " + summarize(e));
 			}
 			b.driver = null;
 		}
-		stopService(b);
-		if(b.profileDir != null)
+		if(b.group != null)
 		{
-			CaptureService.get().findBrowser(b.profileDir).ifPresent(CaptureService::killTree);
-			CaptureService.deleteTree(b.profileDir);
-			b.profileDir = null;
+			ChromeGroups.get().leave(b.group, this);
+			b.group = null;
 		}
 		if(b.guard != null)
 		{
@@ -1061,28 +1414,12 @@ public class WebPageCapture
 		}
 	}
 
-	private static void stopService(Browser b)
-	{
-		if(b.service != null)
-		{
-			try
-			{
-				((ChromeDriverService)b.service).stop();
-			}
-			catch(Exception e)
-			{
-				// already stopped
-			}
-			b.service = null;
-		}
-	}
-
-	private void applyTransparentBackground(Object driver)
+	private void applyTransparentBackground(PageDriver driver) throws Exception
 	{
 		if(settings.paintBackground())
 		{
 			// keying removes this color, so the page background becomes transparent
-			((JavascriptExecutor)driver).executeScript("document.getElementsByTagName('body')[0].style.backgroundColor = '" + settings.backgroundCss() + "';");
+			driver.evaluate("document.getElementsByTagName('body')[0].style.backgroundColor = '" + settings.backgroundCss() + "';", CALL_TIMEOUT.toMillis());
 		}
 	}
 
@@ -1105,7 +1442,7 @@ public class WebPageCapture
 	// now: a reload asked for at once, which runs even when the page does not reload on its own
 	private void startReload(boolean now)
 	{
-		Object driver;
+		PageDriver driver;
 		synchronized(lock)
 		{
 			reloadFuture = null;
@@ -1124,6 +1461,8 @@ public class WebPageCapture
 			driver = webDriver;
 			reloading = true;
 			state = State.reloading;
+			// a probe under way would count the load's repaints; finishReload starts a new one
+			probing = false;
 		}
 		// navigate outside the lock so requests are not blocked; they get the last frame until finishReload. A load
 		// can take up to the page load timeout, so it runs on its own thread, never on the scheduler that times every
@@ -1132,11 +1471,24 @@ public class WebPageCapture
 			try
 			{
 				log.info("UrlOverlay capture: reloading " + settings.label());
-				((WebDriver)driver).get(settings.url());
+				driver.navigate(settings.url(), PAGE_LOAD_TIMEOUT.toMillis());
 			}
 			catch(Exception e)
 			{
-				log.error("UrlOverlay capture: error reloading " + settings.label(), e);
+				boolean replaced;
+				synchronized(lock)
+				{
+					replaced = closed || webDriver != driver;
+				}
+				if(replaced)
+				{
+					// the page was lost or closed under the reload, which is reported where that happened
+					log.info("UrlOverlay capture: the reload of " + settings.label() + " ended with its page: " + summarize(e));
+				}
+				else
+				{
+					log.warn("UrlOverlay capture: the reload of " + settings.label() + " failed: " + summarize(e));
+				}
 			}
 			reloadExecutor.schedule(this::finishReload, Math.max(pageDelay.getAsInt(), 0), TimeUnit.MILLISECONDS);
 		});
@@ -1144,25 +1496,58 @@ public class WebPageCapture
 
 	private void finishReload()
 	{
+		PageDriver driver;
+		synchronized(lock)
+		{
+			if(closed || webDriver == null)
+			{
+				reloading = false;
+				return;
+			}
+			driver = webDriver;
+		}
+		// asked outside the lock; frames stay the last one until it is done
+		try
+		{
+			applyTransparentBackground(driver);
+		}
+		catch(Exception e)
+		{
+			log.error("UrlOverlay capture: error preparing reloaded page " + settings.label(), e);
+		}
+		boolean stop = false;
 		synchronized(lock)
 		{
 			reloading = false;
-			if(closed || webDriver == null)
+			if(closed || webDriver != driver)
 			{
 				return;
 			}
 			state = State.running;
-			try
-			{
-				applyTransparentBackground(webDriver);
-			}
-			catch(Exception e)
-			{
-				log.error("UrlOverlay capture: error preparing reloaded page " + settings.label(), e);
-			}
+			// the page may paint differently now: a new screencast and a new probe
+			stop = casting;
+			stoppingCast = stop;
+			casting = false;
+			probing = false;
+			ackPending = false;
+			probeDue = true;
 			if(reloadRate > 0 && reloadFuture == null)
 			{
 				scheduleReload();
+			}
+		}
+		if(stop)
+		{
+			try
+			{
+				driver.stopScreencast();
+			}
+			finally
+			{
+				synchronized(lock)
+				{
+					stoppingCast = false;
+				}
 			}
 		}
 		for(Runnable r: reloadListeners)

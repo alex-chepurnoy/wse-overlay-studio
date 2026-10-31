@@ -359,6 +359,8 @@ class ServiceTest
 		assertEquals(Path.of("/run/wse-url-overlay/capture.sock"), c.socket());
 		assertEquals(4, c.maxCaptures());
 		assertEquals(1024, c.maxBrowserMb());
+		assertEquals(4, c.pagesPerBrowser());
+		assertTrue(c.warnings().stream().noneMatch(w -> w.contains("chromedriver")), "the setting of earlier versions is accepted quietly");
 		assertNull(c.logFile(), "stdout unless a log file is named");
 		assertNull(c.chrome());
 		assertTrue(c.warnings().stream().anyMatch(w -> w.contains("sandbox")), "an unknown key is reported, and does nothing: " + c.warnings());

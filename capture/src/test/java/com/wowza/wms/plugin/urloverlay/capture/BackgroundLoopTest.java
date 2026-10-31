@@ -9,14 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Proxy;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
-import org.openqa.selenium.OutputType;
-import org.openqa.selenium.TakesScreenshot;
-import org.openqa.selenium.WebDriver;
 
 /** The service takes frames in the background at the refresh it is given; a request only waits for one. */
 class BackgroundLoopTest
@@ -35,20 +31,13 @@ class BackgroundLoopTest
 	@Test
 	void framesAreTakenAtTheIntervalAndNumbered() throws Exception
 	{
-		AtomicInteger shots = new AtomicInteger();
 		byte[] png = png(320, 180);
-		Object fake = Proxy.newProxyInstance(WebDriver.class.getClassLoader(), new Class<?>[] { WebDriver.class, TakesScreenshot.class }, (p, m, a) -> {
-			if(m.getName().equals("getScreenshotAs") && a[0] == OutputType.BYTES)
-			{
-				shots.incrementAndGet();
-				return png;
-			}
-			return null;
-		});
+		FakePage fake = new FakePage(png);
+		AtomicInteger shots = fake.shots;
 		WebPageCapture c = new WebPageCapture("http://example.com/", 320, 180, () -> 0, null);
 		try
 		{
-			c.attachForTest(fake);
+			c.attachForScreenshots(fake);
 			c.interval(60);
 			assertEquals(0, c.seq());
 			c.startLoop();
