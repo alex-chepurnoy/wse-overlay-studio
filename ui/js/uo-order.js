@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay template order: the application's Transcoder/Templates list. WSE gives each stream the first template in
    the list that exists, so this decides which template every stream in the application gets. A change is written to
    Application.xml on Save and applies after the application restarts. */

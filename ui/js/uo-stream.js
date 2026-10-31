@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay stream view: how one stream reaches viewers (input, template, outputs), a preview of one output, the
    addresses players open it at, and the template's actions (apply or change it with a dry run, stop using it) on the
    template's menu. The overlay is the template's: it is changed in the template, not here. The save bar covers only

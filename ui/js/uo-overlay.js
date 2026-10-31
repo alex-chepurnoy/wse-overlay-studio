@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay overlay editor: a named overlay's pages placed over a live preview of a stream (the canvas), the page
    list under the overlay in the list column, and the inspector for the selected page. Edits stay in a draft until Save; a draft is kept in memory per
    overlay while the page is open, so leaving for another screen and coming back loses nothing. Placement is in

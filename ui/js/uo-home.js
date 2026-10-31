@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay home, On air: the application's streams as rows, filtered from the list column. Until the module
    measures what each output draws, rows show what the template is configured to do, labeled "configured", and no
    snapshot (the fallback layout of the design). Each part of a row opens where it is changed: the stream, its

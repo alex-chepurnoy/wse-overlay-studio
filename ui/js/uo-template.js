@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay template editor: every transcoder template on the server. A master template, made here, opens in the
    builder: the hardware on top, then a Decode box (the source, and the overlays drawn on it before scaling) and an
    Encode box (the outputs, the overlays drawn on chosen outputs, and the adaptive groups). One switched on in place

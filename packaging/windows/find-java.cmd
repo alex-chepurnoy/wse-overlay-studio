@@ -1,4 +1,6 @@
 @echo off
+rem This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+rem This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
 rem Sets UO_JAR to the installer next to this file and UO_JAVA to a Java 21 or later, which the capture service needs:
 rem WMSJAVA_HOME, else the Java of
 rem the WSE install named by WMSAPP_HOME, else of an install under Program Files, else java on the PATH. Each one is

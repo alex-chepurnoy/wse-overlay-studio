@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay core: REST through the Manager bridge, timers and shutdown, banners, toasts, dialogs, menus, the save
    bar, players, the page version and session checks, and read-only. The page never reads the Manager's password: the
    bridge forwards each call with the signed-in user's credentials, server-side. */

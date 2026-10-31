@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay server status, for the status drawer: the capture service, Chrome, the browser sessions and the network
    rules for captured pages, read-only, from /info. Values come from Server.xml properties; each rule names its
    property, which a WSE administrator edits. */

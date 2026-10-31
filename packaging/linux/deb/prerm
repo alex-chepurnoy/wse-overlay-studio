@@ -1,4 +1,6 @@
 #!/bin/sh
+# This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+# This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
 # Takes the module out of Wowza Streaming Engine before the package's files go. Skipped on upgrade, where the new
 # package's postinst installs over it. A running WSE (exit 3) stops the removal, so the uninstaller is still there once
 # WSE is stopped; any other failure is reported and the removal goes on.

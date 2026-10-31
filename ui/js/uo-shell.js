@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay shell: the header with its status strip, the tabbed list column, the router between screens, the status
    drawer, the module-not-added state, the help dialog, theme, keyboard and the Manager navbar measure. Routes never
    touch location.hash; the view is kept in localStorage per application. */

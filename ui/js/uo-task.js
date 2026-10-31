@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay task: put a page on a stream, in four steps (overlay, template, stream, preview), launched from On air
    and ending there. Every step uses the module's existing endpoints: the overlay test capture and save, a new
    template from a preset or a copy of an existing one, the stream assign with its dry run, and the stream preview. */
