@@ -47,6 +47,9 @@ public final class Main
 			"                         Linux, Chrome for Testing on Windows), unless its settings already name a Chrome chosen by hand",
 			"  --chromedriver <path>  Accepted for scripts written for earlier versions, and ignored: the service needs no chromedriver",
 			"  --no-download          Do not download Chrome; set the paths yourself",
+			"  --pages <n|auto>       Pages the capture service captures at once, 1 to 32. auto sizes it from this server's cores",
+			"                         and memory, which is also what a new install does; without it a reinstall keeps the number",
+			"                         set. Settings in the URL Overlay page changes it later without running the installer",
 			"  --dry-run              Print every change and write nothing",
 			"  --yes                  No prompts. Without --appName or --all-live-apps no application is changed",
 			"  --keep-templates       Uninstall leaves the starter templates",
@@ -61,7 +64,7 @@ public final class Main
 	static final class Options
 	{
 		String command;
-		String home, wsemHome, chrome, chromedriver;
+		String home, wsemHome, chrome, chromedriver, pages;
 		List<String> apps, removeApps;
 		boolean listApps, allLive, dryRun, yes, keepTemplates, help, noDownload, elevated, purge, gui, setupUninstall;
 	}
@@ -86,7 +89,7 @@ public final class Main
 				// the window-based setup, and the setup program's removal step (main.wxs); neither is for people to type
 				case "--gui" -> o.gui = true;
 				case "--setup-uninstall" -> o.setupUninstall = true;
-				case "--home", "--wsem-home", "--appName", "--remove-app", "--chrome", "--chromedriver" -> {
+				case "--home", "--wsem-home", "--appName", "--remove-app", "--chrome", "--chromedriver", "--pages" -> {
 					if(k + 1 >= args.length)
 					{
 						throw new IllegalArgumentException(a + " needs a value");
@@ -99,6 +102,7 @@ public final class Main
 						case "--appName" -> o.apps = Arrays.asList(v.split("\\s*,\\s*"));
 						case "--remove-app" -> o.removeApps = Arrays.asList(v.split("\\s*,\\s*"));
 						case "--chrome" -> o.chrome = v;
+						case "--pages" -> o.pages = pages(v);
 						// earlier versions needed it; read so their scripts still run, and not used
 						default -> o.chromedriver = v;
 					}
@@ -134,6 +138,28 @@ public final class Main
 			throw new IllegalArgumentException("Use --appName or --all-live-apps, not both");
 		}
 		return o;
+	}
+
+	/** --pages: "auto", or a whole number from 1 to 32. */
+	static String pages(String v)
+	{
+		if(v.trim().equalsIgnoreCase("auto"))
+		{
+			return "auto";
+		}
+		try
+		{
+			int n = Integer.parseInt(v.trim());
+			if(n >= 1 && n <= CaptureSetup.MAX_PAGES)
+			{
+				return Integer.toString(n);
+			}
+		}
+		catch(NumberFormatException e)
+		{
+			// refused below
+		}
+		throw new IllegalArgumentException("--pages takes auto or a whole number from 1 to " + CaptureSetup.MAX_PAGES + ", not " + v);
 	}
 
 	public static void main(String[] args)
@@ -453,7 +479,16 @@ public final class Main
 		{
 			out.println(s.bridgeSkipped());
 		}
-		CaptureSetup.Config cfg = s.captureConfig(chrome);
+		CaptureSetup.Config cfg = s.captureConfig(chrome, o.pages);
+		Integer inPage = o.pages == null ? s.settingsPages() : null;
+		out.println("Pages:        " + (inPage != null ? inPage + " at once, as set in the page's Settings, which WSE uses over maxCaptures " + cfg.maxCaptures() + "; --pages replaces it"
+				: cfg.maxCaptures() + " at once") + ". This server (" + s.machine.cores() + " cores, "
+				+ (s.machine.memoryMb() > 0 ? Math.round(s.machine.memoryMb() / 1024.0) + " GB" : "memory unknown") + ") is sized for " + s.machine.pages()
+				+ (cfg.room() > Math.max(cfg.maxCaptures(), inPage == null ? 0 : inPage) ? "; Settings in the page can raise it to " + cfg.room() : ""));
+		if(s.machine.memoryMb() > 0 && (long)cfg.maxBrowserMemoryMB() * cfg.maxCaptures() + CaptureSetup.SERVICE_OWN_MB > s.machine.memoryMb() * 3 / 4)
+		{
+			out.println("Note: " + cfg.maxCaptures() + " pages at up to " + cfg.maxBrowserMemoryMB() + " MB each may use more than three quarters of this server's memory.");
+		}
 		boolean captureNeeded = s.captureNeeded(cfg);
 		List<Installer.Op> ops = s.planInstall(chosen, props);
 		if(!s.persistentPluginDir)
@@ -474,6 +509,10 @@ public final class Main
 		{
 			// folders an earlier run left incomplete and nothing uses any more
 			ChromeFolders.cleanIncomplete(s.capture.chromeRoot(), s.configuredChrome(), s.sys);
+			if(o.pages != null && s.clearSettingsPages())
+			{
+				out.println("The page's earlier Settings value for pages at once is removed; WSE uses " + cfg.maxCaptures() + " from its next start.");
+			}
 			out.println("Capture service: " + (CaptureSetup.running(s.capture, s.sys) ? "running." : "not running. " + s.captureSetup().start()));
 			nextSteps(out, false, chosen.isEmpty(), null, Preflight.wseRunning(s.home));
 			return 0;
@@ -481,6 +520,10 @@ public final class Main
 		try
 		{
 			InstallSession.Installed done = s.applyInstall(ops, chosen, cfg);
+			if(o.pages != null && s.clearSettingsPages())
+			{
+				out.println("The page's earlier Settings value for pages at once is removed; WSE uses " + cfg.maxCaptures() + " from its next start.");
+			}
 			out.println("Installed.");
 			if(!done.backups().isEmpty())
 			{

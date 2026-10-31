@@ -279,7 +279,7 @@ public final class CaptureService
 		if(n > ceiling)
 		{
 			throw new IllegalArgumentException("The service's memory cap of " + memoryMaxMb + " MB (systemd MemoryMax) holds " + ceiling + " browsers of "
-					+ maxBrowserMb + " MB. Run the installer again with a higher maxCaptures to raise the cap, then set more pages here.");
+					+ maxBrowserMb + " MB. Run the installer again with --pages to raise the cap, then set more pages here.");
 		}
 		synchronized(lock)
 		{

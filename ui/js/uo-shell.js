@@ -421,7 +421,7 @@
       note.textContent = r.active + ' open now. Pages share Chromes, and a Chrome may use up to ' + (r.maxBrowserMemoryMB || '?') + ' MB for each page it holds.' +
         (r.set != null ? ' Set here; the service starts with ' + r.startLimit + ' from capture.properties and is given this one.' : ' From capture.properties.') + ' 1 to ' + r.ceiling + '.' +
         (r.memoryMaxMB != null ? ' The service is held to ' + Math.round(r.memoryMaxMB / 102.4) / 10 + ' GB' + (r.cpuLimit != null ? ' and ' + r.cpuLimit + ' CPU cores' : '') +
-          ' by its systemd unit, which is what caps it at ' + r.ceiling + '; running the installer again with a higher maxCaptures raises that.' : '');
+          ' by its systemd unit, which is what caps it at ' + r.ceiling + '; running the installer again with --pages raises that.' : '');
     }
     U.api.get('/capture/limit').then(show, function (e) { note.textContent = 'Not read: ' + e.message; });
     inp.oninput = function () { var n = +inp.value; set.disabled = !(n >= 1 && n <= +inp.max && n === Math.round(n)); };

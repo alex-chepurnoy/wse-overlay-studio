@@ -31,6 +31,7 @@ import java.util.stream.Stream;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -240,6 +241,8 @@ class InstallerTest
 	@BeforeEach
 	void copyTree() throws IOException
 	{
+		// a server sized for four pages, the number earlier versions always set
+		CaptureSetup.Machine.fixed = new CaptureSetup.Machine(3, 4096);
 		home = tmp.resolve("wse");
 		copy(Paths.get(System.getProperty("urloverlay.fixtures"), "wse412"), home);
 		fakeServerJar(home, "4.12.1+15");
@@ -1700,6 +1703,104 @@ class InstallerTest
 			assertEquals(List.of("/shell.zip"), zipsFetched, "Linux moves to the headless shell: " + output);
 			assertEquals(ChromeDownload.chromeIn(chromeRoot().resolve(CFT_VERSION + "-2"), plat).toString(), p.getProperty("chrome"));
 		}
+	}
+
+	@AfterEach
+	void realMachine()
+	{
+		CaptureSetup.Machine.fixed = null;
+	}
+
+	@Test
+	void pagesAtOnceFollowTheServersCoresAndMemory()
+	{
+		assertEquals(2, CaptureSetup.recommendedPages(1, 2048), "never below two");
+		assertEquals(4, CaptureSetup.recommendedPages(3, 4096));
+		assertEquals(12, CaptureSetup.recommendedPages(8, 15781), "the 8-core, 16 GB test server: the cores decide");
+		assertEquals(6, CaptureSetup.recommendedPages(8, 3072), "little memory decides");
+		assertEquals(25, CaptureSetup.recommendedPages(16, 65536));
+		assertEquals(32, CaptureSetup.recommendedPages(64, 262144), "never above the service's own ceiling");
+		assertEquals(2, CaptureSetup.recommendedPages(4, 0), "memory not known: the least");
+	}
+
+	@Test
+	void theUnitLeavesRoomForTheServersSize() throws Exception
+	{
+		CaptureSetup cs = setup(CaptureSetup.linux(tmp.resolve("linux")));
+		String unit = cs.unit(new CaptureSetup.Config(CONFIG.chrome(), 4, 1024, null, null, 12));
+		assertTrue(unit.lines().anyMatch("MemoryMax=13056M"::equals), unit);
+		assertTrue(unit.lines().anyMatch("CPUQuota=200%"::equals), unit);
+		unit = cs.unit(new CaptureSetup.Config(CONFIG.chrome(), 25, 1024, null, null, 12));
+		assertTrue(unit.lines().anyMatch("MemoryMax=26368M"::equals), "room is never below the number set: " + unit);
+		assertTrue(unit.lines().anyMatch("CPUQuota=400%"::equals), unit);
+	}
+
+	@Test
+	void pagesOptionIsAutoOrOneToThirtyTwo()
+	{
+		assertEquals("auto", Main.parse(new String[] { "Install", "--pages", "AUTO" }).pages);
+		assertEquals("32", Main.parse(new String[] { "Install", "--pages", "32" }).pages);
+		for(String bad: List.of("0", "33", "-1", "many", "2.5"))
+		{
+			try
+			{
+				Main.parse(new String[] { "Install", "--pages", bad });
+				throw new AssertionError(bad + " accepted");
+			}
+			catch(IllegalArgumentException e)
+			{
+				assertTrue(e.getMessage().contains("--pages"), e.getMessage());
+			}
+		}
+	}
+
+	@Test
+	void aNewInstallSizesPagesAndAReinstallKeepsThemUnlessAsked() throws Exception
+	{
+		CaptureSetup.Machine.fixed = new CaptureSetup.Machine(8, 16384);
+		assertEquals(0, run("Install", "--appName", "live", "--yes"));
+		java.util.Properties p = new java.util.Properties();
+		p.load(new StringReader(captureConfig()));
+		assertEquals("12", p.getProperty("maxCaptures"), "a new install is sized from the server: " + captureConfig());
+		assertTrue(output.contains("Pages:        12 at once. This server (8 cores, 16 GB) is sized for 12"), output);
+
+		assertEquals(0, run("Install", "--appName", "live", "--yes", "--pages", "6"));
+		p.load(new StringReader(captureConfig()));
+		assertEquals("6", p.getProperty("maxCaptures"));
+		assertTrue(output.contains("Settings in the page can raise it to 11"), "room is held to three quarters of the memory: " + output);
+
+		assertEquals(0, run("Install", "--appName", "live", "--yes"));
+		p.load(new StringReader(captureConfig()));
+		assertEquals("6", p.getProperty("maxCaptures"), "a reinstall keeps the number set");
+
+		assertEquals(0, run("Install", "--appName", "live", "--yes", "--pages", "auto"));
+		p.load(new StringReader(captureConfig()));
+		assertEquals("12", p.getProperty("maxCaptures"), "auto sizes it again");
+	}
+
+	@Test
+	void theUnitsMemoryCapStaysWithinThreeQuartersOfTheServer() throws Exception
+	{
+		CaptureSetup.Machine.fixed = new CaptureSetup.Machine(16, 16384);
+		assertEquals(0, run("Install", "--appName", "live", "--yes", "--pages", "4", "--dry-run"));
+		assertTrue(output.contains("is sized for 25; Settings in the page can raise it to 11"), output);
+		assertFalse(output.contains("Note: "), output);
+		assertEquals(0, run("Install", "--appName", "live", "--yes", "--pages", "20", "--dry-run"));
+		assertTrue(output.contains("Note: 20 pages at up to 1024 MB each may use more than three quarters of this server's memory."), output);
+	}
+
+	@Test
+	void pagesReplacesTheValueSetInThePagesSettings() throws Exception
+	{
+		Path limit = home.resolve(Installer.MODULE_DIR).resolve("capture-limit.json");
+		Files.createDirectories(limit.getParent());
+		Files.writeString(limit, "{\"maxCaptures\":16}");
+		assertEquals(0, run("Install", "--appName", "live", "--yes"));
+		assertTrue(output.contains("Pages:        16 at once, as set in the page's Settings, which WSE uses over maxCaptures 4; --pages replaces it"), output);
+		assertTrue(Files.exists(limit), "without --pages the Settings value stays");
+		assertEquals(0, run("Install", "--appName", "live", "--yes", "--pages", "4"));
+		assertFalse(Files.exists(limit), "--pages replaces it");
+		assertTrue(output.contains("The page's earlier Settings value for pages at once is removed; WSE uses 4 from its next start."), output);
 	}
 
 	// ---- the Windows upgrade as it happens: the setup program's removal, then the install --------------------------

@@ -42,6 +42,8 @@ final class InstallSession
 	/** Where the capture service, its Chrome and its configuration go, and the system it is set up on. */
 	final CaptureSetup.Layout capture;
 	final CaptureSetup.Sys sys;
+	/** This server's size, which sets pages at once on a new install; tests replace it. */
+	CaptureSetup.Machine machine = CaptureSetup.Machine.here();
 
 	private InstallSession(Path home, Path wsemHome, PrintStream out) throws IOException
 	{
@@ -146,12 +148,19 @@ final class InstallSession
 		return props;
 	}
 
+	CaptureSetup.Config captureConfig(Path chrome) throws IOException
+	{
+		return captureConfig(chrome, null);
+	}
+
 	/**
 	 * The capture service's settings: this Chrome, and the limits its settings file already holds (an admin may have
-	 * changed them), or the defaults: four browsers at once, 1024 MB each. pagesPerBrowser and autoUpdate are kept when set,
-	 * and otherwise left to their defaults.
+	 * changed them), or the defaults: 1024 MB per page, and pages at once sized from this server's cores and memory
+	 * (CaptureSetup.recommendedPages). pages, from --pages, is a number, "auto" for that size, or null to keep what the
+	 * settings file holds. pagesPerBrowser and autoUpdate are kept when set, and otherwise left to their defaults. The
+	 * unit leaves room for the larger of the number set and the server's size.
 	 */
-	CaptureSetup.Config captureConfig(Path chrome) throws IOException
+	CaptureSetup.Config captureConfig(Path chrome, String pages) throws IOException
 	{
 		java.util.Properties p = new java.util.Properties();
 		if(Files.isRegularFile(capture.config()))
@@ -161,9 +170,59 @@ final class InstallSession
 				p.load(in);
 			}
 		}
-		String pages = p.getProperty("pagesPerBrowser"), auto = p.getProperty("autoUpdate");
-		return new CaptureSetup.Config(chrome, number(p.getProperty("maxCaptures"), 4), number(p.getProperty("maxBrowserMemoryMB"), 1024),
-				pages == null || pages.isBlank() ? null : number(pages, 4), auto == null || auto.isBlank() ? null : auto.trim());
+		String perBrowser = p.getProperty("pagesPerBrowser"), auto = p.getProperty("autoUpdate"), set = p.getProperty("maxCaptures");
+		int sized = machine.pages(), perPage = number(p.getProperty("maxBrowserMemoryMB"), 1024);
+		int max = pages != null && !pages.equalsIgnoreCase("auto") ? Math.min(CaptureSetup.MAX_PAGES, number(pages, sized))
+				: pages == null && set != null && !set.isBlank() ? Math.min(CaptureSetup.MAX_PAGES, number(set, sized)) : sized;
+		return new CaptureSetup.Config(chrome, max, perPage, perBrowser == null || perBrowser.isBlank() ? null : number(perBrowser, 4),
+				auto == null || auto.isBlank() ? null : auto.trim(), room(sized, perPage));
+	}
+
+	/**
+	 * The pages the unit leaves room for: the server's size, but never a memory cap above three quarters of the server's
+	 * memory, which leaves WSE the rest. The unit gives each page maxBrowserMemoryMB, the most one may use before its
+	 * Chrome is restarted, so the cap follows that and not what a page usually uses.
+	 */
+	int room(int sized, int perPageMb)
+	{
+		if(machine.memoryMb() <= 0)
+		{
+			return sized;
+		}
+		return (int)Math.max(1, Math.min(sized, (machine.memoryMb() * 3 / 4 - CaptureSetup.SERVICE_OWN_MB) / Math.max(1, perPageMb)));
+	}
+
+	/** Where the page's Settings keep pages at once (the module's CaptureLimit), which WSE uses over maxCaptures. */
+	Path settingsLimitFile() throws IOException
+	{
+		Path v = Wse.vhosts(home).get("_defaultVHost_");
+		return v == null ? null : v.resolve(Installer.MODULE_DIR).resolve("capture-limit.json");
+	}
+
+	/** Pages at once as set in the page's Settings, or null when they were never set there. */
+	Integer settingsPages()
+	{
+		try
+		{
+			Path f = settingsLimitFile();
+			if(f == null || !Files.isRegularFile(f))
+			{
+				return null;
+			}
+			java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"maxCaptures\"\\s*:\\s*(\\d+)").matcher(Files.readString(f, java.nio.charset.StandardCharsets.UTF_8));
+			return m.find() ? Integer.valueOf(m.group(1)) : null;
+		}
+		catch(IOException | RuntimeException e)
+		{
+			return null;
+		}
+	}
+
+	/** Forgets the Settings value, so --pages is what WSE uses from its next start. True when there was one. */
+	boolean clearSettingsPages() throws IOException
+	{
+		Path f = settingsLimitFile();
+		return f != null && Files.deleteIfExists(f);
 	}
 
 	private static int number(String v, int fallback)
