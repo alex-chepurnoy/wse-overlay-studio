@@ -146,8 +146,9 @@ later. Streams publishing to it disconnect for a few seconds; the dialog names t
 
 - **Pages captured at once** changes the capture service's limit while it runs, with no restart, and keeps it for its
   next start. It starts from `maxCaptures` in `capture.properties`. On Linux the service's systemd unit caps its memory
-  at install time, and the page never sets more pages than that cap holds; the dialog says how many that is. Run the
-  installer again with a higher `maxCaptures` to raise the cap.
+  at install time, and the page never sets more pages than that cap holds; the dialog says how many that is. The cap
+  leaves room for as many pages as the server is sized for (below), so it is usually above the number set. Run the
+  installer again with `--pages` to raise it further.
 - **Template order** edits the application's `Transcoder/Templates` (at most 12 entries): WSE uses the first file in
   the list that exists for each stream. The new order is saved to `Application.xml`, backed up first, and applies after
   the application restarts.
@@ -200,14 +201,28 @@ Written by the installer; restart `WowzaURLOverlayCapture` after a change.
 | `socket` | required | The Unix socket the service listens on; must match `UrlOverlayCaptureSocket` |
 | `chrome` | set by the installer | The Chrome the service runs: chrome-headless-shell on Linux, Chrome for Testing on Windows. A `chromedriver` line from an earlier version is ignored |
 | `workDir` | required | Chrome profiles and work files |
-| `maxCaptures` | `4` | Pages open at once when the service starts; one more is refused. **Settings** in the page changes it while the service runs |
+| `maxCaptures` | sized from the server | Pages open at once when the service starts; one more is refused. A new install sets it from the server's cores and memory, and `--pages <n\|auto>` sets it on any install. **Settings** in the page changes it while the service runs |
 | `pagesPerBrowser` | `4` | Pages one Chrome holds. Fewer means fewer pages lost when one Chrome exits, more means less memory |
 | `maxBrowserMemoryMB` | `1024` | Memory a Chrome may use for each page it holds; above it, its largest page is restarted |
 | `logFile` | standard output | The service's log; the installer sets `capture.log` in the service's log folder |
 | `autoUpdate` | on | `false` stops the daily Chrome update. Read by the updater; the service itself logs it as an unknown setting and ignores it |
 
-On Linux the systemd unit's `MemoryMax` is computed at install time from `maxCaptures` and `maxBrowserMemoryMB`;
-run the installer again after raising them.
+On Linux the systemd unit's `MemoryMax` and `CPUQuota` are computed at install time from `maxBrowserMemoryMB` and the
+larger of `maxCaptures` and the number of pages the server is sized for; run the installer again after raising them.
+
+### Pages at once, from the server's size
+
+A new install, and `--pages auto`, set `maxCaptures` from the server: a quarter of its cores at about 16% of a core per
+page, and a quarter of its memory at 128 MB per page, whichever is smaller, from 2 to 32. WSE's own transcoding is
+given the rest. The per-page figures were measured with 1.15.0 on an 8-core server, one page at the Fast rate (0.1 s);
+a page at the Standard rate (0.5 s) costs about a quarter of that, so a server whose pages are mostly Standard can take
+more. Examples: 2 cores, 3 pages; 4 cores, 6; 8 cores and 16 GB, 12; 16 cores and 64 GB, 25. A reinstall without
+`--pages` keeps the number set.
+
+A number set in **Settings** in the page is kept in `conf.modules/urloverlay/capture-limit.json` and replaces
+`maxCaptures` while WSE runs; the installer reports it as the one in force, and `--pages` removes it. On Linux the
+unit's memory cap stays within three quarters of the server's memory, so Settings may top out below the server's
+size; a `--pages` above that is allowed and noted.
 
 ## Troubleshooting
 

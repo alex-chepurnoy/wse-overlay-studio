@@ -200,9 +200,10 @@ final class CaptureSetup
 	/**
 	 * What the service is told: Chrome and the limits. pagesPerBrowser and autoUpdate are null unless capture.properties
 	 * already sets them, and are then kept: the service has its own default, and the daily update is on unless an admin
-	 * turned it off.
+	 * turned it off. room is the most pages at once the systemd unit leaves memory and CPU for, at least maxCaptures, so
+	 * Settings in the page can raise the number up to it without running the installer again.
 	 */
-	record Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB, Integer pagesPerBrowser, String autoUpdate)
+	record Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB, Integer pagesPerBrowser, String autoUpdate, int room)
 	{
 		Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB)
 		{
@@ -212,6 +213,61 @@ final class CaptureSetup
 		Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB, Integer pagesPerBrowser)
 		{
 			this(chrome, maxCaptures, maxBrowserMemoryMB, pagesPerBrowser, null);
+		}
+
+		Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB, Integer pagesPerBrowser, String autoUpdate)
+		{
+			this(chrome, maxCaptures, maxBrowserMemoryMB, pagesPerBrowser, autoUpdate, maxCaptures);
+		}
+
+		Config
+		{
+			room = Math.max(room, maxCaptures);
+		}
+	}
+
+	/** The most pages the capture service takes at once (CaptureService.MAX_CAPTURES_CEILING). */
+	static final int MAX_PAGES = 32;
+	/** What the unit leaves for the service itself on top of its pages (CaptureService.SERVICE_OWN_MB). */
+	static final int SERVICE_OWN_MB = 768;
+
+	/**
+	 * Pages at once for a server of this size, for a new install and --pages auto. Measured with 1.15.0 on an 8-core
+	 * server (docs/USAGE.md, "Pages at once"): one page costs the capture service about 4% of a core at
+	 * the Standard rate (0.5 s) and 16% at Fast (0.1 s), and 40 to 60 MB in a shared Chrome. WSE's own transcoding comes
+	 * first, so the capture service is given a quarter of the cores, counted at the Fast rate, and a quarter of the
+	 * memory at 128 MB a page; the smaller wins, from 2 to MAX_PAGES.
+	 */
+	static int recommendedPages(int cores, long memoryMb)
+	{
+		long byCpu = (long)Math.max(1, cores) * 25 / 16;
+		long byMemory = Math.max(0, memoryMb) / 4 / 128;
+		return (int)Math.max(2, Math.min(MAX_PAGES, Math.min(byCpu, byMemory)));
+	}
+
+	/** This server's cores and memory, as Java sees them; memory 0 when it cannot be read. */
+	record Machine(int cores, long memoryMb)
+	{
+		/** Set by tests, so what they expect does not depend on the machine they run on. */
+		static volatile Machine fixed;
+
+		static Machine here()
+		{
+			if(fixed != null)
+			{
+				return fixed;
+			}
+			long mb = 0;
+			if(java.lang.management.ManagementFactory.getOperatingSystemMXBean() instanceof com.sun.management.OperatingSystemMXBean os)
+			{
+				mb = os.getTotalMemorySize() / (1024 * 1024);
+			}
+			return new Machine(Runtime.getRuntime().availableProcessors(), mb);
+		}
+
+		int pages()
+		{
+			return recommendedPages(cores, memoryMb);
 		}
 	}
 
@@ -307,7 +363,9 @@ final class CaptureSetup
 	 */
 	String unit(Config c)
 	{
-		long memory = (long)c.maxBrowserMemoryMB() * Math.max(1, c.maxCaptures()) + 768;
+		long memory = (long)c.maxBrowserMemoryMB() * Math.max(1, c.room()) + SERVICE_OWN_MB;
+		// 200% as before, or 16% of a core for each page of room at the Fast rate, in whole cores
+		int cpu = Math.max(200, (c.room() * 16 + 99) / 100 * 100);
 		return String.join("\n",
 				"# Written by the URL Overlay installer. URL Overlay's capture service: draws web pages with Chrome for WSE.",
 				"[Unit]",
@@ -332,7 +390,7 @@ final class CaptureSetup
 				"Restart=on-failure",
 				"RestartSec=5",
 				"MemoryMax=" + memory + "M",
-				"CPUQuota=200%",
+				"CPUQuota=" + cpu + "%",
 				"TasksMax=1024",
 				"ProtectSystem=strict",
 				"ReadWritePaths=" + l.work + " " + l.logs,

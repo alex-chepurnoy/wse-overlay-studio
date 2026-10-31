@@ -142,7 +142,8 @@ Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). 
   publishers; any other pushed stream must be restarted at its encoder.
 - A stream runs either a Video Intelligence (VIF) template or a URL Overlay template, never both.
 - A page can still signal through the DNS names it looks up, even when the connection is refused.
-- Four browsers at once by default (`maxCaptures`). Streams showing the same page share one browser.
+- Pages at once (`maxCaptures`) are sized from the server's cores and memory at install, 2 to 32; `--pages` sets
+  another number. Streams showing the same page share one capture.
 - The setup program is not code signed.
 - No automated test runs the module in a real WSE, the bridge in a real Manager, or the page in a browser
   ([docs/DESIGN.md](docs/DESIGN.md#testing)).
