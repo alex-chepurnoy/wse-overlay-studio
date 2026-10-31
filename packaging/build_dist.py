@@ -221,8 +221,12 @@ def build_exe(out_dir, ver, jar_path):
     modules = runtime_modules(jar_path)
     for d in ('input', 'temp', 'out'):
         remove(os.path.join(stage, d))
-    os.makedirs(os.path.join(stage, 'input'))
+    os.makedirs(os.path.join(stage, 'input', 'licenses'))
     shutil.copy2(jar_path, os.path.join(stage, 'input'))
+    # the license and the notices, in the program folder's app\ next to the installer jar, as in every other package
+    for n in ('README.md', 'THIRD-PARTY-NOTICES.md', 'LICENSE.txt'):
+        shutil.copy2(os.path.join(ROOT, n), os.path.join(stage, 'input', n))
+    shutil.copy2(os.path.join(PKG, 'licenses', 'apache-2.0.txt'), os.path.join(stage, 'input', 'licenses'))
     # three launchers: the setup window (the Start menu entry, and what the setup program opens when it finishes), the
     # removal window, and a console one for scripts and for the setup program's own removal step (main.wxs)
     launchers = {'Uninstall URL Overlay': 'arguments=Uninstall --gui\nwin-console=false\nwin-menu=true\n',
@@ -246,8 +250,9 @@ def build_exe(out_dir, ver, jar_path):
          '--resource-dir', os.path.join(PKG, 'windows', 'resources'),
          '--temp', os.path.join(stage, 'temp'), '--dest', os.path.join(stage, 'out')], env=env)
     check_runtime(os.path.join(stage, 'temp', 'images', 'win-msi.image', APP_NAME, 'runtime'), modules)
-    exe = '%s-%s.exe' % (APP_NAME, ver)
-    shutil.copy2(os.path.join(stage, 'out', exe), os.path.join(out_dir, exe))
+    # no spaces: GitHub turns them into dots in a release file's name, and SHA256SUMS would no longer match it
+    exe = '%s-%s.exe' % (APP_NAME.replace(' ', '-'), ver)
+    shutil.copy2(os.path.join(stage, 'out', '%s-%s.exe' % (APP_NAME, ver)), os.path.join(out_dir, exe))
     return exe
 
 
@@ -290,9 +295,9 @@ def main():
     build_deb(os.path.join(out, name), ver, jar_name, jar, a.maintainer)
     made.append(name)
 
+    # the packages a release carries; README.md and THIRD-PARTY-NOTICES.md sit beside them but are in every package
     for n in ('README.md', 'THIRD-PARTY-NOTICES.md'):
         shutil.copy2(os.path.join(ROOT, n), os.path.join(out, n))
-        made.append(n)
 
     sums = ''.join('%s *%s\n' % (hashlib.sha256(read(os.path.join(out, n))).hexdigest(), n) for n in sorted(made))
     with open(os.path.join(out, 'SHA256SUMS'), 'w', encoding='utf-8', newline='\n') as f:

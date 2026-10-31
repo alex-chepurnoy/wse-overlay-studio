@@ -31,20 +31,24 @@ deleted and rebuilt on every run:
 
 | File | What it is |
 |---|---|
-| `Wowza URL Overlay-<version>.exe` | Windows setup program: the installer with its own Java 21 runtime, Start menu entries **Wowza URL Overlay** and **Uninstall URL Overlay**, and the console launcher `urloverlay-cli.exe` |
+| `Wowza-URL-Overlay-<version>.exe` | Windows setup program: the installer with its own Java 21 runtime, Start menu entries **Wowza URL Overlay** and **Uninstall URL Overlay**, and the console launcher `urloverlay-cli.exe`. No spaces in the name, so GitHub keeps it as it is |
 | `wse-url-overlay-<version>-windows.zip` | Installer jar, `install.cmd`, `uninstall.cmd`, `update-chrome.cmd`, `find-java.cmd`, docs |
 | `wse-url-overlay-<version>-linux.tar.gz` | Installer jar, `install.sh`, `uninstall.sh`, `update-chrome.sh`, `find-java.sh`, docs |
 | `wse-url-overlay_<version>_all.deb` | Installs to `/opt/wse-url-overlay/`; `postinst` runs `install.sh --yes`, `prerm` runs `uninstall.sh --yes` on removal |
 | `README.md`, `THIRD-PARTY-NOTICES.md` | Copies of the repository files |
-| `SHA256SUMS` | SHA-256 of every file above |
+| `SHA256SUMS` | SHA-256 of the four packages above, the files a release carries |
 
-Every package carries `README.md`, `THIRD-PARTY-NOTICES.md`, `LICENSE.txt` and `licenses/apache-2.0.txt`. The zip,
+Every package carries `README.md`, `THIRD-PARTY-NOTICES.md`, `LICENSE.txt` and `licenses/apache-2.0.txt`; the setup
+program installs them in its program folder's `app\`. hls.js's license also goes with it, as `vendor/hls.js-LICENSE.txt`
+in the plugin page. The zip,
 tarball and `.deb` use fixed entry times, so the same installer jar gives byte-identical archives; the setup program
 does not. The `.deb` is assembled by the script (ar and tar), so `dpkg-deb` is not needed.
 
 The installer jar, `installer/build/libs/wse-plugin-url-overlay-installer-<version>.jar`, carries everything it
-installs: the module jar, the plugin page, the starter templates, the bridge's class files and the capture service with
-its libraries. The setup program's runtime is linked with the modules `jdeps` finds in the capture service, plus `java.base`, `java.desktop`, `java.net.http` and `jdk.crypto.ec`; the build fails if one is missing.
+installs: the module jar, the plugin page, the starter templates, the bridge's class files and the capture service, with
+no libraries. The setup program's runtime is linked with the modules `jdeps` finds in the installer jar and in the
+capture service, plus `java.base`, `java.desktop`, `java.net.http` and `jdk.crypto.ec`, which `jdeps` cannot see; the
+build fails if one is missing.
 
 ## Run the tests
 
@@ -60,6 +64,16 @@ On Windows use `gradlew.bat`. `build_dist.py` runs all four unless `--skip-tests
 what they do not, is in [DESIGN.md](DESIGN.md#testing).
 
 `./gradlew :installer:setupScreenshots` paints the setup window's screens with sample data into `docs/images/`.
+
+### Troubleshooting
+
+- **`./gradlew: Permission denied`** on a checkout made before 1.15.1: `chmod +x gradlew`. The repository marks it
+  executable since then.
+- **`Unable to establish loopback connection`** from Gradle or the tests on Windows. Java 21 makes its internal
+  pipe a Unix socket in the temp folder, and some machines' security software blocks those under the user's
+  `AppData\Local\Temp`. Point Java at another folder for the run, for example in Git Bash
+  `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/Temp ./gradlew build`, or in PowerShell
+  `$env:JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=C:\Temp'` first. The build does not set it.
 
 ## Project layout
 

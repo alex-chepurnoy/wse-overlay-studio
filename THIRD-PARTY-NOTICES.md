@@ -8,7 +8,8 @@ URL Overlay for Wowza Streaming Engine ships the components below. Each is used 
 |---|---|---|---|
 | hls.js | 1.6.16 | Apache License 2.0 | `manager/wse-plugins/server/url-overlay/vendor/` |
 
-The full Apache License 2.0 text is in `licenses/apache-2.0.txt`.
+The full Apache License 2.0 text is in `licenses/apache-2.0.txt`, and beside hls.js, with its NOTICE, in
+`vendor/hls.js-LICENSE.txt`.
 
 ### NOTICE: hls.js
 
@@ -39,4 +40,5 @@ none of it is shipped.
 
 ## Used from Wowza Streaming Engine, not shipped
 
-Jackson, Restlet, Joda-Time, Commons Lang, Log4j and OpenTelemetry come with WSE.
+Jackson, Restlet, Joda-Time, Commons Lang and Log4j come with WSE. On Windows the installer copies WSE's own
+`bin\nssm_x64.exe` into the capture service's program folder, as `nssm.exe`, to run the service.

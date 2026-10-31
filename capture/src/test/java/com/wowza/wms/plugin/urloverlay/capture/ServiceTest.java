@@ -327,7 +327,8 @@ class ServiceTest
 
 	/**
 	 * Where a test socket can live. On some Windows machines a Unix socket under the user's temp folder binds but
-	 * refuses connections; the build points jdk.net.unixdomain.tmpdir somewhere that works, so tests use that.
+	 * refuses connections; the build does not set jdk.net.unixdomain.tmpdir, so on such a machine it is set for the
+	 * Gradle run (docs/BUILD.md, Troubleshooting) and tests use it.
 	 */
 	static Path socketDir(Path fallback) throws java.io.IOException
 	{
