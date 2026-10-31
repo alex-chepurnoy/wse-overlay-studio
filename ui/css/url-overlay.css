@@ -1,3 +1,7 @@
+/*
+ * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+ * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+ */
 /* URL Overlay plugin page, injected into the WSE Manager: every selector is scoped under .uo-plugin, and class names
    avoid Bootstrap 3's own (.panel, .badge, .label, .row, .table, .close, .active), which the Manager loads globally.
    Type scale 12 / 13 / 14 / 16 / 20; spacing on an 8 px grid. Color: gray by default, green on air and healthy, red
