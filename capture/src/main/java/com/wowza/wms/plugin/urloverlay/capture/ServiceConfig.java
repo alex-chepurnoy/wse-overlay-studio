@@ -10,8 +10,11 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
-/** capture.properties: where the socket, Chrome, chromedriver and work files are, and the limits. */
-public record ServiceConfig(Path socket, String chrome, String chromedriver, Path workDir, int maxCaptures, int maxBrowserMb, Path logFile,
+/**
+ * capture.properties: where the socket, Chrome and work files are, and the limits. chromedriver, which earlier versions
+ * used, is accepted and ignored.
+ */
+public record ServiceConfig(Path socket, String chrome, Path workDir, int maxCaptures, int maxBrowserMb, int pagesPerBrowser, Path logFile,
 		List<String> warnings)
 {
 	public static final String SOCKET = "socket";
@@ -20,10 +23,12 @@ public record ServiceConfig(Path socket, String chrome, String chromedriver, Pat
 	public static final String WORK_DIR = "workDir";
 	public static final String MAX_CAPTURES = "maxCaptures";
 	public static final String MAX_BROWSER_MB = "maxBrowserMemoryMB";
+	/** How many pages share one Chrome. */
+	public static final String PAGES_PER_BROWSER = "pagesPerBrowser";
 	public static final String LOG_FILE = "logFile";
 	/** Read by the installer's daily Chrome update (UpdateChrome), not by the service: false turns the update off. */
 	public static final String AUTO_UPDATE = "autoUpdate";
-	static final Set<String> KEYS = Set.of(SOCKET, CHROME, CHROMEDRIVER, WORK_DIR, MAX_CAPTURES, MAX_BROWSER_MB, LOG_FILE, AUTO_UPDATE);
+	static final Set<String> KEYS = Set.of(SOCKET, CHROME, CHROMEDRIVER, WORK_DIR, MAX_CAPTURES, MAX_BROWSER_MB, PAGES_PER_BROWSER, LOG_FILE, AUTO_UPDATE);
 
 	/** The configuration in these properties; IllegalArgumentException naming what is missing or wrong. */
 	public static ServiceConfig of(Properties p)
@@ -47,9 +52,9 @@ public record ServiceConfig(Path socket, String chrome, String chromedriver, Pat
 			throw new IllegalArgumentException("The capture service's configuration has no " + WORK_DIR + " (where Chrome profiles go)");
 		}
 		String log = value(p, LOG_FILE);
-		return new ServiceConfig(Path.of(socket), value(p, CHROME), value(p, CHROMEDRIVER), Path.of(work),
+		return new ServiceConfig(Path.of(socket), value(p, CHROME), Path.of(work),
 				number(p, MAX_CAPTURES, CaptureService.DEFAULT_MAX_CAPTURES, warnings), number(p, MAX_BROWSER_MB, CaptureService.DEFAULT_MAX_BROWSER_MB, warnings),
-				log == null ? null : Path.of(log), List.copyOf(warnings));
+				number(p, PAGES_PER_BROWSER, CaptureService.DEFAULT_PAGES_PER_BROWSER, warnings), log == null ? null : Path.of(log), List.copyOf(warnings));
 	}
 
 	private static String value(Properties p, String key)

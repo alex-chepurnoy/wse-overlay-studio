@@ -108,7 +108,7 @@ final class CaptureSetup
 		/** Linux: the AppArmor policy knows abi 4.0, which the userns rule needs (AppArmor 4, Ubuntu 23.10 and later). */
 		boolean apparmorAbi4();
 
-		/** The processes whose program file lies under dir: a Chrome or chromedriver of the capture service. */
+		/** The processes whose program file lies under dir: a Chrome of the capture service, or an earlier version's chromedriver. */
 		default List<Long> processesUnder(Path dir)
 		{
 			Path d = dir.toAbsolutePath().normalize();
@@ -197,9 +197,22 @@ final class CaptureSetup
 		}
 	};
 
-	/** What the service is told: Chrome, chromedriver and the limits. */
-	record Config(Path chrome, Path driver, int maxCaptures, int maxBrowserMemoryMB)
+	/**
+	 * What the service is told: Chrome and the limits. pagesPerBrowser and autoUpdate are null unless capture.properties
+	 * already sets them, and are then kept: the service has its own default, and the daily update is on unless an admin
+	 * turned it off.
+	 */
+	record Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB, Integer pagesPerBrowser, String autoUpdate)
 	{
+		Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB)
+		{
+			this(chrome, maxCaptures, maxBrowserMemoryMB, null, null);
+		}
+
+		Config(Path chrome, int maxCaptures, int maxBrowserMemoryMB, Integer pagesPerBrowser)
+		{
+			this(chrome, maxCaptures, maxBrowserMemoryMB, pagesPerBrowser, null);
+		}
 	}
 
 	/** The capture service could not be set up; the message is plain words. */
@@ -269,11 +282,18 @@ final class CaptureSetup
 		Map<String, String> v = new LinkedHashMap<>();
 		v.put("socket", l.socket.toString());
 		v.put("chrome", c.chrome() == null ? "" : c.chrome().toString());
-		v.put("chromedriver", c.driver() == null ? "" : c.driver().toString());
 		v.put("workDir", l.work.toString());
 		v.put("maxCaptures", String.valueOf(c.maxCaptures()));
 		v.put("maxBrowserMemoryMB", String.valueOf(c.maxBrowserMemoryMB()));
+		if(c.pagesPerBrowser() != null)
+		{
+			v.put("pagesPerBrowser", String.valueOf(c.pagesPerBrowser()));
+		}
 		v.put("logFile", l.logs.resolve("capture.log").toString());
+		if(c.autoUpdate() != null)
+		{
+			v.put("autoUpdate", c.autoUpdate());
+		}
 		// java.util.Properties reads a backslash as an escape, so each one in a Windows path is doubled
 		v.forEach((k, x) -> b.append(k).append('=').append(x.replace("\\", "\\\\")).append('\n'));
 		return b.toString();
@@ -326,8 +346,12 @@ final class CaptureSetup
 	}
 
 	/**
-	 * Lets Chrome for Testing make the user namespaces its sandbox needs where Ubuntu restricts them
-	 * (kernel.apparmor_restrict_unprivileged_userns = 1), in the shape of Ubuntu's own profile for Chrome.
+	 * Lets chrome-headless-shell make the user namespaces its sandbox needs where Ubuntu restricts them
+	 * (kernel.apparmor_restrict_unprivileged_userns = 1), in the shape of Ubuntu's own profile for Chrome. The headless
+	 * shell is one program: its zygote and renderers are the same file started again, so they run under this profile too.
+	 * Written again on every install, so an install from before the headless shell, whose profile named
+	 * chrome-linux64/chrome, gets this one. That Chrome stays named too: when the headless shell's download fails during
+	 * an upgrade, capture.properties still points at it until the daily update moves it, and its sandbox must still start.
 	 */
 	String apparmorProfile()
 	{
@@ -336,7 +360,7 @@ final class CaptureSetup
 				"abi <abi/4.0>,",
 				"include <tunables/global>",
 				"",
-				"profile wse-url-overlay-chrome " + l.chromeRoot + "/*/chrome-linux64/chrome flags=(unconfined) {",
+				"profile wse-url-overlay-chrome " + l.chromeRoot + "/*/{chrome-headless-shell-linux64/chrome-headless-shell,chrome-linux64/chrome} flags=(unconfined) {",
 				"  userns,",
 				"",
 				"  include if exists <local/wse-url-overlay-chrome>",
@@ -364,7 +388,7 @@ final class CaptureSetup
 		// registered the service with an nssm.exe under the setup program's folder
 		c.add(List.of(n, "set", SERVICE, "ImagePath", n));
 		c.add(List.of(n, "set", SERVICE, "Application", java().toString()));
-		// Java's Unix domain sockets and Selenium's HTTP client make temporary files: in the service's own work folder, since
+		// Java's Unix domain sockets and other temporary files go in the service's own work folder, since
 		// the default temporary folder of a virtual account fails for them
 		// no quotes: Java does not escape quotes inside an argument on Windows, so nssm received the value with them stripped
 		// and java read "C:\Program" as the jar. The jar is named relative to AppDirectory; the ProgramData paths have no spaces.
@@ -864,8 +888,9 @@ final class CaptureSetup
 	}
 
 	/**
-	 * Stops the service and waits, at most about 30 seconds, until no Chrome or chromedriver runs from the Chrome folder
-	 * (nssm and systemd end the whole process tree on stop; this checks it). What still runs then is killed.
+	 * Stops the service and waits, at most about 30 seconds, until nothing runs from the Chrome folder: Chrome, or the
+	 * chromedriver of an earlier version (nssm and systemd end the whole process tree on stop; this checks it). What
+	 * still runs then is killed.
 	 * @return the processes still running from the folder afterwards; empty normally
 	 */
 	static List<Long> stopAndWait(Layout l, Sys sys)

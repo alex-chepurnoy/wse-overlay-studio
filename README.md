@@ -32,7 +32,7 @@ the overlays and the transcoder templates that carry them, assigns templates to 
     v
  +-----------------------------------------------------------------+
  | Capture service WowzaURLOverlayCapture (own unprivileged user)  |
- |  Chrome for Testing + chromedriver, sandbox always on           |
+ |  Chrome (headless shell on Linux), sandbox always on            |
  |  egress proxy: every connection Chrome makes is checked         |
  +-----------------------------------------------------------------+
     |
@@ -52,7 +52,7 @@ Source: `ui/` (the page), `bridge/`, `module/`, `capture/`, and `installer/` wit
 | Java | Nothing to install on Windows with the setup program, which carries its own Java 21 runtime. The zip, tarball and `.deb` run the installer and the capture service on WSE's bundled Java, which must be 21 or later for the capture service (WSE 4.12.0 ships 21.0.3; earlier versions not checked) |
 | OS | Windows x64 (Windows 10 or Server 2019 and later, for Unix domain sockets) or Linux x86_64. Chrome for Testing is downloaded for `win64` and `linux64` only |
 | Rights | Administrator (Windows) or root (Linux): the install creates a service and its account |
-| Network at install | `googlechromelabs.github.io` and `storage.googleapis.com` for Chrome (about 220 MB), unless you pass your own Chrome with `--chrome` and `--chromedriver`. A reinstall reuses a complete Chrome already on disk |
+| Network at install | `googlechromelabs.github.io` and `storage.googleapis.com` for Chrome (chrome-headless-shell on Linux, Chrome for Testing on Windows), unless you pass your own Chrome with `--chrome`. A reinstall reuses a complete Chrome already on disk; on Linux, an install from before 1.15.0 downloads the headless shell once |
 | Linux fonts | `fontconfig` and a font package; the `.deb` recommends them with Chrome's libraries |
 
 ## Install

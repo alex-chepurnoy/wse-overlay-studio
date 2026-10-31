@@ -5,6 +5,7 @@
 package com.wowza.wms.plugin.urloverlay.capture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,42 +17,47 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/**
- * Without an explicit chromedriver no browser may be opened, so Selenium Manager never gets the chance to
- * download one.
- */
+/** Without an explicit Chrome no page may be opened: the service never looks for one of its own. */
 class CaptureSettingsTest
 {
 	@AfterEach
 	void reset()
 	{
-		CaptureSettings.configure(null, null);
+		CaptureSettings.configure(null);
 	}
 
 	@Test
-	void unsetDriverRefusesToOpenABrowser(@TempDir Path dir) throws Exception
+	void unsetChromeRefusesToOpenAPage(@TempDir Path dir) throws Exception
 	{
-		CaptureSettings.configure(null, null);
+		CaptureSettings.configure(null);
 		WebPageCapture capture = new WebPageCapture("http://192.0.2.10/", 16, 16, () -> 0, () -> {});
 		IllegalStateException e = assertThrows(IllegalStateException.class, capture::capture);
-		assertTrue(e.getMessage().contains("chromedriver"), e.getMessage());
+		assertTrue(e.getMessage().contains("No Chrome configured"), e.getMessage());
 		// a blank path is unset
 		{
-			CaptureSettings.configure("   ", null);
-			assertThrows(IllegalStateException.class, CaptureSettings::requireChromeDriver);
+			CaptureSettings.configure("   ");
+			assertThrows(IllegalStateException.class, CaptureSettings::requireChrome);
 		}
 		// a path to nothing is refused
 		{
-			CaptureSettings.configure(dir.resolve("no-such-chromedriver.exe").toString(), null);
-			IllegalStateException e2 = assertThrows(IllegalStateException.class, CaptureSettings::requireChromeDriver);
+			CaptureSettings.configure(dir.resolve("no-such-chrome.exe").toString());
+			IllegalStateException e2 = assertThrows(IllegalStateException.class, CaptureSettings::requireChrome);
 			assertTrue(e2.getMessage().contains("not found"), e2.getMessage());
 		}
 		// an existing file is used
 		{
-			Path fake = Files.createFile(dir.resolve("chromedriver.exe"));
-			CaptureSettings.configure(" " + fake + " ", null);
-			assertEquals(new File(fake.toString()), CaptureSettings.requireChromeDriver());
+			Path fake = Files.createFile(dir.resolve("chrome.exe"));
+			CaptureSettings.configure(" " + fake + " ");
+			assertEquals(new File(fake.toString()).getPath(), CaptureSettings.requireChrome());
 		}
 	}
 
+	@Test
+	void theHeadlessShellIsKnownByItsName()
+	{
+		assertTrue(CaptureSettings.isHeadlessShell("/opt/wse-url-overlay/chrome-for-testing/156.0.8078.80/chrome-headless-shell-linux64/chrome-headless-shell"));
+		assertTrue(CaptureSettings.isHeadlessShell("C:/x/chrome-headless-shell.exe"));
+		assertFalse(CaptureSettings.isHeadlessShell("/opt/wse-url-overlay/chrome-for-testing/156.0.8078.80/chrome-linux64/chrome"));
+		assertFalse(CaptureSettings.isHeadlessShell(null));
+	}
 }

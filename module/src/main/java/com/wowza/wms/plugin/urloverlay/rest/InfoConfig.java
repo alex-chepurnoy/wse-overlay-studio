@@ -24,7 +24,7 @@ import com.wowza.wms.plugin.urloverlay.WebPageCapture;
 import com.wowza.wms.rest.ConfigBase;
 import com.wowza.wms.rest.WMSConfig;
 
-/** Server-wide capture engine state: versions, Chrome and chromedriver, session use, network rules, recent blocks. */
+/** Server-wide capture engine state: versions, Chrome, session use, network rules, recent blocks. */
 // fields of the WSE REST base class that mean nothing in these responses
 @JsonIgnoreProperties({ "version", "serverName", "saveFieldList" })
 @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -135,11 +135,12 @@ public class InfoConfig extends ConfigBase
 		service.put("user", svc.get("user"));
 		body.put("service", service);
 		body.put("chrome", running ? svc.get("chrome") : Map.of("found", false));
-		body.put("chromedriver", running ? svc.get("chromedriver") : Map.of("found", false));
 		body.put("chromeUpdate", chromeUpdate(svc.get("socket")));
 		Map<String, Object> captures = new LinkedHashMap<>();
 		captures.put("active", running ? svc.get("active") : 0);
 		captures.put("limit", running ? svc.get("limit") : 0);
+		captures.put("pagesPerBrowser", running ? svc.get("pagesPerBrowser") : null);
+		captures.put("browsers", running ? svc.get("browsers") : 0);
 		captures.put("maxBrowserMemoryMB", svc.get("maxBrowserMemoryMB"));
 		// pages in use by a stream, for the header: how many have a picture, how many cannot get one
 		int capturing = 0, failing = 0;

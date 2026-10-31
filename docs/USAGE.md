@@ -157,8 +157,8 @@ later. Streams publishing to it disconnect for a few seconds; the dialog names t
 
 ![Status drawer](images/usage-server.png)
 
-Any item in the header opens the status drawer: the capture service (version, account, sandbox), Chrome and
-chromedriver with the last update check, browsers open and the memory limit per browser, the network rules for captured
+Any item in the header opens the status drawer: the capture service (version, account, sandbox), Chrome with the last
+update check, pages open and the Chromes they share, the memory limit, the network rules for captured
 pages with recent blocks, streams waiting for a restart, and unsaved work. It is read only: each value names the
 setting behind it.
 
@@ -198,10 +198,11 @@ Written by the installer; restart `WowzaURLOverlayCapture` after a change.
 | Key | Default | Meaning |
 |---|---|---|
 | `socket` | required | The Unix socket the service listens on; must match `UrlOverlayCaptureSocket` |
-| `chrome`, `chromedriver` | set by the installer | The Chrome and chromedriver the service runs |
+| `chrome` | set by the installer | The Chrome the service runs: chrome-headless-shell on Linux, Chrome for Testing on Windows. A `chromedriver` line from an earlier version is ignored |
 | `workDir` | required | Chrome profiles and work files |
-| `maxCaptures` | `4` | Browsers open at once when the service starts; one more is refused. **Settings** in the page changes it while the service runs |
-| `maxBrowserMemoryMB` | `1024` | A browser above this is restarted |
+| `maxCaptures` | `4` | Pages open at once when the service starts; one more is refused. **Settings** in the page changes it while the service runs |
+| `pagesPerBrowser` | `4` | Pages one Chrome holds. Fewer means fewer pages lost when one Chrome exits, more means less memory |
+| `maxBrowserMemoryMB` | `1024` | Memory a Chrome may use for each page it holds; above it, its largest page is restarted |
 | `logFile` | standard output | The service's log; the installer sets `capture.log` in the service's log folder |
 | `autoUpdate` | on | `false` stops the daily Chrome update. Read by the updater; the service itself logs it as an unknown setting and ignores it |
 

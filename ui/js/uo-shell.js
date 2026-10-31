@@ -76,10 +76,10 @@
     var pend = (U.appStreams || []).filter(function (s) { return s.restartNeeded; }).map(function (s) { return s.name; });
     var un = U.unsaved(), live = U.live();
     el.strip.innerHTML = si('capture', 'Capture service', capV) +
-      si('browsers', 'Browsers', i ? U.esc(cap.active || 0) + ' of ' + U.esc(cap.limit || 0) : '<span class="faint">-</span>') +
+      si('browsers', 'Pages open', i ? U.esc(cap.active || 0) + ' of ' + U.esc(cap.limit || 0) : '<span class="faint">-</span>') +
       // pages first, as the live check; blocks only when there are some, and they open the network rules
-      si(blocks || cap.pagesFailing ? 'network' : 'browsers', 'Pages', !i || cap.pagesCapturing == null ? '<span class="faint">-</span>' :
-        (cap.pagesFailing ? '<span class="dot bad"></span>' : '') + U.esc(cap.pagesCapturing) + ' capturing' + (cap.pagesFailing ? ', ' + U.esc(cap.pagesFailing) + ' not' : '') + (blocks ? ', ' + blocks + ' blocked' : '')) +
+      si(blocks || cap.pagesFailing ? 'network' : 'browsers', 'Capturing', !i || cap.pagesCapturing == null ? '<span class="faint">-</span>' :
+        (cap.pagesFailing ? '<span class="dot bad"></span>' : '') + U.esc(cap.pagesCapturing) + (cap.pagesCapturing === 1 ? ' page' : ' pages') + (cap.pagesFailing ? ', ' + U.esc(cap.pagesFailing) + ' not' : '') + (blocks ? ', ' + blocks + ' blocked' : '')) +
       (nomod ? si('restart', 'Stream restart', faint) + si('unsaved', 'Unsaved', faint) :
         si('restart', 'Stream restart', pend.length ? '<span class="dot warn"></span>' + U.esc(pend[0]) + (pend.length > 1 ? ' +' + (pend.length - 1) : '') : 'None') +
         si('unsaved', 'Unsaved', un.length ? '<span class="chip-draft">' + U.esc(un[0].label) + (un.length > 1 ? ' +' + (un.length - 1) : '') + '</span>' : 'None')) +
@@ -418,7 +418,7 @@
       err.hidden = !r.refused;
       if (r.refused) err.textContent = 'When the capture service last started it would not take ' + r.set + ' and runs at ' + r.limit + ': ' + r.refused;
       inp.value = r.limit; inp.max = r.ceiling; inp.disabled = !!U.readOnly; set.disabled = true;
-      note.textContent = r.active + ' open now. Each is one Chrome of up to ' + (r.maxBrowserMemoryMB || '?') + ' MB.' +
+      note.textContent = r.active + ' open now. Pages share Chromes, and a Chrome may use up to ' + (r.maxBrowserMemoryMB || '?') + ' MB for each page it holds.' +
         (r.set != null ? ' Set here; the service starts with ' + r.startLimit + ' from capture.properties and is given this one.' : ' From capture.properties.') + ' 1 to ' + r.ceiling + '.' +
         (r.memoryMaxMB != null ? ' The service is held to ' + Math.round(r.memoryMaxMB / 102.4) / 10 + ' GB' + (r.cpuLimit != null ? ' and ' + r.cpuLimit + ' CPU cores' : '') +
           ' by its systemd unit, which is what caps it at ' + r.ceiling + '; running the installer again with a higher maxCaptures raises that.' : '');

@@ -71,8 +71,9 @@ public final class CaptureServiceMain
 		c.warnings().forEach(log::warn);
 		log.info("UrlOverlay capture service " + CaptureVersion.VERSION + " starting as " + System.getProperty("user.name") + ", config " + config);
 
-		CaptureSettings.configure(c.chromedriver(), c.chrome());
+		CaptureSettings.configure(c.chrome());
 		CaptureService service = CaptureService.configure(c.workDir(), c.maxCaptures(), c.maxBrowserMb());
+		service.pagesPerBrowser(c.pagesPerBrowser());
 		service.reapOrphans();
 		BrowserEnvironment.refreshInBackground();
 
@@ -100,6 +101,7 @@ public final class CaptureServiceMain
 			{
 				w.close();
 			}
+			ChromeGroups.get().closeAll();
 		}, "capture-shutdown"));
 	}
 
@@ -110,7 +112,6 @@ public final class CaptureServiceMain
 		m.put("version", CaptureVersion.VERSION);
 		m.put("user", System.getProperty("user.name"));
 		m.put("chrome", BrowserEnvironment.chrome());
-		m.put("chromedriver", BrowserEnvironment.chromedriver());
 		m.put("sandbox", "on");
 		m.put("sandboxProblem", s.sandboxProblem());
 		m.put("active", s.activeCaptures());
@@ -120,6 +121,8 @@ public final class CaptureServiceMain
 		m.put("memoryMaxMB", s.memoryMaxMb() < 0 ? null : s.memoryMaxMb());
 		m.put("cpuLimit", s.cpuLimit() < 0 ? null : s.cpuLimit());
 		m.put("maxBrowserMemoryMB", s.maxBrowserMb());
+		m.put("pagesPerBrowser", s.pagesPerBrowser());
+		m.put("browsers", ChromeGroups.get().all().size());
 		m.put("recentBlocks", s.recentBlocks());
 		m.put("chromeServiceBlocks", s.chromeServiceBlocks());
 		return m;

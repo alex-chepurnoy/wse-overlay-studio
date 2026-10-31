@@ -1,29 +1,10 @@
 // The capture service: Chrome under its own unprivileged account, outside WSE, serving frames to the module over a
-// Unix domain socket. Runs on its own Java 21 runtime with Selenium beside it; it needs no WSE classes.
+// Unix domain socket. Runs on its own Java 21 runtime and drives Chrome over DevTools with the JDK's own WebSocket
+// client; it needs no WSE classes and no third-party libraries.
 
 def payloadLib = layout.buildDirectory.dir('payload/lib')
 
-// Selenium and the libraries it needs at run time, from Maven Central. Each is taken without its own dependencies: the
-// service uses chromedriver only, so the rest of Selenium's tree (other browsers, OpenTelemetry, Netty) stays out.
-def runtimeLibs = [
-        'org.seleniumhq.selenium:selenium-api:4.21.0',
-        'org.seleniumhq.selenium:selenium-chrome-driver:4.21.0',
-        'org.seleniumhq.selenium:selenium-chromium-driver:4.21.0',
-        'org.seleniumhq.selenium:selenium-http:4.21.0',
-        'org.seleniumhq.selenium:selenium-java:4.21.0',
-        'org.seleniumhq.selenium:selenium-json:4.21.0',
-        'org.seleniumhq.selenium:selenium-manager:4.21.0',
-        'org.seleniumhq.selenium:selenium-os:4.21.0',
-        'org.seleniumhq.selenium:selenium-remote-driver:4.21.0',
-        'org.seleniumhq.selenium:selenium-support:4.21.0',
-        'com.google.guava:guava:33.2.0-jre',
-        'dev.failsafe:failsafe:3.3.2',
-        'org.apache.commons:commons-exec:1.4.0',
-]
-
 dependencies {
-    runtimeLibs.each { implementation(it) { transitive = false } }
-
     testImplementation platform('org.junit:junit-bom:5.10.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

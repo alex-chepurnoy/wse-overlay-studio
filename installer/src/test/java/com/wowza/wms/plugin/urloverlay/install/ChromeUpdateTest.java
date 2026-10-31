@@ -39,6 +39,7 @@ class ChromeUpdateTest
 	InstallerTest.FakeSys sys;
 	com.sun.net.httpserver.HttpServer cft;
 	final AtomicInteger zips = new AtomicInteger();
+	final List<String> fetched = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 	volatile String stable = NEW;
 	volatile boolean zip404;
 	/** The Chrome the stand-in service reports: what its settings name, unless told it cannot find that one. */
@@ -58,21 +59,18 @@ class ChromeUpdateTest
 		CaptureSetup.testLayout = l;
 		String plat = ChromeDownload.platform();
 		boolean win = plat.startsWith("win");
-		byte[] chromeZip = InstallerTest.zip("chrome-" + plat + "/" + (win ? "chrome.exe" : "chrome"), "new chrome");
-		byte[] driverZip = InstallerTest.zip("chromedriver-" + plat + "/" + (win ? "chromedriver.exe" : "chromedriver"), "new driver");
+		// the Chrome for this OS at /chrome.zip (Windows) or /shell.zip (Linux); chromedriver is listed and never fetched
+		Map<String, byte[]> served = Map.of("/chrome.zip", InstallerTest.zip("chrome-" + plat + "/" + (win ? "chrome.exe" : "chrome"), "new chrome"),
+				"/shell.zip", InstallerTest.zip("chrome-headless-shell-" + plat + "/chrome-headless-shell" + (win ? ".exe" : ""), "new chrome"),
+				"/driver.zip", InstallerTest.zip("chromedriver-" + plat + "/chromedriver", "new driver"));
 		cft = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
 		String base = "http://127.0.0.1:" + cft.getAddress().getPort();
-		cft.createContext("/list.json", x -> send(x, ("{\"channels\":{\"Stable\":{\"version\":\"" + stable + "\",\"downloads\":{\"chrome\":[{\"platform\":\"" + plat
-				+ "\",\"url\":\"" + base + "/chrome.zip\"}],\"chromedriver\":[{\"platform\":\"" + plat + "\",\"url\":\"" + base + "/driver.zip\"}]}}}}")
-				.getBytes(StandardCharsets.UTF_8)));
-		cft.createContext("/chrome.zip", x -> {
+		cft.createContext("/list.json", x -> send(x, InstallerTest.list(plat, base, stable).getBytes(StandardCharsets.UTF_8)));
+		served.forEach((path, body) -> cft.createContext(path, x -> {
 			zips.incrementAndGet();
-			send(x, zip404 ? null : chromeZip);
-		});
-		cft.createContext("/driver.zip", x -> {
-			zips.incrementAndGet();
-			send(x, zip404 ? null : driverZip);
-		});
+			fetched.add(path);
+			send(x, zip404 ? null : body);
+		}));
 		cft.start();
 		ChromeDownload.source = new ChromeDownload.Source(base + "/list.json", InstallerTest::standIn, InstallerTest::standIn);
 		ChromeUpdate.testProbe = socket -> {
@@ -81,12 +79,13 @@ class ChromeUpdateTest
 			boolean found = serviceFindsNew || !chrome.contains(NEW);
 			return Map.of("ok", true, "chrome", Map.of("found", found, "path", chrome));
 		};
-		// what the installer left: the Chrome in use, an older one, and the settings pointing at the one in use
+		// what the installer left: the Chrome in use, an older one, and the settings pointing at the one in use, with the
+		// chromedriver line an earlier version wrote, which the service ignores
 		version(OLD);
 		version(OLDER);
 		Files.createDirectories(l.configDir());
 		Files.writeString(l.config(), "# Written by the URL Overlay installer\nsocket=" + esc(l.socket()) + "\nchrome=" + esc(chromeIn(OLD)) + "\nchromedriver="
-				+ esc(driverIn(OLD)) + "\nmaxCaptures=6\n");
+				+ esc(l.chromeRoot().resolve(OLD).resolve("chromedriver-" + plat + "/chromedriver")) + "\nmaxCaptures=6\n");
 	}
 
 	@AfterEach
@@ -123,17 +122,10 @@ class ChromeUpdateTest
 		return ChromeDownload.chromeIn(l.chromeRoot().resolve(v), ChromeDownload.platform());
 	}
 
-	Path driverIn(String v)
-	{
-		return ChromeDownload.driverIn(l.chromeRoot().resolve(v), ChromeDownload.platform());
-	}
-
 	void version(String v) throws IOException
 	{
 		Files.createDirectories(chromeIn(v).getParent());
-		Files.createDirectories(driverIn(v).getParent());
 		Files.writeString(chromeIn(v), "chrome " + v);
-		Files.writeString(driverIn(v), "driver " + v);
 		Files.writeString(l.chromeRoot().resolve(v).resolve(ChromeDownload.COMPLETE), v);
 	}
 
@@ -177,11 +169,12 @@ class ChromeUpdateTest
 	void aNewerStableIsDownloadedTakenIntoUseCheckedAndTheOldestRemoved() throws Exception
 	{
 		assertEquals(0, update(), output);
-		assertEquals(2, zips.get());
+		assertEquals(List.of(InstallerTest.expectedZip()), fetched, "one zip, the Chrome for this OS; never chromedriver");
 		Properties p = settings();
 		assertEquals(chromeIn(NEW).toString(), p.getProperty("chrome"), "the settings point at the new Chrome");
-		assertEquals(driverIn(NEW).toString(), p.getProperty("chromedriver"));
+		assertNull(p.getProperty("chromedriver"), "the chromedriver line of an earlier version is dropped");
 		assertEquals("6", p.getProperty("maxCaptures"), "every other setting stays");
+		assertEquals(l.socket().toString(), p.getProperty("socket"));
 		assertTrue(restarted(), sys.ran.toString());
 		assertTrue(Files.isRegularFile(l.chromeRoot().resolve(NEW).resolve(ChromeDownload.COMPLETE)));
 		assertTrue(Files.isDirectory(l.chromeRoot().resolve(OLD)), "the previous version is kept");
@@ -270,11 +263,83 @@ class ChromeUpdateTest
 	}
 
 	@Test
-	void theSettingsKeepEveryOtherLine()
+	void theSettingsKeepEveryOtherLineAndLoseChromedriver()
 	{
 		String t = "# comment\nsocket=s\nchrome=a\nchromedriver=b\nautoUpdate=true\n";
-		String u = ChromeUpdate.withChrome(t, Path.of("x"), Path.of("y"));
-		assertEquals("# comment\nsocket=s\nchrome=x\nchromedriver=y\nautoUpdate=true\n", u);
+		assertEquals("# comment\nsocket=s\nchrome=x\nautoUpdate=true\n", ChromeUpdate.withChrome(t, Path.of("x")));
+		// spaced, indented or last, and without a chrome line to replace
+		assertEquals("socket=s\n  # kept\npagesPerBrowser=2\nchrome=x\n", ChromeUpdate.withChrome("socket=s\n  # kept\n  chromedriver = b\npagesPerBrowser=2\nchromedriver=c\n", Path.of("x")));
+		assertEquals("socket=s\nchrome=x\n", ChromeUpdate.withChrome("socket=s", Path.of("x")));
+	}
+
+	@Test
+	void aLinuxInstallStillOnChromeForTestingMovesEvenWhenItsVersionIsTheNewest() throws Exception
+	{
+		// what an earlier installer left on Linux: chrome-linux64/chrome and chromedriver in the version folder in use. The
+		// test runs on either OS, so the folder names the layout the installer no longer puts there.
+		stable = OLD;
+		Path old = l.chromeRoot().resolve(OLD);
+		ChromeDownload.deleteTree(old);
+		Path oldChrome = old.resolve("chrome-linux64/chrome");
+		Files.createDirectories(oldChrome.getParent());
+		Files.createDirectories(old.resolve("chromedriver-linux64"));
+		Files.writeString(oldChrome, "chrome " + OLD);
+		Files.writeString(old.resolve("chromedriver-linux64/chromedriver"), "driver " + OLD);
+		Files.writeString(old.resolve(ChromeDownload.COMPLETE), OLD);
+		Files.writeString(l.config(), "socket=" + esc(l.socket()) + "\nchrome=" + esc(oldChrome) + "\nchromedriver=" + esc(old.resolve("chromedriver-linux64/chromedriver"))
+				+ "\nmaxCaptures=6\n");
+
+		assertEquals(0, update(), output);
+		assertEquals(List.of(InstallerTest.expectedZip()), fetched, output);
+		Path moved = ChromeDownload.chromeIn(l.chromeRoot().resolve(OLD + "-2"), ChromeDownload.platform());
+		Properties p = settings();
+		assertEquals(moved.toString(), p.getProperty("chrome"), "beside the folder that was in use, never into it");
+		assertNull(p.getProperty("chromedriver"));
+		assertEquals("6", p.getProperty("maxCaptures"));
+		assertTrue(restarted(), sys.ran.toString());
+		assertTrue(Files.isRegularFile(oldChrome), "the Chrome it ran before is kept as the previous version");
+		assertFalse(Files.exists(l.chromeRoot().resolve(OLDER)), "older ones go");
+		assertEquals("updated", state().get("result"));
+
+		// the next run finds it current: nothing more
+		fetched.clear();
+		assertEquals(0, update(), output);
+		assertTrue(output.contains("is the newest Stable"), output);
+		assertEquals(List.of(), fetched);
+	}
+
+	@Test
+	void aMoveThatFailedIsNotTriedAgainForTheSameVersion() throws Exception
+	{
+		stable = OLD;
+		Path old = l.chromeRoot().resolve(OLD);
+		ChromeDownload.deleteTree(old);
+		Path oldChrome = old.resolve("chrome-linux64/chrome");
+		Files.createDirectories(oldChrome.getParent());
+		Files.writeString(oldChrome, "chrome " + OLD);
+		Files.writeString(old.resolve(ChromeDownload.COMPLETE), OLD);
+		Files.writeString(l.config(), "socket=" + esc(l.socket()) + "\nchrome=" + esc(oldChrome) + "\nmaxCaptures=6\n");
+		// what a run that could not take the headless shell into use left in the state file
+		Files.writeString(l.configDir().resolve(ChromeUpdate.STATE), "{\"" + ChromeUpdate.MOVE_FAILED + "\":\"" + OLD + "\"}");
+
+		assertEquals(0, update(), output);
+		assertEquals(List.of(), fetched, "nothing downloaded again: " + output);
+		assertFalse(restarted(), "and the service is not restarted: " + sys.ran);
+		assertEquals(oldChrome.toString(), settings().getProperty("chrome"));
+
+		assertEquals("failed", state().get("result"), "the Server view says it did not move, not that Chrome is current");
+
+		// behind Stable, and the move to that Stable failed too: still nothing, every day
+		stable = NEW;
+		Files.writeString(l.configDir().resolve(ChromeUpdate.STATE), "{\"" + ChromeUpdate.MOVE_FAILED + "\":\"" + NEW + "\"}");
+		assertEquals(0, update(), output);
+		assertEquals(List.of(), fetched, "a Chrome behind Stable is not moved again for a version that failed: " + output);
+		assertFalse(restarted(), sys.ran.toString());
+
+		// a newer Stable than the one that failed is tried
+		Files.writeString(l.configDir().resolve(ChromeUpdate.STATE), "{\"" + ChromeUpdate.MOVE_FAILED + "\":\"" + OLD + "\"}");
+		assertEquals(0, update(), output);
+		assertEquals(List.of(InstallerTest.expectedZip()), fetched, output);
 	}
 
 	@Test
@@ -301,7 +366,7 @@ class ChromeUpdateTest
 			Path home = tmp.resolve("wse");
 			Files.createDirectories(home.resolve("conf"));
 			Files.writeString(home.resolve("conf/Server.xml"), "<Root/>");
-			CaptureSetup.Config c = new CaptureSetup.Config(chromeIn(OLD), driverIn(OLD), 4, 1024);
+			CaptureSetup.Config c = new CaptureSetup.Config(chromeIn(OLD), 4, 1024);
 
 			CaptureSetup.Layout lx = CaptureSetup.linux(tmp.resolve("linux"));
 			CaptureSetup cs = new CaptureSetup(lx, sys, home, new Payload(), new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));

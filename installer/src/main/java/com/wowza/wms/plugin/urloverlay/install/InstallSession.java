@@ -83,12 +83,12 @@ final class InstallSession
 	 * The Chrome the capture service's configuration names now. One outside the folder this installer downloads into is
 	 * an admin's choice and is kept; one inside it is this installer's own.
 	 */
-	record ServerChrome(String chrome, String driver, boolean own)
+	record ServerChrome(String chrome, boolean own)
 	{
-		/** True when an admin named a chromedriver: nothing is downloaded then. */
+		/** True when an admin named a Chrome of their own: nothing is downloaded then. */
 		boolean set()
 		{
-			return driver != null && !driver.isEmpty() && !own;
+			return chrome != null && !chrome.isEmpty() && !own;
 		}
 	}
 
@@ -96,18 +96,19 @@ final class InstallSession
 	{
 		if(!Files.isRegularFile(capture.config()))
 		{
-			return new ServerChrome(null, null, false);
+			return new ServerChrome(null, false);
 		}
 		java.util.Properties p = new java.util.Properties();
 		try(var in = Files.newBufferedReader(capture.config(), java.nio.charset.StandardCharsets.UTF_8))
 		{
 			p.load(in);
 		}
-		String chrome = p.getProperty("chrome"), driver = p.getProperty("chromedriver");
-		// settings naming programs that are not there (a setup program's removal deleted them) mean no Chrome at all
-		if(!exists(chrome) || !exists(driver))
+		// chromedriver, which settings from earlier versions name, is no longer used and plays no part here
+		String chrome = p.getProperty("chrome");
+		// settings naming a Chrome that is not there (a setup program's removal deleted it) mean no Chrome at all
+		if(!exists(chrome))
 		{
-			return new ServerChrome(null, null, false);
+			return new ServerChrome(null, false);
 		}
 		// this installer's own: under the Chrome folder in use now, or where an earlier version kept it
 		List<Path> roots = new ArrayList<>(List.of(capture.chromeRoot()));
@@ -116,9 +117,9 @@ final class InstallSession
 		{
 			roots.add(Path.of(String.valueOf(rec.get("chromeRoot"))));
 		}
-		Path d = Path.of(driver).toAbsolutePath().normalize();
-		boolean own = roots.stream().anyMatch(r -> d.startsWith(r.toAbsolutePath().normalize()));
-		return new ServerChrome(chrome, driver, own);
+		Path c = Path.of(chrome.trim()).toAbsolutePath().normalize();
+		boolean own = roots.stream().anyMatch(r -> c.startsWith(r.toAbsolutePath().normalize()));
+		return new ServerChrome(chrome, own);
 	}
 
 	private static boolean exists(String path)
@@ -147,9 +148,10 @@ final class InstallSession
 
 	/**
 	 * The capture service's settings: this Chrome, and the limits its settings file already holds (an admin may have
-	 * changed them), or the defaults: four browsers at once, 1024 MB each.
+	 * changed them), or the defaults: four browsers at once, 1024 MB each. pagesPerBrowser and autoUpdate are kept when set,
+	 * and otherwise left to their defaults.
 	 */
-	CaptureSetup.Config captureConfig(Path chrome, Path driver) throws IOException
+	CaptureSetup.Config captureConfig(Path chrome) throws IOException
 	{
 		java.util.Properties p = new java.util.Properties();
 		if(Files.isRegularFile(capture.config()))
@@ -159,7 +161,9 @@ final class InstallSession
 				p.load(in);
 			}
 		}
-		return new CaptureSetup.Config(chrome, driver, number(p.getProperty("maxCaptures"), 4), number(p.getProperty("maxBrowserMemoryMB"), 1024));
+		String pages = p.getProperty("pagesPerBrowser"), auto = p.getProperty("autoUpdate");
+		return new CaptureSetup.Config(chrome, number(p.getProperty("maxCaptures"), 4), number(p.getProperty("maxBrowserMemoryMB"), 1024),
+				pages == null || pages.isBlank() ? null : number(pages, 4), auto == null || auto.isBlank() ? null : auto.trim());
 	}
 
 	private static int number(String v, int fallback)

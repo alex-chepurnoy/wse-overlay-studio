@@ -83,7 +83,7 @@ public final class SetupScreenshots
 		out.add(save(w, outDir, "setup-4-review.png"));
 
 		w = new SetupWindow();
-		w.showProgress("Downloading Chrome (1 of 2): 84 of 208 MB", 404, "Downloading Chrome for Testing " + CHROME + " and its chromedriver (about 220 MB)...\n"
+		w.showProgress("Downloading Chrome: 84 of 208 MB", 404, "Downloading chrome " + CHROME + " from Chrome for Testing...\n"
 				+ SetupWindow.Controller.shorten("  downloading https://storage.googleapis.com/chrome-for-testing-public/" + CHROME + "/win64/chrome-win64.zip\n", home),
 				true);
 		out.add(save(w, outDir, "setup-5-progress.png"));

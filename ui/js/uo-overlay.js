@@ -364,7 +364,7 @@
     if (c.state === 'service not running') return '<b class="err">Not capturing: the capture service is not running.</b> Viewers see the last picture.';
     if (c.state === 'error') return '<b class="err">' + U.esc(c.lastError || 'Capture failed') + '</b>';
     var ch = c.chrome || {};
-    return (S.drafted[id] ? 'Draft captured ' : 'Capturing, last picture ') + U.ago(c.lastCaptureAt) + (c.lastCaptureMs != null ? ' in ' + c.lastCaptureMs + ' ms' : '') + (ch.pid ? ', Chrome ' + U.mb(ch.rssBytes) : '') + '.';
+    return (S.drafted[id] ? 'Draft captured ' : 'Capturing, last picture ') + U.ago(c.lastCaptureAt) + (c.lastCaptureMs != null ? ' in ' + c.lastCaptureMs + ' ms' : '') + (ch.pid ? ', Chrome ' + U.mb(ch.rssBytes) + (ch.pagesInBrowser > 1 ? ' as its share of one Chrome for ' + ch.pagesInBrowser + ' pages' : '') : '') + '.';
   }
 
   // the browser on the server loads the saved page's address again; the next captures show the result

@@ -10,8 +10,8 @@
 | Python 3.12 or later | Runs `packaging/build_dist.py` (standard library only) |
 
 Gradle itself comes from the wrapper (`gradlew`, `gradlew.bat`, Gradle 8.10). Every other dependency comes from Maven
-Central: Selenium 4.21.0 and the three libraries it needs for the capture service (listed in `capture/build.gradle`),
-JUnit 5, and the Spring and Jakarta APIs the bridge compiles against.
+Central: JUnit 5, and the Spring and Jakarta APIs the bridge compiles against. The capture service has no third-party
+libraries: it drives Chrome over DevTools with the JDK's own WebSocket client.
 
 ## Build the packages
 
@@ -44,8 +44,7 @@ does not. The `.deb` is assembled by the script (ar and tar), so `dpkg-deb` is n
 
 The installer jar, `installer/build/libs/wse-plugin-url-overlay-installer-<version>.jar`, carries everything it
 installs: the module jar, the plugin page, the starter templates, the bridge's class files and the capture service with
-its libraries. The setup program's runtime is linked with the modules `jdeps` finds in the capture service and
-Selenium, plus `java.base`, `java.desktop`, `java.net.http` and `jdk.crypto.ec`; the build fails if one is missing.
+its libraries. The setup program's runtime is linked with the modules `jdeps` finds in the capture service, plus `java.base`, `java.desktop`, `java.net.http` and `jdk.crypto.ec`; the build fails if one is missing.
 
 ## Run the tests
 
@@ -68,7 +67,7 @@ what they do not, is in [DESIGN.md](DESIGN.md#testing).
 |---|---|
 | `module/` | The WSE module: server listener, application module, REST resources, template builder, starter templates |
 | `bridge/` | The Manager bridge: one Spring controller, compiled against the Manager's Spring 6 and Jakarta Servlet 6 |
-| `capture/` | The capture service: Chrome and chromedriver through Selenium, the egress proxy, the socket server |
+| `capture/` | The capture service: Chrome over DevTools, shared between pages, the egress proxy, the socket server |
 | `shared/` | Source compiled into more than one jar: the capture protocol, egress rules, browser pool, byte-preserving config edits |
 | `installer/` | The installer jar and the Windows setup window; install, uninstall, verify and Chrome update |
 | `ui/` | The plugin page served by WSE Manager: HTML, CSS, JavaScript, and its own copy of hls.js |
@@ -92,8 +91,8 @@ overlay. None is required: URL Overlay can be added to an application later from
 
 ![Applications](images/setup-2-applications.png)
 
-**3. Chrome.** Download Chrome for Testing from Google (about 220 MB), use a Chrome and chromedriver already on the
-computer, or skip (no page is drawn until Chrome is set up).
+**3. Chrome.** Download Chrome for Testing from Google, use a Chrome already on the computer, or skip (no page is
+drawn until Chrome is set up).
 
 ![Google Chrome](images/setup-3-chrome.png)
 

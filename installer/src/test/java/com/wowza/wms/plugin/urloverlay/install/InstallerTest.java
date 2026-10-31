@@ -46,9 +46,11 @@ class InstallerTest
 	Path home;
 	String output;
 
-	// a stand-in for Google's Chrome for Testing service: the list and two small zips with the real layout
+	// a stand-in for Google's Chrome for Testing service: the list and small zips with the real layout
 	com.sun.net.httpserver.HttpServer cft;
 	final java.util.concurrent.atomic.AtomicInteger zipRequests = new java.util.concurrent.atomic.AtomicInteger();
+	/** The zips fetched, by path on the stand-in service. */
+	final List<String> zipsFetched = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 	static final String CFT_VERSION = "156.0.8078.73";
 	FakeSys sys;
 	/** Set when a Chrome zip was fetched while the stand-in capture service ran. */
@@ -271,20 +273,31 @@ class InstallerTest
 	void startCft() throws IOException
 	{
 		String plat = ChromeDownload.platform();
-		boolean win = plat.startsWith("win");
-		byte[] chromeZip = zip("chrome-" + plat + "/" + (win ? "chrome.exe" : "chrome"), "fake chrome");
-		byte[] driverZip = zip("chromedriver-" + plat + "/" + (win ? "chromedriver.exe" : "chromedriver"), "fake driver");
 		cft = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
 		String base = "http://127.0.0.1:" + cft.getAddress().getPort();
-		String list = "{\"timestamp\":\"t\",\"channels\":{\"Stable\":{\"channel\":\"Stable\",\"version\":\"" + CFT_VERSION + "\",\"downloads\":{"
-				+ "\"chrome\":[{\"platform\":\"" + plat + "\",\"url\":\"" + base + "/chrome.zip\"}],"
-				+ "\"chromedriver\":[{\"platform\":\"" + plat + "\",\"url\":\"" + base + "/driver.zip\"}]}}}}";
-		serve("/list.json", list.getBytes(StandardCharsets.UTF_8));
-		serve("/chrome.zip", chromeZip);
-		serve("/driver.zip", driverZip);
+		// the three downloads Google's list names per platform; only the one for this OS may be fetched
+		serve("/list.json", list(plat, base, CFT_VERSION).getBytes(StandardCharsets.UTF_8));
+		serve("/chrome.zip", zip("chrome-" + plat + "/" + (plat.startsWith("win") ? "chrome.exe" : "chrome"), "fake chrome"));
+		serve("/shell.zip", zip("chrome-headless-shell-" + plat + "/chrome-headless-shell" + (plat.startsWith("win") ? ".exe" : ""), "fake chrome"));
+		serve("/driver.zip", zip("chromedriver-" + plat + "/chromedriver", "fake driver"));
 		cft.start();
 		ChromeDownload.source = new ChromeDownload.Source(base + "/list.json", ChromeDownload.GOOGLE.listAllowed().or(InstallerTest::standIn),
 				ChromeDownload.GOOGLE.downloadAllowed().or(InstallerTest::standIn));
+	}
+
+	/** Google's list as it is shaped: chrome, chrome-headless-shell and chromedriver, each at base/&lt;chrome|shell|driver&gt;.zip. */
+	static String list(String plat, String base, String version)
+	{
+		return "{\"timestamp\":\"t\",\"channels\":{\"Stable\":{\"channel\":\"Stable\",\"version\":\"" + version + "\",\"downloads\":{"
+				+ "\"chrome\":[{\"platform\":\"" + plat + "\",\"url\":\"" + base + "/chrome.zip\"}],"
+				+ "\"chrome-headless-shell\":[{\"platform\":\"" + plat + "\",\"url\":\"" + base + "/shell.zip\"}],"
+				+ "\"chromedriver\":[{\"platform\":\"" + plat + "\",\"url\":\"" + base + "/driver.zip\"}]}}}}";
+	}
+
+	/** Which zip the capture service gets on this OS: Chrome for Testing on Windows, the headless shell elsewhere. */
+	static String expectedZip()
+	{
+		return Preflight.WINDOWS ? "/chrome.zip" : "/shell.zip";
 	}
 
 	/** The stand-in service's own address, the only one besides Google's that the tests allow. */
@@ -299,6 +312,7 @@ class InstallerTest
 			if(path.endsWith(".zip"))
 			{
 				zipRequests.incrementAndGet();
+				zipsFetched.add(path);
 				serviceRanDuringDownload |= sys.running;
 			}
 			x.sendResponseHeaders(200, body.length);
@@ -325,18 +339,24 @@ class InstallerTest
 		byte[] server0 = bytes("conf/Server.xml");
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
 		Path dir = chromeRoot().resolve(CFT_VERSION);
-		Path chrome = ChromeDownload.chromeIn(dir, ChromeDownload.platform()), driver = ChromeDownload.driverIn(dir, ChromeDownload.platform());
-		assertTrue(Files.isRegularFile(chrome) && Files.isRegularFile(driver), output);
+		Path chrome = ChromeDownload.chromeIn(dir, ChromeDownload.platform());
+		assertTrue(Files.isRegularFile(chrome), output);
 		assertTrue(Files.isRegularFile(dir.resolve(ChromeDownload.COMPLETE)), "the marker is written last");
-		assertEquals(2, zipRequests.get());
+		assertEquals(List.of(expectedZip()), zipsFetched, "one zip, the Chrome for this OS; never chromedriver");
+		try(Stream<Path> s = Files.list(dir))
+		{
+			assertEquals(1, s.filter(Files::isDirectory).count(), "no chromedriver folder");
+		}
 		String config = captureConfig();
-		assertTrue(config.contains("chromedriver=" + driver.toString().replace("\\", "\\\\")), "the capture service is pointed at the pair: " + config);
+		assertTrue(config.contains("chrome=" + chrome.toString().replace("\\", "\\\\")), "the capture service is pointed at it: " + config);
+		assertFalse(config.contains("chromedriver"), config);
 		assertFalse(text("conf/Server.xml").contains("UrlOverlayChromeDriverPath"), "WSE itself no longer starts Chrome");
 
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
-		assertEquals(2, zipRequests.get(), "a second run downloads nothing");
+		assertEquals(1, zipRequests.get(), "a second run downloads nothing");
 		assertTrue(output.contains("No changes."), output);
-		assertTrue(output.contains("chromedriver: " + driver), "the report names the chromedriver the service uses: " + output);
+		assertTrue(output.contains("Chrome:       " + chrome), "the report names the Chrome the service uses: " + output);
+		assertFalse(output.contains("chromedriver"), output);
 		try(Stream<Path> s = Files.list(home.resolve("logs")))
 		{
 			assertEquals(2, s.count(), "both runs keep their log, even within one second");
@@ -352,16 +372,14 @@ class InstallerTest
 	{
 		// what an interrupted run, or a scanner that held a file, leaves: the version folder without its marker
 		Path dir = chromeRoot().resolve(CFT_VERSION);
-		Path chrome = ChromeDownload.chromeIn(dir, ChromeDownload.platform()), driver = ChromeDownload.driverIn(dir, ChromeDownload.platform());
+		Path chrome = ChromeDownload.chromeIn(dir, ChromeDownload.platform());
 		Files.createDirectories(chrome.getParent());
-		Files.createDirectories(driver.getParent());
 		Files.writeString(chrome, "half written");
-		Files.writeString(driver, "half written");
 		Files.writeString(dir.resolve("leftover.zip.download"), "x");
 		assertNull(ChromeDownload.existing(chromeRoot(), CFT_VERSION, ChromeDownload.platform()), "no marker, not complete");
 
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
-		assertEquals(2, zipRequests.get(), "unpacked again");
+		assertEquals(1, zipRequests.get(), "unpacked again");
 		assertEquals("fake chrome", Files.readString(chrome));
 		assertFalse(Files.exists(dir.resolve("leftover.zip.download")), "the incomplete folder was cleaned first");
 		assertNotNull(ChromeDownload.existing(chromeRoot(), CFT_VERSION, ChromeDownload.platform()));
@@ -378,10 +396,18 @@ class InstallerTest
 		assertEquals(0, zipRequests.get());
 		assertEquals(0, run("Uninstall", "--yes"));
 
-		assertEquals(0, run("Install", "--appName", "live", "--yes", "--chromedriver", "C:/somewhere/chromedriver.exe"));
-		assertEquals(0, zipRequests.get(), "a given chromedriver is used, nothing downloaded");
-		assertTrue(captureConfig().contains("chromedriver=" + Paths.get("C:/somewhere/chromedriver.exe").toString().replace("\\", "\\\\")), captureConfig());
+		assertEquals(0, run("Install", "--appName", "live", "--yes", "--chrome", "C:/somewhere/chrome.exe"));
+		assertEquals(0, zipRequests.get(), "a given Chrome is used, nothing downloaded");
+		assertTrue(captureConfig().contains("chrome=" + Paths.get("C:/somewhere/chrome.exe").toString().replace("\\", "\\\\")), captureConfig());
 		assertEquals(0, run("Uninstall", "--yes"));
+
+		// what scripts for earlier versions pass: accepted, said to be ignored, and Chrome is downloaded as without it
+		assertEquals(0, run("Install", "--appName", "live", "--yes", "--chromedriver", "C:/somewhere/chromedriver.exe"));
+		assertTrue(output.contains("--chromedriver is ignored"), output);
+		assertEquals(List.of(expectedZip()), zipsFetched);
+		assertFalse(captureConfig().contains("chromedriver"), captureConfig());
+		assertEquals(0, run("Uninstall", "--yes"));
+		zipRequests.set(0);
 
 		cft.stop(0);
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
@@ -1102,13 +1128,10 @@ class InstallerTest
 		String plat = ChromeDownload.platform();
 		int port = cft.getAddress().getPort();
 		// the zip URL names another host
-		String other = "{\"channels\":{\"Stable\":{\"version\":\"" + CFT_VERSION + "\",\"downloads\":{"
-				+ "\"chrome\":[{\"platform\":\"" + plat + "\",\"url\":\"http://localhost:" + port + "/chrome.zip\"}],"
-				+ "\"chromedriver\":[{\"platform\":\"" + plat + "\",\"url\":\"http://localhost:" + port + "/driver.zip\"}]}}}}";
+		String other = list(plat, "http://localhost:" + port, CFT_VERSION);
 		serve("/other.json", other.getBytes(StandardCharsets.UTF_8));
 		// the zip URL is allowed but redirects to another host
-		String redirect = other.replace("localhost:" + port + "/chrome.zip", "127.0.0.1:" + port + "/moved.zip").replace("localhost:" + port + "/driver.zip",
-				"127.0.0.1:" + port + "/driver.zip");
+		String redirect = other.replace("localhost:" + port + expectedZip(), "127.0.0.1:" + port + "/moved.zip");
 		serve("/redirect.json", redirect.getBytes(StandardCharsets.UTF_8));
 		cft.createContext("/moved.zip", x -> {
 			x.getResponseHeaders().add("Location", "http://localhost:" + port + "/chrome.zip");
@@ -1291,6 +1314,10 @@ class InstallerTest
 	void theCaptureServiceIsInstalledStartedAndTakenOutAgain() throws Exception
 	{
 		CaptureSetup.Layout l = CaptureSetup.testLayout;
+		// what an earlier version left in the program folder: Selenium's jars, which the service no longer has
+		Path selenium = l.program().resolve("lib/selenium-api-4.25.0.jar");
+		Files.createDirectories(selenium.getParent());
+		Files.writeString(selenium, "old library");
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
 		assertTrue(output.contains("Capture service: running."), output);
 		Path jar;
@@ -1298,12 +1325,13 @@ class InstallerTest
 		{
 			jar = s.filter(p -> p.getFileName().toString().startsWith("wse-url-overlay-capture-") && p.toString().endsWith(".jar")).findFirst().orElseThrow();
 		}
-		assertTrue(Files.isDirectory(l.program().resolve("lib")), "with its libraries");
+		assertFalse(Files.exists(selenium), "a library the payload no longer carries is removed");
 		String config = captureConfig();
-		for(String key: List.of("socket=", "chrome=", "chromedriver=", "workDir=", "maxCaptures=4", "maxBrowserMemoryMB=1024", "logFile="))
+		for(String key: List.of("socket=", "chrome=", "workDir=", "maxCaptures=4", "maxBrowserMemoryMB=1024", "logFile="))
 		{
 			assertTrue(config.contains(key), key + " in " + config);
 		}
+		assertFalse(config.contains("chromedriver") || config.contains("pagesPerBrowser"), "no chromedriver; pagesPerBrowser left to the service: " + config);
 		assertEquals(l.socket().toString(), ConfigEdits.propertyValue(text("conf/Server.xml"), "/Root/Server/Properties", "UrlOverlayCaptureSocket"),
 				"the module finds the service through Server.xml");
 		if(l.windows())
@@ -1351,8 +1379,8 @@ class InstallerTest
 		return new CaptureSetup(l, sys, home, new Payload(), new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
 	}
 
-	static final CaptureSetup.Config CONFIG = new CaptureSetup.Config(Paths.get("/opt/wse-url-overlay/chrome-for-testing/1.0/chrome-linux64/chrome"),
-			Paths.get("/opt/wse-url-overlay/chrome-for-testing/1.0/chromedriver-linux64/chromedriver"), 4, 1024);
+	static final CaptureSetup.Config CONFIG = new CaptureSetup.Config(
+			Paths.get("/opt/wse-url-overlay/chrome-for-testing/1.0/chrome-headless-shell-linux64/chrome-headless-shell"), 4, 1024);
 
 	@Test
 	void linuxUnitAppArmorProfileAndSettings() throws Exception
@@ -1376,7 +1404,13 @@ class InstallerTest
 		}
 		String profile = Files.readString(l.apparmor());
 		assertTrue(profile.contains("abi <abi/4.0>,") && profile.contains("  userns,"), profile);
-		assertTrue(profile.contains("profile wse-url-overlay-chrome " + l.chromeRoot() + "/*/chrome-linux64/chrome flags=(unconfined) {"), profile);
+		assertTrue(profile.contains("profile wse-url-overlay-chrome " + l.chromeRoot()
+				+ "/*/{chrome-headless-shell-linux64/chrome-headless-shell,chrome-linux64/chrome} flags=(unconfined) {"),
+				"the profile names the headless shell the installer puts on Linux, and the Chrome of earlier installs, still used when an upgrade's download fails: "
+						+ profile);
+		assertFalse(profile.contains("chromedriver"), profile);
+		Path shell = ChromeDownload.chromeIn(l.chromeRoot().resolve("156.0.8078.73"), "linux64");
+		assertEquals(l.chromeRoot().resolve("156.0.8078.73/chrome-headless-shell-linux64/chrome-headless-shell"), shell, "where the download unpacks it");
 		assertTrue(sys.ran("apparmor_parser -r " + l.apparmor()), sys.ran.toString());
 		assertEquals("rw-r----- root:wse-url-overlay", sys.modes.get(l.config()), "the settings are readable by the service, not by everyone");
 		assertTrue(sys.modes.entrySet().stream().filter(e -> e.getKey().startsWith(l.program())).allMatch(e -> e.getValue().endsWith(" root:root")
@@ -1418,7 +1452,7 @@ class InstallerTest
 	{
 		CaptureSetup.Layout l = CaptureSetup.windows(tmp.resolve("win/Program Files/Wowza URL Overlay"), tmp.resolve("win/ProgramData/WowzaURLOverlay"), tmp.resolve("runtime"));
 		CaptureSetup cs = setup(l);
-		cs.install(new CaptureSetup.Config(Paths.get("C:\\Program Files\\Wowza URL Overlay\\chrome-for-testing\\1.0\\chrome-win64\\chrome.exe"), null, 2, 512));
+		cs.install(new CaptureSetup.Config(Paths.get("C:\\Program Files\\Wowza URL Overlay\\chrome-for-testing\\1.0\\chrome-win64\\chrome.exe"), 2, 512));
 		String nssm = l.program().resolve("nssm.exe").toString();
 		assertTrue(sys.ran.contains(List.of(nssm, "install", CaptureSetup.SERVICE, cs.java().toString())), sys.ran.toString());
 		for(List<String> c: List.of(List.of(nssm, "set", CaptureSetup.SERVICE, "AppParameters", "-Djdk.net.unixdomain.tmpdir=" + l.work() + " -Djava.io.tmpdir=" + l.work()
@@ -1497,13 +1531,11 @@ class InstallerTest
 	@Test
 	void aCompleteChromeIsNeverDownloadedAgainAndOneWithoutItsMarkerIsAdopted() throws Exception
 	{
-		// both programs of the right version, no marker: as an earlier run, or a setup program's removal, left them
+		// Chrome of the right version, no marker: as an earlier run, or a setup program's removal, left it
 		Path dir = chromeRoot().resolve(CFT_VERSION);
-		Path chrome = ChromeDownload.chromeIn(dir, ChromeDownload.platform()), driver = ChromeDownload.driverIn(dir, ChromeDownload.platform());
+		Path chrome = ChromeDownload.chromeIn(dir, ChromeDownload.platform());
 		Files.createDirectories(chrome.getParent());
-		Files.createDirectories(driver.getParent());
 		Files.writeString(chrome, "chrome");
-		Files.writeString(driver, "driver");
 		ChromeFolders.testVersionOf = p -> CFT_VERSION;
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
 		assertEquals(0, zipRequests.get(), "adopted, not downloaded: " + output);
@@ -1529,9 +1561,8 @@ class InstallerTest
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
 		Path dir = chromeRoot().resolve(CFT_VERSION);
 		Path chrome = ChromeDownload.chromeIn(dir, ChromeDownload.platform());
-		// a download cut short: only chrome-win64 is there, no chromedriver, no marker, and the running
+		// a marker lost (Chrome's version cannot be read from the stand-in, so it is not adopted), and the running
 		// service's Chrome holds its files (and on Windows keeps them from being deleted)
-		ChromeDownload.deleteTree(ChromeDownload.driverIn(dir, ChromeDownload.platform()).getParent());
 		Files.delete(dir.resolve(ChromeDownload.COMPLETE));
 		sys.processes.put(4242L, chrome);
 		sys.stopEndsProcesses = false;
@@ -1548,23 +1579,23 @@ class InstallerTest
 				held.close();
 			}
 		}
-		assertEquals(4, zipRequests.get(), "the complete version is fetched again: " + output);
+		assertEquals(2, zipRequests.get(), "the complete version is fetched again: " + output);
 		assertFalse(serviceRanDuringDownload, "the service was stopped before its Chrome folder changed");
 		assertTrue(sys.killed.contains(4242L), "a Chrome left running after the stop is ended before anything is touched");
 		Path fresh = chromeRoot().resolve(CFT_VERSION + "-2");
 		assertTrue(Files.isRegularFile(fresh.resolve(ChromeDownload.COMPLETE)), "unpacked into a fresh sibling, marker last: " + output);
-		assertTrue(Files.isRegularFile(ChromeDownload.driverIn(fresh, ChromeDownload.platform())));
+		assertTrue(Files.isRegularFile(ChromeDownload.chromeIn(fresh, ChromeDownload.platform())));
 		java.util.Properties p = new java.util.Properties();
 		p.load(new java.io.StringReader(captureConfig()));
 		assertEquals(ChromeDownload.chromeIn(fresh, ChromeDownload.platform()).toString(), p.getProperty("chrome"), "the service is pointed at it");
-		assertEquals(ChromeDownload.driverIn(fresh, ChromeDownload.platform()).toString(), p.getProperty("chromedriver"));
+		assertNull(p.getProperty("chromedriver"));
 		assertTrue(sys.running, "and started again");
 		assertTrue(output.contains("Capture service: running."), output);
 		assertNoClassNames(output);
 
 		// a later run finds the fresh folder complete and downloads nothing
 		assertEquals(0, run("Install", "--appName", "live", "--yes"));
-		assertEquals(4, zipRequests.get());
+		assertEquals(2, zipRequests.get());
 		assertFalse(Files.exists(dir), "the broken folder, no longer used, is cleaned up");
 	}
 
@@ -1582,6 +1613,93 @@ class InstallerTest
 		assertEquals(dir, ChromeFolders.target(chromeRoot(), CFT_VERSION, d -> ChromeFolders.inUse(d, null, sys), System.out), "once free, it is cleared and used");
 		assertFalse(Files.exists(dir.resolve("partial")));
 		assertEquals(CFT_VERSION, ChromeFolders.version(CFT_VERSION + "-2"));
+	}
+
+	@Test
+	void linuxGetsTheHeadlessShellAndWindowsChromeForTesting() throws Exception
+	{
+		String base = "http://127.0.0.1:" + cft.getAddress().getPort();
+		for(String plat: List.of("linux64", "win64"))
+		{
+			serve("/list-" + plat + ".json", list(plat, base, CFT_VERSION).getBytes(StandardCharsets.UTF_8));
+			ChromeDownload.source = new ChromeDownload.Source(base + "/list-" + plat + ".json", InstallerTest::standIn, InstallerTest::standIn);
+			ChromeDownload.Build b = ChromeDownload.stable(ChromeDownload.client(), plat);
+			assertEquals(CFT_VERSION, b.version());
+			assertEquals(base + (plat.equals("linux64") ? "/shell.zip" : "/chrome.zip"), b.chromeUrl(), "the download chosen for " + plat);
+		}
+		assertEquals(Paths.get("v", "chrome-headless-shell-linux64", "chrome-headless-shell"), ChromeDownload.chromeIn(Paths.get("v"), "linux64"));
+		assertEquals(Paths.get("v", "chrome-win64", "chrome.exe"), ChromeDownload.chromeIn(Paths.get("v"), "win64"));
+
+		// a list without the headless shell is refused, not answered with Chrome for Testing or chromedriver
+		serve("/no-shell.json", list("linux64", base, CFT_VERSION).replace("\"chrome-headless-shell\"", "\"something-else\"").getBytes(StandardCharsets.UTF_8));
+		ChromeDownload.source = new ChromeDownload.Source(base + "/no-shell.json", InstallerTest::standIn, InstallerTest::standIn);
+		IOException e = org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> ChromeDownload.stable(ChromeDownload.client(), "linux64"));
+		assertTrue(e.getMessage().contains("chrome-headless-shell"), e.getMessage());
+	}
+
+	@Test
+	void aLinuxInstallFromBeforeTheHeadlessShellGetsItBesideTheFolderInUse() throws Exception
+	{
+		// what an earlier installer left on Linux: Chrome for Testing and chromedriver, complete, and in use
+		Path old = chromeRoot().resolve(CFT_VERSION);
+		Path oldChrome = old.resolve("chrome-linux64/chrome");
+		Files.createDirectories(oldChrome.getParent());
+		Files.createDirectories(old.resolve("chromedriver-linux64"));
+		Files.writeString(oldChrome, "chrome");
+		Files.writeString(old.resolve("chromedriver-linux64/chromedriver"), "driver");
+		Files.writeString(old.resolve(ChromeDownload.COMPLETE), CFT_VERSION);
+		assertNull(ChromeFolders.complete(chromeRoot(), CFT_VERSION, "linux64"), "complete for Chrome for Testing, not for the headless shell");
+		ChromeFolders.testVersionOf = p -> CFT_VERSION;
+		assertNull(ChromeFolders.adopt(chromeRoot(), CFT_VERSION, "linux64", System.out), "nothing to adopt: it holds no headless shell");
+
+		serve("/linux-shell.zip", zip("chrome-headless-shell-linux64/chrome-headless-shell", "shell"));
+		String base = "http://127.0.0.1:" + cft.getAddress().getPort();
+		ChromeDownload.Build b = new ChromeDownload.Build(CFT_VERSION, "linux64", base + "/linux-shell.zip");
+		ChromeFolders.Result r = ChromeFolders.ensure(chromeRoot(), b, oldChrome, sys, ChromeDownload.client(), System.out, null, () -> false, () -> {
+		});
+		assertTrue(r.downloaded());
+		assertEquals(List.of("/linux-shell.zip"), zipsFetched);
+		assertEquals(chromeRoot().resolve(CFT_VERSION + "-2/chrome-headless-shell-linux64/chrome-headless-shell"), r.pair().chrome(),
+				"beside the folder in use, never into it");
+		assertTrue(Files.isRegularFile(oldChrome) && Files.isRegularFile(old.resolve(ChromeDownload.COMPLETE)), "the folder in use is left as it is");
+		assertEquals(r.pair(), ChromeFolders.complete(chromeRoot(), CFT_VERSION, "linux64"), "and found complete from then on");
+	}
+
+	@Test
+	void anUpgradeKeepsAChromeForTestingThatIsCompleteAndDropsChromedriverFromTheSettings() throws Exception
+	{
+		// what an earlier installer left: the version folder with Chrome and chromedriver, and settings naming both
+		CaptureSetup.Layout l = CaptureSetup.testLayout;
+		String plat = ChromeDownload.platform();
+		Path dir = chromeRoot().resolve(CFT_VERSION);
+		Path chrome = dir.resolve(plat.startsWith("win") ? "chrome-win64/chrome.exe" : "chrome-linux64/chrome");
+		Path driver = dir.resolve("chromedriver-" + plat + "/chromedriver" + (plat.startsWith("win") ? ".exe" : ""));
+		Files.createDirectories(chrome.getParent());
+		Files.createDirectories(driver.getParent());
+		Files.writeString(chrome, "chrome");
+		Files.writeString(driver, "driver");
+		Files.writeString(dir.resolve(ChromeDownload.COMPLETE), CFT_VERSION);
+		Files.createDirectories(l.configDir());
+		Files.writeString(l.config(), "chrome=" + chrome.toString().replace("\\", "\\\\") + "\nchromedriver=" + driver.toString().replace("\\", "\\\\")
+				+ "\nmaxCaptures=6\npagesPerBrowser=2\nautoUpdate=false\n");
+
+		assertEquals(0, run("Install", "--appName", "live", "--yes"));
+		java.util.Properties p = new java.util.Properties();
+		p.load(new java.io.StringReader(captureConfig()));
+		assertNull(p.getProperty("chromedriver"), "the service needs no chromedriver: " + captureConfig());
+		assertEquals("6", p.getProperty("maxCaptures"), "the admin's limits are kept");
+		assertEquals("2", p.getProperty("pagesPerBrowser"));
+		assertEquals("false", p.getProperty("autoUpdate"), "an admin who turned the daily update off keeps it off");
+		if(Preflight.WINDOWS)
+		{
+			assertEquals(0, zipRequests.get(), "Windows keeps Chrome for Testing: the complete folder is used as it is: " + output);
+			assertEquals(chrome.toString(), p.getProperty("chrome"));
+		}
+		else
+		{
+			assertEquals(List.of("/shell.zip"), zipsFetched, "Linux moves to the headless shell: " + output);
+			assertEquals(ChromeDownload.chromeIn(chromeRoot().resolve(CFT_VERSION + "-2"), plat).toString(), p.getProperty("chrome"));
+		}
 	}
 
 	// ---- the Windows upgrade as it happens: the setup program's removal, then the install --------------------------
@@ -1642,7 +1760,7 @@ class InstallerTest
 	void theWindowsUpgradeFromAnInstallInsideTheSetupFolderEndsWorking() throws Exception
 	{
 		CaptureSetup.Layout old = olderInstall();
-		assertEquals(2, zipRequests.get());
+		assertEquals(1, zipRequests.get());
 		// the MSI upgrade removes the old version's folder, all but the files the running service holds: its nssm.exe
 		// and the Chrome it runs; capture.properties still points at that Chrome
 		Path oldChrome = ChromeDownload.chromeIn(old.chromeRoot().resolve(CFT_VERSION), ChromeDownload.platform());
@@ -1652,7 +1770,7 @@ class InstallerTest
 		CaptureSetup.Layout now = windowsLayout(NEW_BASE);
 		CaptureSetup.testLayout = now;
 		assertEquals(0, run("Install", "--appName", "live", "--yes"), output);
-		assertEquals(4, zipRequests.get(), "the Chrome left behind is incomplete, so it is downloaded again");
+		assertEquals(2, zipRequests.get(), "the Chrome left behind is incomplete, so it is downloaded again");
 		assertWorksFromTheNewPlace(now);
 		assertFalse(Files.exists(old.program()), "the leftovers of the old place are cleaned up");
 	}

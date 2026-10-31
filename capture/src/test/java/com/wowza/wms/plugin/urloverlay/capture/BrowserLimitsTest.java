@@ -9,15 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
-import org.openqa.selenium.WebDriver;
 
-/** One browser's memory cap and how long a single chromedriver call may hold a capture. */
+/** One page's memory cap and how long a single DevTools call may hold a capture. */
 class BrowserLimitsTest
 {
 	static final long MB = 1024L * 1024L;
@@ -25,14 +23,8 @@ class BrowserLimitsTest
 	@Test
 	void aBrowserOverTheCapIsClosedAndReportedThenReopens()
 	{
-		AtomicInteger quits = new AtomicInteger();
-		WebDriver fake = (WebDriver)Proxy.newProxyInstance(WebDriver.class.getClassLoader(), new Class<?>[] { WebDriver.class }, (p, m, a) -> {
-			if(m.getName().equals("quit"))
-			{
-				quits.incrementAndGet();
-			}
-			return null;
-		});
+		FakePage fake = new FakePage(null);
+		AtomicInteger quits = fake.closes;
 		WebPageCapture c = new WebPageCapture("http://example.com/", 320, 180, () -> 0, null);
 		try
 		{
@@ -43,7 +35,7 @@ class BrowserLimitsTest
 			assertFalse(c.checkMemory(over, now - WebPageCapture.OVER_MEMORY_MS), "one reading over the limit is not enough");
 			assertEquals(0, quits.get());
 			assertTrue(c.checkMemory(over, now), "still over the limit after the grace period");
-			assertEquals(1, quits.get(), "the driver was quit");
+			assertEquals(1, quits.get(), "the page was closed");
 			Map<String, Object> st = c.status();
 			assertEquals("error", st.get("state"));
 			assertTrue(String.valueOf(st.get("lastError")).contains("was restarted"), String.valueOf(st.get("lastError")));
@@ -78,11 +70,10 @@ class BrowserLimitsTest
 	}
 
 	@Test
-	void noChromedriverCallWaitsForMinutes()
+	void noDevToolsCallWaitsForMinutes()
 	{
-		Duration read = WebPageCapture.clientConfig().readTimeout();
-		assertEquals(WebPageCapture.CALL_TIMEOUT, read);
-		assertTrue(read.compareTo(Duration.ofMinutes(1)) < 0, "Selenium's own default is 3 minutes");
-		assertTrue(read.compareTo(WebPageCapture.PAGE_LOAD_TIMEOUT) > 0, "a slow page load still ends with chromedriver's own timeout");
+		assertTrue(WebPageCapture.CALL_TIMEOUT.compareTo(Duration.ofSeconds(30)) <= 0, "a hung page holds a capture for seconds, not minutes");
+		assertTrue(WebPageCapture.PAGE_LOAD_TIMEOUT.compareTo(Duration.ofMinutes(1)) < 0);
+		assertTrue(ChromeBrowser.CALL_TIMEOUT_MS <= 30_000);
 	}
 }
