@@ -269,7 +269,7 @@
           (ex ? '<div class="chips">' + (already ? '<span class="bdg on">Used as it is: it already draws ' + U.esc(T.made.overlay) + '</span>' : '<span class="bdg">New copy: ' + U.esc(copyName) + '</span><span class="bdg on">' + U.esc(ex.name) + ' is not changed</span>') + '</div>' : '')) +
       '<details class="adv"' + (nameErr ? ' open' : '') + '><summary>Advanced: name, hardware, each rendition</summary><div class="stack-3">' +
       (isNew ? '<div><label class="f" for="uo-t-tn">Template name' + U.tip('Templates are shared by every application on this server.') + '</label><input id="uo-t-tn" type="text" data-tname value="' + U.esc(p.name) + '" spellcheck="false" autocomplete="off"></div>' : '') +
-      '<p class="small muted">Hardware, codecs, bitrates, image layers and where the overlay is drawn are in the template editor, under Templates.</p></div></details></div></div>';
+      '<p class="small muted">Hardware, codecs, bitrates, and overlays on the input or on chosen outputs are in the template editor, under Templates.</p></div></details></div></div>';
     renderFoot('Back', same || already ? 'Continue' : mine ? 'Save and continue' : isNew ? 'Create template and continue' : 'Make the copy and continue', isNew ? !!nameErr : !ex);
     el.main.querySelectorAll('[name=uo-t2]').forEach(function (r) { r.onchange = function () { p.mode = r.value; render(); }; });
     el.main.querySelectorAll('[name=uo-t2x]').forEach(function (r) { r.onchange = function () { p.existing = r.value; render(); }; });

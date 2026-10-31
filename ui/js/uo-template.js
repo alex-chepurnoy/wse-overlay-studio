@@ -1,6 +1,7 @@
 /* URL Overlay template editor: every transcoder template on the server. A master template, made here, opens in the
-   builder: the hardware on top, then a Decode box (the source, the URL overlay and image layers drawn on the picture)
-   and an Encode box (the outputs and their adaptive groups). One switched on in place gets the overlay form; a
+   builder: the hardware on top, then a Decode box (the source, and the overlays drawn on it before scaling) and an
+   Encode box (the outputs, the overlays drawn on chosen outputs, and the adaptive groups). One switched on in place
+   gets the overlay form; a
    stream's own copy of a master is shown read-only with Update from its master; any other is shown read-only with its
    verdict, "Use with an overlay", and "New master from this one". Edits stay in a draft kept in memory per template
    until Save. */
@@ -409,51 +410,62 @@
   function libEntry(file) { return (S.lib || []).filter(function (x) { return x.file === file; })[0] || null; }
   function videoOutputs(d) { return d.outputs.filter(function (o) { return o.kind === 'video' && o.enabled; }); }
 
-  // where a layer is drawn: on the input, once and before scaling, so every output shows it in source pixels; or on
-  // chosen outputs, after scaling, in each output's pixels. For the URL overlay the module derives this from the
-  // outputs it is on (all of them: the input), so "Outputs" with every output picked is saved as the input.
-  function urlStage(d) { var v = videoOutputs(d); return !d.urlSome && v.length && v.every(function (o) { return o.overlay; }) ? 'input' : 'outputs'; }
-  function stageSeg(attr, stage) {
-    return '<div class="seg stage" role="group" aria-label="Drawn on">' +
-      '<button type="button" ' + attr + '="input" aria-pressed="' + (stage === 'input') + '">' + U.icon('input') + 'Input</button>' +
-      '<button type="button" ' + attr + '="outputs" aria-pressed="' + (stage === 'outputs') + '">' + U.icon('outputs') + 'Outputs</button></div>';
-  }
-  var STAGE_TIP = 'Input: drawn once on the source picture before scaling, so every output shows it, in source pixels. Outputs: drawn after scaling, only on the outputs you pick, in each output\'s pixels.';
+  // where a layer is drawn. Decode's Overlays: on the input, once and before scaling, so every video output shows it,
+  // in source pixels. Encode's Overlays: after scaling, only on the outputs picked, in each output's pixels. A template
+  // carries one URL overlay, which can hold several pages; the module derives its place from the outputs it is on,
+  // all of them being the input, so in Encode with every output picked it is saved on the input.
+  function urlStage(d) { var v = videoOutputs(d); return !v.length || (!d.urlSome && v.every(function (o) { return o.overlay; })) ? 'input' : 'outputs'; }
+  function imgStage(l) { return l.where === 'outputs' ? 'outputs' : 'input'; }
+  var IN_TIP = 'Drawn once on the source picture, before scaling, so every video output shows it. Offsets and sizes are in source pixels.';
+  var OUT_TIP = 'Drawn after scaling, only on the outputs you pick, so outputs can differ. Offsets and sizes are in each output\'s pixels.';
+  var KINDS_TIP = ' A URL overlay is web pages captured live; one per template, and it can hold several pages. An image is a PNG, JPEG, GIF or BMP file in the server\'s content folder, drawn under the URL overlay.';
   function outPicks(attr, i, vids, isOn) {
     return '<div class="ly-outs">' + vids.map(function (o) {
       return '<label class="pilltog' + (isOn(o) ? ' on' : '') + '"><input type="checkbox" ' + attr + '="' + i + '" value="' + U.esc(o.name) + '"' + (isOn(o) ? ' checked' : '') + '>' + U.esc(o.name) + '</label>'; }).join('') + '</div>';
   }
-  function layersHtml(d, t) {
-    var vids = videoOutputs(d), st = urlStage(d), picked = vids.filter(function (o) { return o.overlay; }).length;
+  function urlCard(d, t, stage, vids) {
+    var picked = vids.filter(function (o) { return o.overlay; }).length;
     var b = S.base && !d.isNew ? JSON.parse(S.base) : null, ovChanged = b && (b.overlay || '') !== (d.overlay || '');
-    var url = '<div class="tb-line"><span class="f">URL overlay' + U.tip('Web pages captured live and drawn on the video. Pick one of the overlays in ' + U.app + ', or make a new one from a web page. Live on save for every stream that loads this file.') + '</span>' +
-      '<div class="tb-val"><div class="hrow"><span class="ly-thumb sm" aria-hidden="true">' + U.icon('web') + '</span><select id="uo-b-ov" data-d="overlay"' + (ovChanged ? ' class="is-draft"' : '') + '>' + overlayOptions(d.overlay, 'None') + '</select>' +
-      '<button type="button" class="btn sm ghost" data-write data-go="new-overlay:">' + U.icon('plus') + 'New URL overlay</button></div>' +
-      (ovChanged ? '<div class="hint">Saved: ' + U.esc(b.overlay || 'None') + '</div>' : '') +
-      (t && t.overlay && !(U.overlays || []).some(function (o) { return o.name === t.overlay; }) ? '<div class="note bad"><span class="dot bad"></span><div>Overlay <strong>' + U.esc(t.overlay) + '</strong> does not exist in ' + U.esc(U.app) + '.</div></div>' : '') + '</div></div>' +
-      (d.overlay && vids.length ? '<div class="tb-line"><span class="f">Drawn on' + U.tip(STAGE_TIP) + '</span><div class="tb-val">' + stageSeg('data-urlstage', st) +
-        (st === 'outputs' ? outPicks('data-urlout', 0, vids, function (o) { return o.overlay; }) +
-          (picked === vids.length ? '<span class="bdg">Every output picked: saved as Input</span>' : !picked ? '<span class="bdg warn">Pick at least one output</span>' : '') : '') + '</div></div>' : '') +
-      (d.overlay && d.hardware !== 'cpu' ? '<p class="hint tb-indent">With an overlay on ' + U.esc((HW.filter(function (x) { return x[0] === d.hardware; })[0] || HW[0])[1]) + ', each frame is copied off the card to draw it, which costs more than without one.</p>' : '');
-    var imgs = (d.images || []).map(function (l, i) {
-      var e = libEntry(l.file), pv = e && e.preview, stage = l.where === 'outputs' ? 'outputs' : 'input';
-      return '<div class="lyc lyr" data-ly="' + i + '"><div class="lyc-top"><div class="ly-thumb">' + (pv ? '<img src="' + U.esc(pv) + '" alt="">' : U.icon('grid')) + '</div>' +
-        '<div class="ly-main"><strong>' + U.esc(l.file) + '</strong><span class="small ' + (e || !S.lib ? 'muted' : 'warn-text') + '">' + (e || !S.lib ? 'Image' : 'Not in the content folder') + '</span></div>' +
-        '<div class="ly-acts">' + (i ? '<button class="btn sm icon ghost" type="button" data-lyup="' + i + '" aria-label="Move up">' + U.icon('up') + '</button>' : '') +
-        '<button class="btn sm icon ghost" type="button" data-lyrm="' + i + '" aria-label="Remove image layer">' + U.icon('close') + '</button></div></div>' +
-        '<div class="lyc-row"><span class="f">Drawn on' + U.tip(STAGE_TIP) + '</span>' + stageSeg('data-lystage', stage) + '</div>' +
-        (stage === 'outputs' ? outPicks('data-lyout', i, vids, function (o) { return l.outputs.indexOf(o.name) >= 0; }) : '') +
-        '<div class="lyc-row"><span class="f">Corner</span><div class="align9" role="radiogroup" aria-label="Corner">' + ALIGNS.map(function (a) {
-          return '<button type="button" role="radio" data-lyalign="' + a[0] + '" aria-checked="' + (l.align === a[0]) + '" aria-label="' + a[1] + '" title="' + a[1] + '"></button>'; }).join('') + '</div></div>' +
-        '<details class="lyc-more"><summary>Offset, size, opacity</summary><div class="oc-f ly-f">' +
-        '<label>Offset x<input type="number" data-ly-k="x" min="0" max="8192" value="' + l.x + '"></label><label>Offset y<input type="number" data-ly-k="y" min="0" max="8192" value="' + l.y + '"></label>' +
-        '<label>Width<input type="number" data-ly-k="width" min="0" max="8192" value="' + l.width + '" placeholder="its own"></label><label>Height<input type="number" data-ly-k="height" min="0" max="8192" value="' + l.height + '" placeholder="its own"></label>' +
-        '<label>Opacity %<input type="number" data-ly-k="opacity" min="0" max="100" value="' + l.opacity + '"></label></div>' +
-        '<label class="check"><input type="checkbox" data-ly-k="refresh"' + (l.refresh ? ' checked' : '') + '>Reload when the file changes</label></details></div>';
-    }).join('');
-    return url + '<div class="tb-line"><span class="f">Image layers' + U.tip('PNG, JPEG, GIF or BMP files in the server\'s content folder, drawn under the URL overlay. Offsets are pixels from the chosen corner. Width and height 0 keep the image\'s own size.') + '</span>' +
-      '<div class="tb-val"><div class="hrow">' + ((d.images || []).length ? '' : '<span class="small faint">None</span>') + '<button class="btn sm ghost" type="button" data-addimg' + ((d.images || []).length >= MAX_IMAGES ? ' disabled' : '') + '>' + U.icon('plus') + 'Image layer</button></div>' +
-      (S.pick ? pickerHtml() : '') + imgs + '</div></div>';
+    return '<div class="lyc lyr lyu"><div class="lyc-top"><div class="ly-thumb">' + U.icon('web') + '</div>' +
+      '<div class="ly-main"><select id="uo-b-ov" data-d="overlay" aria-label="URL overlay"' + (ovChanged ? ' class="is-draft"' : '') + '>' + overlayOptions(d.overlay) + '</select>' +
+      '<span class="small muted">URL overlay' + (ovChanged ? '; saved: ' + U.esc(b.overlay || 'none') : '') + '</span></div>' +
+      '<div class="ly-acts"><button type="button" class="btn sm ghost" data-write data-go="new-overlay:">' + U.icon('plus') + 'New</button>' +
+      '<button class="btn sm icon ghost" type="button" data-urlrm aria-label="Remove the URL overlay">' + U.icon('close') + '</button></div></div>' +
+      (t && t.overlay && t.overlay === d.overlay && !(U.overlays || []).some(function (o) { return o.name === t.overlay; }) ? '<div class="note bad"><span class="dot bad"></span><div>Overlay <strong>' + U.esc(t.overlay) + '</strong> does not exist in ' + U.esc(U.app) + '.</div></div>' : '') +
+      (stage === 'outputs' ? '<div class="lyc-row"><span class="f">On</span>' + outPicks('data-urlout', 0, vids, function (o) { return o.overlay; }) + '</div>' +
+        (picked === vids.length && vids.length ? '<span class="bdg">Every output picked: saved on the input, in Decode</span>' : !picked ? '<span class="bdg warn">Pick at least one output</span>' : '') : '') +
+      (d.hardware !== 'cpu' ? '<p class="hint">On ' + U.esc((HW.filter(function (x) { return x[0] === d.hardware; })[0] || HW[0])[1]) + ', each frame is copied off the card to draw it, which costs more than without one.</p>' : '') + '</div>';
+  }
+  function imageCard(d, l, i, stage, vids) {
+    var e = libEntry(l.file), pv = e && e.preview;
+    var same = (d.images || []).filter(function (x) { return imgStage(x) === stage; }), first = same[0] === l;
+    return '<div class="lyc lyr" data-ly="' + i + '"><div class="lyc-top"><div class="ly-thumb">' + (pv ? '<img src="' + U.esc(pv) + '" alt="">' : U.icon('grid')) + '</div>' +
+      '<div class="ly-main"><strong>' + U.esc(l.file) + '</strong><span class="small ' + (e || !S.lib ? 'muted' : 'warn-text') + '">' + (e || !S.lib ? 'Image' : 'Not in the content folder') + '</span></div>' +
+      '<div class="ly-acts">' + (first ? '' : '<button class="btn sm icon ghost" type="button" data-lyup="' + i + '" aria-label="Move up">' + U.icon('up') + '</button>') +
+      '<button class="btn sm icon ghost" type="button" data-lyrm="' + i + '" aria-label="Remove image ' + U.esc(l.file) + '">' + U.icon('close') + '</button></div></div>' +
+      (stage === 'outputs' ? '<div class="lyc-row"><span class="f">On</span>' + outPicks('data-lyout', i, vids, function (o) { return l.outputs.indexOf(o.name) >= 0; }) + '</div>' : '') +
+      '<div class="lyc-row"><span class="f">Corner</span><div class="align9" role="radiogroup" aria-label="Corner">' + ALIGNS.map(function (a) {
+        return '<button type="button" role="radio" data-lyalign="' + a[0] + '" aria-checked="' + (l.align === a[0]) + '" aria-label="' + a[1] + '" title="' + a[1] + '"></button>'; }).join('') + '</div></div>' +
+      '<details class="lyc-more"><summary>Offset, size, opacity</summary><div class="oc-f ly-f">' +
+      '<label>Offset x<input type="number" data-ly-k="x" min="0" max="8192" value="' + l.x + '"></label><label>Offset y<input type="number" data-ly-k="y" min="0" max="8192" value="' + l.y + '"></label>' +
+      '<label>Width<input type="number" data-ly-k="width" min="0" max="8192" value="' + l.width + '" placeholder="its own"></label><label>Height<input type="number" data-ly-k="height" min="0" max="8192" value="' + l.height + '" placeholder="its own"></label>' +
+      '<label>Opacity %<input type="number" data-ly-k="opacity" min="0" max="100" value="' + l.opacity + '"></label></div>' +
+      '<label class="check"><input type="checkbox" data-ly-k="refresh"' + (l.refresh ? ' checked' : '') + '>Reload when the file changes</label></details></div>';
+  }
+  // one Overlays section: its add buttons, the image picker when opened here, then the URL overlay and the images drawn here
+  function overlaysHtml(d, t, stage) {
+    var vids = videoOutputs(d), st = urlStage(d), full = (d.images || []).length >= MAX_IMAGES;
+    var items = (d.overlay && st === stage ? urlCard(d, t, stage, vids) : '') +
+      (d.images || []).map(function (l, i) { return imgStage(l) === stage ? imageCard(d, l, i, stage, vids) : ''; }).join('');
+    // nothing to draw on: what is there can still be removed
+    if (!vids.length) return '<div class="hrow ly-add"><span class="small faint">No video output to draw on</span></div>' + items;
+    // the URL overlay is on outputs only when some of two or more carry it; with one, it is the input
+    var url = stage === 'outputs' && vids.length < 2 ? (d.overlay && st === stage ? '' : '<span class="small faint">With one video output, the URL overlay goes in Decode</span>')
+      : !d.overlay ? ((U.overlays || []).length ? '<button class="btn sm ghost" type="button" data-addurl="' + stage + '">' + U.icon('plus') + 'URL overlay</button>'
+        : '<button class="btn sm ghost" type="button" data-write data-go="new-overlay:">' + U.icon('plus') + 'URL overlay</button>')
+      : st !== stage ? '<button class="btn sm ghost" type="button" data-urlmove="' + stage + '" title="A template carries one URL overlay">' + U.icon(stage === 'input' ? 'input' : 'outputs') + 'Move the URL overlay here</button>' : '';
+    return '<div class="hrow ly-add">' + url + '<button class="btn sm ghost" type="button" data-addimg="' + stage + '"' + (full ? ' disabled title="At most ' + MAX_IMAGES + ' images in a template"' : '') + ' aria-expanded="' + (S.pick === stage) + '">' + U.icon('plus') + 'Image</button>' +
+      (items || S.pick === stage ? '' : '<span class="small faint">None</span>') + '</div>' + (S.pick === stage ? pickerHtml() : '') + items;
   }
   // what is drawn where, as badges: the input row of the ladder, and each output row
   function layerBadges(d, o) {
@@ -474,16 +486,24 @@
       '<div class="hint">Uploads go to the server\'s <code>content/urloverlay/</code> folder.</div></div>' +
       '<div class="hrow end" style="margin-top:8px"><button type="button" class="btn sm" data-pickcancel>Cancel</button><button type="button" class="btn sm primary" data-pickok' + (lib.length ? '' : ' disabled') + '>Add layer</button></div></div>';
   }
-  function addImage(d, file) {
+  function addImage(d, file, stage) {
     d.images = d.images || [];
-    d.images.push({ file: file, where: 'all', outputs: [], x: 16, y: 16, width: 0, height: 0, align: 'right,top', opacity: 100, refresh: false });
+    var outs = stage === 'outputs';
+    d.images.push({ file: file, where: outs ? 'outputs' : 'all', outputs: outs ? videoOutputs(d).slice(0, 1).map(function (o) { return o.name; }) : [], x: 16, y: 16, width: 0, height: 0,
+      align: 'right,top', opacity: 100, refresh: false });
+  }
+  // the URL overlay on one stage: the input is every video output, outputs starts with the first one
+  function placeUrl(d, stage) {
+    var v = videoOutputs(d);
+    d.urlSome = stage === 'outputs';
+    v.forEach(function (o, k) { o.overlay = stage === 'input' || k === 0; });
   }
   function bindPicker(d) {
     var box = el.body.querySelector('.ly-picker');
     if (!box) return;
     var cancel = box.querySelector('[data-pickcancel]'), ok = box.querySelector('[data-pickok]');
     if (cancel) cancel.onclick = function () { S.pick = false; rerender(); };
-    if (ok) ok.onclick = function () { var r = box.querySelector('input[name=uo-img]:checked'); if (!r) return; addImage(d, r.value); S.pick = false; rerender(); };
+    if (ok) ok.onclick = function () { var r = box.querySelector('input[name=uo-img]:checked'); if (!r) return; addImage(d, r.value, S.pick); S.pick = false; rerender(); };
     box.querySelectorAll('[data-imgdel]').forEach(function (b) {
       b.onclick = function (e) {
         e.preventDefault();
@@ -495,7 +515,7 @@
     });
     var up = box.querySelector('#uo-img-up');
     if (up) up.onchange = function () {
-      var f = up.files && up.files[0];
+      var f = up.files && up.files[0], stage = S.pick;
       if (!f) return;
       if (f.size > 2 * 1024 * 1024) { U.toast('An image is at most 2 MB.', { level: 'bad' }); return; }
       var rd = new FileReader();
@@ -503,7 +523,7 @@
         var name = f.name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '');
         U.api.post(vh() + '/images', { name: name, data: rd.result }).then(function (r) {
           return library(true).then(function () {
-            addImage(d, r.file); S.pick = false;
+            addImage(d, r.file, stage); S.pick = false;
             U.toast('Uploaded ' + r.file + ' and added it as a layer.');
             rerender();
           });
@@ -513,23 +533,14 @@
     };
   }
   function bindLayers(d) {
-    el.body.querySelectorAll('[data-urlstage]').forEach(function (b) {
-      b.onclick = function () {
-        if (b.getAttribute('data-urlstage') === 'input') { d.urlSome = false; videoOutputs(d).forEach(function (o) { o.overlay = true; }); }
-        else { d.urlSome = true; var v = videoOutputs(d); if (v.every(function (o) { return o.overlay; }) && v.length > 1) v.slice(1).forEach(function (o) { o.overlay = false; }); }
-        rerender();
-      };
+    el.body.querySelectorAll('[data-addurl]').forEach(function (b) {
+      b.onclick = function () { d.overlay = ((U.overlays || [])[0] || {}).name || ''; placeUrl(d, b.getAttribute('data-addurl')); rerender(); };
     });
+    el.body.querySelectorAll('[data-urlmove]').forEach(function (b) { b.onclick = function () { placeUrl(d, b.getAttribute('data-urlmove')); rerender(); }; });
+    var urm = el.body.querySelector('[data-urlrm]');
+    if (urm) urm.onclick = function () { d.overlay = ''; d.urlSome = false; rerender(); };
     el.body.querySelectorAll('[data-urlout]').forEach(function (c) {
       c.onchange = function () { var o = videoOutputs(d).filter(function (x) { return x.name === c.value; })[0]; if (o) o.overlay = c.checked; d.urlSome = true; rerender(); };
-    });
-    el.body.querySelectorAll('[data-lystage]').forEach(function (b) {
-      b.onclick = function () {
-        var l = d.images[+b.closest('[data-ly]').getAttribute('data-ly')];
-        l.where = b.getAttribute('data-lystage') === 'outputs' ? 'outputs' : 'all';
-        if (l.where === 'outputs' && !l.outputs.length) l.outputs = videoOutputs(d).slice(0, 1).map(function (o) { return o.name; });
-        rerender();
-      };
     });
     el.body.querySelectorAll('[data-lyalign]').forEach(function (b) {
       b.onclick = function () { d.images[+b.closest('[data-ly]').getAttribute('data-ly')].align = b.getAttribute('data-lyalign'); rerender(); };
@@ -551,12 +562,22 @@
       c.onchange = function () { var l = d.images[+c.getAttribute('data-lyout')]; l.outputs = l.outputs.filter(function (n) { return n !== c.value; }); if (c.checked) l.outputs.push(c.value); rerender(); };
     });
     el.body.querySelectorAll('[data-lyrm]').forEach(function (b) { b.onclick = function () { d.images.splice(+b.getAttribute('data-lyrm'), 1); rerender(); }; });
-    el.body.querySelectorAll('[data-lyup]').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-lyup'), t = d.images[i]; d.images[i] = d.images[i - 1]; d.images[i - 1] = t; rerender(); }; });
-    var add = el.body.querySelector('[data-addimg]');
-    if (add) add.onclick = function () {
-      S.pick = !S.pick; rerender();
-      if (S.pick) library(true).then(function () { if (S.draft === d) rerender(); }, function (e) { S.pick = false; rerender(); U.toast('The image list could not be read: ' + e.message, { level: 'bad' }); });
-    };
+    // up past the image above it in the same section; the other section's images keep their places
+    el.body.querySelectorAll('[data-lyup]').forEach(function (b) {
+      b.onclick = function () {
+        var i = +b.getAttribute('data-lyup'), st = imgStage(d.images[i]), j = i - 1;
+        while (j >= 0 && imgStage(d.images[j]) !== st) j--;
+        if (j < 0) return;
+        var t = d.images[i]; d.images[i] = d.images[j]; d.images[j] = t; rerender();
+      };
+    });
+    el.body.querySelectorAll('[data-addimg]').forEach(function (add) {
+      add.onclick = function () {
+        var st = add.getAttribute('data-addimg');
+        S.pick = S.pick === st ? false : st; rerender();
+        if (S.pick) library(true).then(function () { if (S.draft === d) rerender(); }, function (e) { S.pick = false; rerender(); U.toast('The image list could not be read: ' + e.message, { level: 'bad' }); });
+      };
+    });
     bindPicker(d);
   }
 
@@ -594,7 +615,7 @@
       '<span class="small faint">The incoming stream, and what is drawn on its picture</span></div>' +
       '<div class="tb-line"><span class="f">Source</span><div class="tb-val hrow"><label class="check"><input type="checkbox" data-d="deinterlace"' + (d.deinterlace ? ' checked' : '') + '>Deinterlace</label>' +
       '<label class="inl">Never below<input type="number" class="num" data-d="minFrameRate" min="0" max="120" value="' + (d.minFrameRate || 0) + '" aria-label="Never below, frames per second">fps' + U.tip('For sources that drop frames: WSE fills up to this rate. 0 leaves it out.') + '</label></div></div>' +
-      layersHtml(d, t) + '</section>';
+      '<div class="tb-line"><span class="f">Overlays' + U.tip(IN_TIP + KINDS_TIP) + '</span><div class="tb-val ly-sec">' + overlaysHtml(d, t, 'input') + '</div></div></section>';
     var encode = '<section class="tb-box"><div class="tb-bh"><span class="tb-ic">' + U.icon('outputs') + '</span><h3>Encode</h3><span class="hwc">' + U.icon('chip') + (hs[1] === hs[2] ? 'Scale, encode ' + U.esc(hs[2]) : 'Scale ' + U.esc(hs[1]) + ', encode ' + U.esc(hs[2])) + '</span>' +
       '<span class="spacer"></span>' + loadText(d) + '</div>' +
       // presets replace every output, so they are offered only while the template is new
@@ -604,6 +625,7 @@
       '<div class="oc-list">' + d.outputs.map(function (o, i) { return card(o, i, d); }).join('') +
       '<div class="oc-add"><button class="btn sm" type="button" data-add="video">' + U.icon('plus') + 'Output</button>' +
       '<button class="btn sm ghost" type="button" data-add="passthrough">' + U.icon('plus') + 'Original</button><button class="btn sm ghost" type="button" data-add="audio">' + U.icon('plus') + 'Audio only</button></div></div>' +
+      '<div class="b-ovl"><div class="tb-h">' + U.icon('overlay') + 'Overlays on outputs' + U.tip(OUT_TIP + KINDS_TIP) + '</div>' + overlaysHtml(d, t, 'outputs') + '</div>' +
       playback(d) + '</section>';
     el.body.innerHTML = '<div class="tb">' + top + decode + encode + '</div>';
     bindBuilder();
@@ -619,7 +641,7 @@
         if (f.type === 'checkbox') d[k] = f.checked;
         else if (f.type === 'number') d[k] = num(f.value, d[k]);
         else d[k] = f.value;
-        if (k === 'overlay' && d.overlay && !d.outputs.some(function (o) { return o.kind === 'video' && o.overlay; })) d.outputs.forEach(function (o) { if (o.kind === 'video') o.overlay = true; });
+        if (k === 'overlay' && d.overlay && !d.urlSome && !d.outputs.some(function (o) { return o.kind === 'video' && o.overlay; })) d.outputs.forEach(function (o) { if (o.kind === 'video') o.overlay = true; });
         rerender();
       });
     });
@@ -962,11 +984,12 @@
       var s = ao.filter(function (x) { return x.name === o.name; })[0];
       if (!s) { out.push('add ' + o.name); return; }
       var w = {};
-      Object.keys(o).forEach(function (k) { if (JSON.stringify(o[k]) !== JSON.stringify(s[k])) w[WORDS[k] || k] = 1; });
+      Object.keys(o).forEach(function (k) { if (k !== 'overlay' && JSON.stringify(o[k]) !== JSON.stringify(s[k])) w[WORDS[k] || k] = 1; });
       if (Object.keys(w).length) out.push(o.name + ' ' + Object.keys(w).join(', '));
+      if (o.overlay !== s.overlay && b.overlay && a.overlay) out.push(o.name + (o.overlay ? ' gets ' : ' drops ') + b.overlay);
     });
     ao.forEach(function (s) { if (!bo.some(function (o) { return o.name === s.name; })) out.push('remove ' + s.name); });
-    if (JSON.stringify(a.images) !== JSON.stringify(b.images)) out.push('image layers');
+    if (JSON.stringify(a.images) !== JSON.stringify(b.images)) out.push('images');
     if (JSON.stringify(a.groups) !== JSON.stringify(b.groups)) out.push('adaptive groups');
     if (a.deinterlace !== b.deinterlace || a.gpuId !== b.gpuId || a.minFrameRate !== b.minFrameRate) out.push('decode');
     return out.length ? out : ['unsaved edits'];

@@ -507,8 +507,6 @@
 .uo-plugin .lyc-top .ly-thumb { display: grid; place-items: center; color: var(--text-2); }
 .uo-plugin .lyc-top .ly-thumb svg { width: 20px; height: 20px; }
 .uo-plugin .lyc-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.uo-plugin .seg.stage button { display: inline-flex; align-items: center; gap: 4px; }
-.uo-plugin .seg.stage svg { width: 13px; height: 13px; }
 .uo-plugin .ly-outs { display: flex; flex-wrap: wrap; gap: 6px; }
 .uo-plugin .align9 { display: grid; grid-template-columns: repeat(3, 14px); gap: 3px; padding: 4px; border: 1px solid var(--border); border-radius: var(--r-sm); }
 .uo-plugin .align9 button { width: 14px; height: 10px; padding: 0; border: 1px solid var(--border-strong); border-radius: 2px; background: var(--surface); cursor: pointer; }
@@ -786,6 +784,8 @@
 .uo-plugin .tb-box .oc.ov { box-shadow: inset 3px 0 0 var(--green); }
 .uo-plugin .tb-box .oc-add { border: 0; padding: var(--s-3) 0 0; }
 .uo-plugin .tb-box .b-play { padding: var(--s-3) var(--s-4) var(--s-4); border-top: 1px solid var(--border); }
+.uo-plugin .tb-box .b-ovl { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3) var(--s-4) var(--s-4); border-top: 1px solid var(--border); }
+.uo-plugin .ly-add { gap: var(--s-2); flex-wrap: wrap; }
 .uo-plugin .lyr { border: 0; border-top: 1px solid var(--gray-100); border-radius: 0; padding: var(--s-2) 0; width: 100%; }
 .uo-plugin .lyr:first-of-type { border-top: 0; }
 @media (max-width: 1250px) { .uo-plugin ol.tb-flow { margin-left: 0; } .uo-plugin .tb-line { grid-template-columns: minmax(0, 1fr); } .uo-plugin .tb-indent { padding-left: var(--s-4); } }
