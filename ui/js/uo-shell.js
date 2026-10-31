@@ -53,7 +53,13 @@
     Object.keys(U.screens).forEach(function (k) { if (U.screens[k].unsaved) all = all.concat(U.screens[k].unsaved()); });
     return U.readOnly ? [] : all;
   };
-  U.changed = function () { renderStrip(); renderItems(); if (drawer) renderDrawer(); };
+  // unsaved work changed: the header, the list and the drawer follow once per animation frame, however many edits
+  // land in it (a drag or typing calls this on every event)
+  var changedFrame = 0;
+  U.changed = function () {
+    if (changedFrame) return;
+    changedFrame = window.requestAnimationFrame(function () { changedFrame = 0; if (!U.alive()) return; renderStrip(); renderItems(); if (drawer) renderDrawer(); });
+  };
 
   /* ---------- header ---------- */
   function si(key, k, v, attrs) {
@@ -154,11 +160,19 @@
   }
   function matches(text) { var q = (search[U.view.tab] || '').toLowerCase(); return !q || text.toLowerCase().indexOf(q) >= 0; }
   U.attention = function (s) { return s.publishing && (!!s.restartNeeded || !!(s.overlay && !U.overlayEntry(s.overlay))); };
-  function unsavedFor(go) { return U.unsaved().some(function (u) { return u.go === go; }) ? '<span class="chip-draft">Unsaved</span>' : ''; }
+  // the unsaved work, read once per list render rather than once per row: each read compares every open draft
+  var unsavedNow = null;
+  function unsavedFor(go) { return (unsavedNow || {})[go] ? '<span class="chip-draft">Unsaved</span>' : ''; }
   function renderItems() {
     var box = el.list.querySelector('[data-items]'), foot = el.list.querySelector('[data-foot]');
     if (!box) return;
     var tab = U.view.tab, h = [], v = U.view;
+    unsavedNow = {};
+    U.unsaved().forEach(function (u) { unsavedNow[u.go] = true; });
+    // rows and copies by name, once, instead of a search per row
+    var rowsByName = {}, copiesOf = {};
+    U.streams().forEach(function (r) { rowsByName[r.name] = r; });
+    (U.templates || []).forEach(function (c) { var b = c && U.copyBase(c); if (b) (copiesOf[b] = copiesOf[b] || []).push(c); });
     foot.innerHTML = '';
     if (tab === 'onair') {
       var live = U.live(), att = live.filter(U.attention), off = U.streams().filter(function (s) { return !s.publishing; });
@@ -194,14 +208,14 @@
       var list = (U.templates || []).filter(function (t) { return t && !t.error && !U.copyBase(t) && !t.vif; });
       var mine = list.filter(function (t) { return t.overlay || t.managed; }), other = list.filter(function (t) { return !(t.overlay || t.managed); });
       function copyItem(c) {
-        var s = U.streamRow(c.name), sel = v.screen === 'template' && v.id === c.name, behind = c.copyCurrent === false, base = U.copyBase(c);
+        var s = rowsByName[c.name], sel = v.screen === 'template' && v.id === c.name, behind = c.copyCurrent === false, base = U.copyBase(c);
         return item('template:' + c.name, s && s.publishing ? 'live' : '', U.icon('sub') + U.esc(c.name), behind ? '<span class="warn-text">Differs from ' + U.esc(base) + '</span>' : 'Copy for stream ' + U.esc(c.name) + (s && s.publishing ? ', publishing' : ''), '', sel, null,
           (behind && !U.readOnly ? '<button type="button" class="btn sm rowupd" data-write data-cupd="' + U.esc(c.name) + '" title="Copy ' + U.esc(base) + ' as saved now into ' + U.esc(c.name) + '">Update</button>' : '') +
           U.rowMenuHtml('copy:' + c.name, 'Actions for the copy ' + c.name, [['update', 'Update from ' + base], ['stream', 'Open stream ' + c.name]]), 'lsub' + (behind ? ' behind' : ''));
       }
       function tplItem(t, master) {
         var users = U.streamsUsing(t.name), live = users.filter(function (s) { return s.publishing; });
-        var copies = (U.templates || []).filter(function (c) { return c && U.copyBase(c) === t.name; });
+        var copies = copiesOf[t.name] || [];
         var behind = copies.filter(function (c) { return c.copyCurrent === false; }).length;
         var sub = (t.overlay ? t.overlay : 'No overlay') + (master ? ', ' + copies.length + ' stream cop' + (copies.length === 1 ? 'y' : 'ies') + (behind ? ', ' + behind + ' differ' + (behind === 1 ? 's' : '') : '') : t.shipped ? ', ships with WSE' : '');
         if (!matches(t.name + ' ' + sub + ' ' + copies.map(function (c) { return c.name; }).join(' '))) return '';
@@ -213,9 +227,11 @@
       if (a) h.push('<li class="lgroup">Master templates' + U.tip('A master is where a template is edited. A stream runs its own copy of a master, made when it is put on the stream, so editing a master changes no stream until its copy is updated from it.') + '</li>' + a);
       if (b) h.push('<li class="lgroup">Other templates on this server</li>' + b);
       // copies whose master is gone: nothing above lists them, and they cannot be updated
-      var orphans = (U.templates || []).filter(function (c) { return c && !c.error && U.copyBase(c) && !U.templateEntry(U.copyBase(c)); }).filter(function (c) { return matches(c.name + ' ' + U.copyBase(c)); });
+      var names = {};
+      (U.templates || []).forEach(function (x) { if (x) names[x.name] = true; });
+      var orphans = (U.templates || []).filter(function (c) { return c && !c.error && U.copyBase(c) && !names[U.copyBase(c)]; }).filter(function (c) { return matches(c.name + ' ' + U.copyBase(c)); });
       if (orphans.length) h.push('<li class="lgroup">Copies without a master' + U.tip('Each is the own copy, for one stream, of a master that no longer exists. The stream still runs it; it can no longer be updated. Delete it to have the stream use the template order again.') + '</li>' + orphans.map(function (c) {
-        var s = U.streamRow(c.name);
+        var s = rowsByName[c.name];
         return item('template:' + c.name, s && s.publishing ? 'live' : '', U.esc(c.name), 'Copy of ' + U.esc(U.copyBase(c)) + ', which no longer exists', '', v.screen === 'template' && v.id === c.name, null,
           U.rowMenuHtml('copy:' + c.name, 'Actions for the copy ' + c.name, [['stream', 'Open stream ' + c.name], '-', ['del', 'Delete this copy...', true, !!(s && s.publishing)]]));
       }).join(''));
@@ -510,8 +526,10 @@
     var unhost = function () { document.documentElement.classList.remove('uo-host'); document.documentElement.removeAttribute('data-uo-theme'); };
     U.onShutdown(unhost);
     // the Manager swaps its page out some time after the address changes; the colors go back the moment it does
+    // only the root's ancestors are watched, each for its own children: the plugin's own redraws and the rest of the
+    // Manager page cause no work
     var gone = new MutationObserver(function () { if (!U.alive()) { unhost(); gone.disconnect(); } });
-    gone.observe(document.body, { childList: true, subtree: true });
+    for (var a = r.parentNode; a && a !== document; a = a.parentNode) gone.observe(a, { childList: true });
     U.onShutdown(function () { gone.disconnect(); });
     var tb = r.querySelector('[data-act=theme]');
     tb.innerHTML = U.icon(theme === 'dark' ? 'sun' : 'moon'); tb.setAttribute('aria-pressed', String(theme === 'dark'));

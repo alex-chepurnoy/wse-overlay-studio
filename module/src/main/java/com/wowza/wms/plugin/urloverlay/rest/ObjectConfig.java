@@ -215,15 +215,15 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@JsonProperty("cropH")
 	protected int cropH = 0;
 
-	private transient volatile BufferedImage lastKeyedImage = null;
-	private transient volatile BufferedImage lastSourceImage = null;
-	private transient volatile long lastKeyedSeq = -2;
 	private transient volatile long lastKeyMs = -1;
+	// the page frame this layer drew last, so a refresh with no new frame does not redraw
+	private transient volatile long drawnSeq = Long.MIN_VALUE;
 	private transient volatile long lastScaleMs = -1;
 	// the keyed frame scaled to the size it is drawn at, made once per frame and size
 	private transient volatile BufferedImage scaledFrom = null;
 	private transient volatile BufferedImage scaledImage = null;
-	private transient volatile String lastKeySig = null;
+	// the last keyed frame this layer drew, for the stream capture endpoint
+	private transient volatile BufferedImage lastKeyedImage = null;
 	/** Time this thread spent waiting for page screenshots in draw(), so a draw's own cost is reported apart from it. */
 	public static final ThreadLocal<Long> CAPTURE_WAIT_NS = ThreadLocal.withInitial(() -> 0L);
 
@@ -1000,25 +1000,18 @@ public class ObjectConfig extends JsonApplicationConfigBase
                         CAPTURE_WAIT_NS.set(CAPTURE_WAIT_NS.get() + System.nanoTime() - c0);
                         if(image != null)
                         {
-                            // each frame is keyed once, and scaled once per size, however often the overlay is drawn
-                            String keySig = awt_keyColor() + "/" + keyTolerance + "/" + cropX + "," + cropY + "," + cropW + "," + cropH;
+                            // each frame is keyed once, and scaled once per size, for every layer and stream drawing
+                            // this page: the cache is the page's, not this layer's
+                            String keySig = keySignature();
                             long seq = capture.frameSeq();
-                            if(image == lastSourceImage && seq == lastKeyedSeq && keySig.equals(lastKeySig) && lastKeyedImage != null)
-                            {
-                                image = lastKeyedImage;
-                            }
-                            else
-                            {
-                                long k0 = System.nanoTime();
-                                lastSourceImage = image;
-                                lastKeyedSeq = seq;
-                                lastKeySig = keySig;
-                                image = cropped(keyOut(image, awt_keyColor(), keyTolerance));
-                                lastKeyMs = (System.nanoTime() - k0) / 1_000_000;
-                            }
-                            lastKeyedImage = image;
-                            int[] size = webPageDrawSize(this.w, this.h, image.getWidth(), image.getHeight(), scaled);
-                            drawImageAt(g, scaledOnce(image, size[0], size[1]), this.getX(scaled), this.getY(scaled), size[0], size[1]);
+                            BufferedImage source = image;
+                            BufferedImage keyed = keyedShared(capture, source, seq);
+                            drawnSeq = seq;
+                            lastKeyedImage = keyed;
+                            int[] size = webPageDrawSize(this.w, this.h, keyed.getWidth(), keyed.getHeight(), scaled);
+                            BufferedImage drawn = size[0] <= 0 || size[1] <= 0 || (size[0] == keyed.getWidth() && size[1] == keyed.getHeight()) ? keyed
+                                : capture.derived(source, seq, keySig + "@" + size[0] + "x" + size[1], () -> scaledOnce(keyed, size[0], size[1]));
+                            drawImageAt(g, drawn, this.getX(scaled), this.getY(scaled), size[0], size[1]);
                             capture.reloadEvery(reloadListener, reloadRate);
                         }
                     }
@@ -1080,6 +1073,42 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	}
 
 	// The capture for the current url and window size, or null once disposed.
+	// what keying and cropping depend on: frames keyed alike are shared between layers and streams
+	private String keySignature()
+	{
+		return awt_keyColor() + "/" + keyTolerance + "/" + cropX + "," + cropY + "," + cropW + "," + cropH;
+	}
+
+	/** frame (number seq) of capture, keyed and cropped as this layer shows it, made once for every layer and stream that keys alike. */
+	public BufferedImage keyedShared(WebPageCapture capture, BufferedImage frame, long seq)
+	{
+		return capture.derived(frame, seq, keySignature(), () -> {
+			long k0 = System.nanoTime();
+			BufferedImage k = cropped(keyOut(frame, awt_keyColor(), keyTolerance));
+			lastKeyMs = (System.nanoTime() - k0) / 1_000_000;
+			return k;
+		});
+	}
+
+	/**
+	 * Whether drawing again would show something new: a web page with a frame this layer has not drawn yet. Every other
+	 * kind is the same until the overlay is saved, which redraws by itself.
+	 */
+	public boolean hasNewFrame()
+	{
+		if(!"webPage".equals(type))
+		{
+			return false;
+		}
+		WebPageCapture c;
+		synchronized(webPageLock)
+		{
+			c = webPageCapture;
+		}
+		// no capture yet: the next draw opens it
+		return c == null || c.frameSeq() != drawnSeq;
+	}
+
 	private WebPageCapture getWebPageCapture()
 	{
 		synchronized(webPageLock)

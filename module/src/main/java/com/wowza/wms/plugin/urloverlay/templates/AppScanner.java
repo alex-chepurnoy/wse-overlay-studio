@@ -30,6 +30,35 @@ public final class AppScanner
 	{
 	}
 
+	// what each Application.xml says, kept while its size and time stay the same: scans run on every state change
+	private record Read(long size, long modified, Map<String, Object> map)
+	{
+	}
+	private static final java.util.concurrent.ConcurrentHashMap<Path, Read> READ = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private static Map<String, Object> read(Path xml) throws Exception
+	{
+		long size = Files.size(xml), modified = Files.getLastModifiedTime(xml).toMillis();
+		Read r = READ.get(xml);
+		if(r == null || r.size() != size || r.modified() != modified)
+		{
+			try(InputStream in = Files.newInputStream(xml))
+			{
+				Document doc = TemplateValidator.newBuilder().parse(in);
+				XPath xp = XPathFactory.newInstance().newXPath();
+				String moduleCount = xp.evaluate("count(/Root/Application/Modules/Module[normalize-space(Class)='" + MODULE_CLASS + "'])", doc);
+				Map<String, Object> m = new LinkedHashMap<>();
+				m.put("installed", Double.parseDouble(moduleCount) >= 1);
+				m.put("streamType", xp.evaluate("normalize-space(/Root/Application/Streams/StreamType)", doc));
+				m.put("liveStreamTranscoder", xp.evaluate("normalize-space(/Root/Application/Transcoder/LiveStreamTranscoder)", doc));
+				m.put("templates", xp.evaluate("normalize-space(/Root/Application/Transcoder/Templates)", doc));
+				r = new Read(size, modified, java.util.Collections.unmodifiableMap(m));
+			}
+			READ.put(xml, r);
+		}
+		return r.map();
+	}
+
 	public static List<Map<String, Object>> scan(Path vhostDir)
 	{
 		List<Map<String, Object>> out = new ArrayList<>();
@@ -46,17 +75,11 @@ public final class AppScanner
 			{
 				continue;
 			}
-			try(InputStream in = Files.newInputStream(xml))
+			try
 			{
-				Document doc = TemplateValidator.newBuilder().parse(in);
-				XPath xp = XPathFactory.newInstance().newXPath();
-				String moduleCount = xp.evaluate("count(/Root/Application/Modules/Module[normalize-space(Class)='" + MODULE_CLASS + "'])", doc);
 				Map<String, Object> m = new LinkedHashMap<>();
 				m.put("name", d.getName());
-				m.put("installed", Double.parseDouble(moduleCount) >= 1);
-				m.put("streamType", xp.evaluate("normalize-space(/Root/Application/Streams/StreamType)", doc));
-				m.put("liveStreamTranscoder", xp.evaluate("normalize-space(/Root/Application/Transcoder/LiveStreamTranscoder)", doc));
-				m.put("templates", xp.evaluate("normalize-space(/Root/Application/Transcoder/Templates)", doc));
+				m.putAll(read(xml));
 				List<Map<String, String>> saved = new ArrayList<>();
 				File[] instances = ModuleFiles.appDir(vhostDir, d.getName()).resolve(ModuleFiles.STREAMS).toFile().listFiles(File::isDirectory);
 				if(instances != null)

@@ -54,7 +54,8 @@ public class UrlOverlayModule extends ModuleBase
 
 
 	OverlayLiveStreamTranscoderNotifier liveStreamTranscoderNotifier = null;
-	private final HashMap<String, StreamInfo> streamInfos = new HashMap<>();
+	// read on every frame of every transcoder thread: a concurrent map, with no lock and no allocation once a stream has its entry
+	private final java.util.concurrent.ConcurrentHashMap<String, StreamInfo> streamInfos = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private boolean debugOverlayLogs = false;
 	private int maxDebugOverlayLogs = 100;
@@ -545,11 +546,8 @@ public class UrlOverlayModule extends ModuleBase
 
 	private StreamInfo getStreamInfo(String streamName)
 	{
-		synchronized(streamInfos)
-		{
-			streamInfos.putIfAbsent(streamName, new StreamInfo());
-			return streamInfos.get(streamName);
-		}
+		StreamInfo s = streamInfos.get(streamName);
+		return s != null ? s : streamInfos.computeIfAbsent(streamName, k -> new StreamInfo());
 	}
 
 	// overlay change lines, up to UrlOverlayMaxDebugOverlayLogs, when UrlOverlayDebugLogs is on
@@ -564,18 +562,12 @@ public class UrlOverlayModule extends ModuleBase
 
 	private StreamInfo findStreamInfo(String streamName)
 	{
-		synchronized(streamInfos)
-		{
-			return streamInfos.get(streamName);
-		}
+		return streamInfos.get(streamName);
 	}
 
 	private StreamInfo removeStreamInfo(String streamName)
 	{
-		synchronized(streamInfos)
-		{
-			return streamInfos.remove(streamName);
-		}
+		return streamInfos.remove(streamName);
 	}
 
 	public void addListener(String streamName, IOverlayListener listener)

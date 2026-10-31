@@ -14,9 +14,13 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import com.wowza.wms.logging.WMSLogger;
 import com.wowza.wms.logging.WMSLoggerFactory;
@@ -41,7 +45,31 @@ public class OverlayImage
 	private boolean evenCoords = false;
 	// set while a background draw runs; at most one at a time
 	private final java.util.concurrent.atomic.AtomicBoolean drawingImage = new java.util.concurrent.atomic.AtomicBoolean();
-	private Timer refreshTimer = null;
+	private ScheduledFuture<?> refreshTimer = null;
+
+	/**
+	 * Background draws for every stream, on a few threads rather than one new thread per draw: each overlay has at most
+	 * one draw queued or running, so the queue holds at most one per stream. Half the cores, 2 to 8, so draws never
+	 * take every core from the transcoder.
+	 */
+	static final ExecutorService DRAWS;
+	static
+	{
+		int n = Math.max(2, Math.min(8, Runtime.getRuntime().availableProcessors() / 2));
+		ThreadPoolExecutor e = new ThreadPoolExecutor(n, n, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
+			Thread t = new Thread(r, "UrlOverlayDraw");
+			t.setDaemon(true);
+			return t;
+		});
+		e.allowCoreThreadTimeOut(true);
+		DRAWS = e;
+	}
+	/** One thread ticks every overlay's refresh; a tick only marks the overlay for redrawing. */
+	static final ScheduledExecutorService REFRESH = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+		Thread t = new Thread(r, "UrlOverlayRefresh");
+		t.setDaemon(true);
+		return t;
+	});
 
 	private OverlayConfig mainOverlayConfig;
 	private String streamName;
@@ -148,12 +176,10 @@ public class OverlayImage
 			{
 				if(refreshTimer != null)
 				{
-					refreshTimer.cancel();
+					refreshTimer.cancel(false);
 				}
-
-				RefreshTimer r = new RefreshTimer();
-				refreshTimer = new Timer("RefreshTimer", true);
-				refreshTimer.scheduleAtFixedRate(r, (int)(mainOverlayConfig.getRefreshRate()*1000.0), (int)(mainOverlayConfig.getRefreshRate()*1000.0));
+				long ms = Math.max(1, (long)(mainOverlayConfig.getRefreshRate() * 1000.0));
+				refreshTimer = REFRESH.scheduleAtFixedRate(new RefreshTimer(), ms, ms, TimeUnit.MILLISECONDS);
 			}
 		}
 	}
@@ -162,7 +188,7 @@ public class OverlayImage
 	{
 		if(refreshTimer != null)
 		{
-			refreshTimer.cancel();
+			refreshTimer.cancel(false);
 			refreshTimer = null;
 		}
 	}
@@ -185,17 +211,23 @@ public class OverlayImage
 		}
 	}
 
-	public class RefreshTimer extends TimerTask
+	public class RefreshTimer implements Runnable
 	{
 
 		public RefreshTimer()
 		{
 		}
 
+		// a refresh redraws only when a page has a frame not drawn yet; the rest of an overlay changes only on save,
+		// which redraws by itself
 		@Override
 		public void run()
 		{
-			mainOverlayConfig.resetUuid();
+			OverlayConfig c = mainOverlayConfig;
+			if(c != null && c.hasNewFrame())
+			{
+				c.resetUuid();
+			}
 		}
 	}
 
@@ -334,7 +366,7 @@ public class OverlayImage
 				{
 					try
 					{
-						(new Thread(new DrawImageThread(mainOverlayConfig, scaled), "DrawImageThread:"+streamName)).start();
+						DRAWS.execute(new DrawImageThread(mainOverlayConfig, scaled));
 					}
 					catch(RuntimeException | Error e)
 					{

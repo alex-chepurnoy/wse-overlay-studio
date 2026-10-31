@@ -77,10 +77,15 @@ public class WebPageCapture
 	private final Object lock = new Object();
 	private String remoteId = null;
 	private int sentDelay = Integer.MIN_VALUE;
+	// a reload asked for from the page, sent with the next request to the service
+	private boolean reloadWanted = false;
 	private double sentRate = -1;
 	private long sentInterval = -1;
 	// how often the service takes a frame: the overlay's refresh, learned from the draws' maxAgeMs
 	private volatile long intervalMs = 1000;
+	// when the interval in force was last asked for; a slower one waits INTERVAL_HOLD_MS after it
+	private long intervalAskedAt = 0;
+	static final long INTERVAL_HOLD_MS = 10_000;
 	private long reloadsSeen = 0;
 	private BufferedImage lastImage = null;
 	private Instant lastCaptureAt = null;
@@ -149,6 +154,18 @@ public class WebPageCapture
 	 * One layer's reload rate for a page that several layers may share. The page reloads at the shortest positive rate
 	 * any layer asks for, so layers asking for different rates do not keep resetting each other's timer.
 	 */
+	/**
+	 * Asks the service to load the page's address again, with the next request. A page opened since never needs it:
+	 * opening loads the address.
+	 */
+	public void reloadNow()
+	{
+		synchronized(lock)
+		{
+			reloadWanted = remoteId != null;
+		}
+	}
+
 	public void reloadEvery(Object layer, double rate)
 	{
 		if(rate > 0)
@@ -188,8 +205,17 @@ public class WebPageCapture
 	{
 		if(maxAgeMs > 0)
 		{
-			// the draws use 80% of the refresh as maxAgeMs; the service takes a frame once per refresh
-			intervalMs = Math.max(50, Math.round(maxAgeMs / 0.8));
+			// the draws use 80% of the refresh as maxAgeMs; the service takes a frame once per refresh. Streams drawing
+			// one page at different speeds get the fastest: a slower ask replaces it only once the faster stops asking.
+			long want = Math.max(50, Math.round(maxAgeMs / 0.8)), now = System.currentTimeMillis();
+			synchronized(lock)
+			{
+				if(want <= intervalMs || now - intervalAskedAt > INTERVAL_HOLD_MS)
+				{
+					intervalMs = want;
+					intervalAskedAt = now;
+				}
+			}
 		}
 		start();
 		synchronized(lock)
@@ -234,6 +260,46 @@ public class WebPageCapture
 				lock.wait(left);
 			}
 			return closed ? null : lastImage != null ? lastImage : img;
+		}
+	}
+
+	// the latest frame keyed and scaled, shared by every layer and stream drawing this page: by key signature and size
+	private final Object derivedLock = new Object();
+	private BufferedImage derivedSource = null;
+	private long derivedSeq = Long.MIN_VALUE;
+	private final Map<String, BufferedImage> derived = new java.util.LinkedHashMap<>(16, 0.75f, true)
+	{
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<String, BufferedImage> e)
+		{
+			return size() > DERIVED_MAX;
+		}
+	};
+	/** Keyed and scaled versions of one frame kept at once: a few keys times an output ladder's sizes. */
+	static final int DERIVED_MAX = 12;
+
+	/**
+	 * What make builds from frame source (number seq), built once for every layer and stream that asks with the same
+	 * key: a keyed frame, or a keyed frame scaled to one size. A new frame drops the old ones. Built under this page's
+	 * own lock, so twenty streams drawing one page key it once, not twenty times.
+	 */
+	public BufferedImage derived(BufferedImage source, long seq, String key, java.util.function.Supplier<BufferedImage> make)
+	{
+		synchronized(derivedLock)
+		{
+			if(source != derivedSource || seq != derivedSeq)
+			{
+				derived.clear();
+				derivedSource = source;
+				derivedSeq = seq;
+			}
+			BufferedImage d = derived.get(key);
+			if(d == null)
+			{
+				d = make.get();
+				derived.put(key, d);
+			}
+			return d;
 		}
 	}
 
@@ -371,23 +437,39 @@ public class WebPageCapture
 				since = -1;
 			}
 		}
-		else if(delay != sentDelay || rate != sentRate || interval != sentInterval)
+		else
 		{
-			Map<String, Object> h = Wire.header(Wire.UPDATE);
-			h.put("capture", id);
-			h.put("pageDelayMs", delay);
-			h.put("reloadRate", rate);
-			h.put("intervalMs", interval);
-			Message u = c.call(h, CALL_TIMEOUT_MS);
-			if(!u.ok())
-			{
-				return u;
-			}
+			boolean reload;
 			synchronized(lock)
 			{
-				sentDelay = delay;
-				sentRate = rate;
-				sentInterval = interval;
+				reload = reloadWanted;
+			}
+			if(reload || delay != sentDelay || rate != sentRate || interval != sentInterval)
+			{
+				Map<String, Object> h = Wire.header(Wire.UPDATE);
+				h.put("capture", id);
+				h.put("pageDelayMs", delay);
+				h.put("reloadRate", rate);
+				h.put("intervalMs", interval);
+				if(reload)
+				{
+					h.put("reload", true);
+				}
+				Message u = c.call(h, CALL_TIMEOUT_MS);
+				if(!u.ok())
+				{
+					return u;
+				}
+				synchronized(lock)
+				{
+					sentDelay = delay;
+					sentRate = rate;
+					sentInterval = interval;
+					if(reload)
+					{
+						reloadWanted = false;
+					}
+				}
 			}
 		}
 		Map<String, Object> h = Wire.header(Wire.FRAME);

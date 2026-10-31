@@ -74,6 +74,9 @@ public final class CaptureService
 	private final java.util.concurrent.atomic.AtomicLong chromeServiceBlocks = new java.util.concurrent.atomic.AtomicLong();
 	private volatile String sandboxProblem = null;
 	private Map<Long, Long> rssCache = new HashMap<>();
+	// held while the processes are listed, so two callers do not both list them
+	private final Object rssScan = new Object();
+	private final Object cmdScan = new Object();
 	private long rssCacheAt = 0;
 	private Map<Long, String> cmdCache = new HashMap<>();
 	private long cmdCacheAt = 0;
@@ -513,26 +516,38 @@ public final class CaptureService
 	 */
 	Map<Long, String> commandLines(boolean fresh)
 	{
+		long asked = System.currentTimeMillis();
 		synchronized(lock)
 		{
-			long now = System.currentTimeMillis();
-			if(!fresh && now - cmdCacheAt < CMD_CACHE_MS)
+			if(!fresh && asked - cmdCacheAt < CMD_CACHE_MS)
 			{
 				return cmdCache;
 			}
 		}
-		Map<Long, String> out = new HashMap<>();
-		ProcessHandle.allProcesses().forEach(p -> p.info().commandLine().ifPresent(c -> out.put(p.pid(), c)));
-		if(isWindows())
+		// one listing at a time, outside the service lock (on Windows it starts PowerShell, a second or more); a caller
+		// that waited for another's gets that one
+		synchronized(cmdScan)
 		{
-			out.putAll(windowsCommandLines());
+			synchronized(lock)
+			{
+				if(cmdCacheAt >= asked)
+				{
+					return cmdCache;
+				}
+			}
+			Map<Long, String> out = new HashMap<>();
+			ProcessHandle.allProcesses().forEach(p -> p.info().commandLine().ifPresent(c -> out.put(p.pid(), c)));
+			if(isWindows())
+			{
+				out.putAll(windowsCommandLines());
+			}
+			synchronized(lock)
+			{
+				cmdCache = out;
+				cmdCacheAt = System.currentTimeMillis();
+			}
+			return out;
 		}
-		synchronized(lock)
-		{
-			cmdCache = out;
-			cmdCacheAt = System.currentTimeMillis();
-		}
-		return out;
 	}
 
 	private static Map<Long, String> windowsCommandLines()
@@ -565,10 +580,21 @@ public final class CaptureService
 	{
 		synchronized(lock)
 		{
-			long now = System.currentTimeMillis();
-			if(now - rssCacheAt < RSS_CACHE_MS)
+			if(System.currentTimeMillis() - rssCacheAt < RSS_CACHE_MS)
 			{
 				return rssCache;
+			}
+		}
+		// listed outside the service lock, which taking and freeing browser slots needs; one listing at a time
+		synchronized(rssScan)
+		{
+			long now = System.currentTimeMillis();
+			synchronized(lock)
+			{
+				if(now - rssCacheAt < RSS_CACHE_MS)
+				{
+					return rssCache;
+				}
 			}
 			Map<Long, Long> m = new HashMap<>();
 			if(isWindows())
@@ -616,8 +642,11 @@ public final class CaptureService
 					}
 				});
 			}
-			rssCache = m;
-			rssCacheAt = now;
+			synchronized(lock)
+			{
+				rssCache = m;
+				rssCacheAt = now;
+			}
 			return m;
 		}
 	}

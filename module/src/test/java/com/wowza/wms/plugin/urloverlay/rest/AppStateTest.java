@@ -46,12 +46,7 @@ class AppStateTest
 
 	private String rev(List<String> publishing, String showing) throws Exception
 	{
-		return rev(publishing, showing, Map.of());
-	}
-
-	private String rev(List<String> publishing, String showing, Map<String, Integer> viewers) throws Exception
-	{
-		return AppStateConfig.revision(vhost, "live", publishing, showing, viewers);
+		return AppStateConfig.revision(vhost, "live", publishing, showing);
 	}
 
 	private static void touch(Path p, long ms) throws Exception
@@ -96,19 +91,14 @@ class AppStateTest
 	}
 
 	@Test
-	void aViewerCountChangesItAndNothingElseAboutViewersDoes() throws Exception
+	void viewersComingAndGoingLeaveTheRevisionAlone() throws Exception
 	{
+		// counts move all the time on a public stream; the unchanged answer carries them, so every template is not read
+		// again each time one does. The revision depends only on files, publishing streams and what they show.
 		List<String> live = List.of("cam1", "cam2");
-		String r0 = rev(live, "", Map.of("cam1", 3, "cam2", 0));
-		assertEquals(r0, rev(live, "", Map.of("cam1", 3, "cam2", 0)), "the same counts");
-		// map order is not a change
-		java.util.Map<String, Integer> reversed = new java.util.LinkedHashMap<>();
-		reversed.put("cam2", 0);
-		reversed.put("cam1", 3);
-		assertEquals(r0, rev(live, "", reversed), "the same counts in another order");
-		assertNotEquals(r0, rev(live, "", Map.of("cam1", 4, "cam2", 0)), "a viewer joined");
-		assertNotEquals(r0, rev(live, "", Map.of("cam1", 3, "cam2", 1)), "a viewer joined another stream");
-		assertNotEquals(r0, rev(live, "", Map.of("cam1", 2, "cam2", 0)), "a viewer left");
+		assertEquals(rev(live, ""), rev(live, ""));
+		java.lang.reflect.Method m = AppStateConfig.class.getDeclaredMethod("revision", java.nio.file.Path.class, String.class, List.class, String.class);
+		assertEquals(4, m.getParameterCount(), "no viewer counts go into the revision");
 	}
 
 	@Test

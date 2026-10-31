@@ -14,7 +14,7 @@
   // drafts of overlays not in view, by name: { saved, draft, undo, redo, known, layer }
   var mem = {};
   var S = { name: null, saved: null, draft: null, layer: null, preview: null, previewInfo: null, status: null,
-    captures: {}, raw: {}, rawAt: {}, busy: {}, seq: 0, shown: {}, capStatus: {}, drafted: {}, saving: false, player: null, timer: null, statusTimer: null,
+    captures: {}, raw: {}, rawAt: {}, busy: {}, thumbAt: {}, seq: 0, shown: {}, capStatus: {}, drafted: {}, saving: false, player: null, timer: null, statusTimer: null,
     undo: [], redo: [], lastSnap: null, known: null, conflict: false, theirs: null, justSaved: false, soon: {}, guides: false, inspTab: null, adding: false, savedNote: null };
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -122,7 +122,7 @@
   }
   function open(name) {
     if (S.name && S.name !== name) stash();
-    S.name = name; S.captures = {}; S.raw = {}; S.capStatus = {}; S.drafted = {}; S.shown = {};
+    S.name = name; S.captures = {}; S.raw = {}; S.capStatus = {}; S.drafted = {}; S.shown = {}; S.thumbAt = {};
     S.conflict = false; S.theirs = null; S.adding = false; S.savedNote = null;
     var e = entry(), kept = mem[name];
     if (kept) {
@@ -274,7 +274,7 @@
       objects().forEach(function (o) {
         if (o.type !== 'webPage' || (S.busy[o.id] || 0) >= 1) return;
         S.busy[o.id] = (S.busy[o.id] || 0) + 1;
-        capturePage(o, mine).then(function () { S.busy[o.id]--; if (S.name === mine) showCaptures(); });
+        capturePage(o, mine).then(function () { S.busy[o.id]--; if (S.name === mine) showCaptures(o.id); });
       });
       return null;
     });
@@ -286,36 +286,48 @@
     var box = el.stage.querySelector('.pg[data-id="' + CSS.escape(id) + '"]');
     if (box) box.classList.add('updating');
     var mine = S.name;
-    S.soon[id] = setTimeout(function () {
+    S.soon[id] = setTimeout(function go() {
       var o = byId(id);
       if (!o || S.name !== mine || o.type !== 'webPage' || !U.alive()) return;
-      capturePage(o, mine).then(function () { if (S.name === mine) { showCaptures(); var b = el.stage.querySelector('.pg[data-id="' + CSS.escape(id) + '"]'); if (b) b.classList.remove('updating'); } });
+      // one request out per page: wait for the timer's capture to finish rather than send a second
+      if ((S.busy[id] || 0) >= 1) { S.soon[id] = setTimeout(go, 150); return; }
+      S.busy[id] = (S.busy[id] || 0) + 1;
+      capturePage(o, mine).then(function () { S.busy[id]--; if (S.name === mine) { showCaptures(id); var b = el.stage.querySelector('.pg[data-id="' + CSS.escape(id) + '"]'); if (b) b.classList.remove('updating'); } });
     }, 400);
   }
   function captureSoonAll() { objects().forEach(function (o) { if (o.type === 'webPage') captureSoon(o.id); }); }
 
-  function showCaptures() {
+  // a picture is set only when it changed: each new one is a full-size PNG the browser decodes again
+  function setSrc(img, src) { if (src && img.getAttribute('src') !== src) img.src = src; if (src) img.hidden = false; }
+  var THUMB_MS = 2000;
+  // only: the page whose capture just finished; without it, every page
+  function showCaptures(only) {
+    var now = Date.now();
     el.stage.querySelectorAll('.pg').forEach(function (b) {
-      var id = b.getAttribute('data-id'), img = b.querySelector('img');
-      if (S.captures[id]) { img.src = S.captures[id]; img.hidden = false; }
+      var id = b.getAttribute('data-id');
+      if (only && id !== only) return;
+      setSrc(b.querySelector('img'), S.captures[id]);
       var o = byId(id);
       b.classList.toggle('draft', !!(o && isDraftPage(o)));
-      var nm = b.querySelector('.pg-name');
-      if (nm && o) nm.textContent = o.id + (isDraftPage(o) ? ', unsaved' : '');
+      var nm = b.querySelector('.pg-name'), t = o ? o.id + (isDraftPage(o) ? ', unsaved' : '') : '';
+      if (nm && o && nm.textContent !== t) nm.textContent = t;
     });
     el.layers.querySelectorAll('.prow').forEach(function (l) {
-      var id = l.getAttribute('data-id'), img = l.querySelector('.thumb img');
-      if (S.captures[id]) { img.src = S.captures[id]; img.hidden = false; }
-      var tag = l.querySelector('[data-tag]');
-      if (tag) tag.outerHTML = pageTag(id);
-      var dot = l.querySelector('[data-pdot]');
-      if (dot) dot.className = 'dot ' + pageDot(id);
+      var id = l.getAttribute('data-id');
+      if (only && id !== only) return;
+      // a thumbnail a few pixels wide does not need every frame
+      if (!only || now - (S.thumbAt[id] || 0) >= THUMB_MS) { S.thumbAt[id] = now; setSrc(l.querySelector('.thumb img'), S.captures[id]); }
+      var tag = l.querySelector('[data-tag]'), th = pageTag(id);
+      if (tag && tag.outerHTML !== th) tag.outerHTML = th;
+      var dot = l.querySelector('[data-pdot]'), dc = 'dot ' + pageDot(id);
+      if (dot && dot.className !== dc) dot.className = dc;
     });
+    if (only && only !== S.layer) return;
     var raw = el.insp.querySelector('[data-raw]'), keyed = el.insp.querySelector('[data-keyed]');
-    if (raw && S.raw[S.layer]) { raw.src = S.raw[S.layer]; raw.hidden = false; var rw = el.insp.querySelector('[data-rawwait]'); if (rw) rw.hidden = true; }
+    if (raw && S.raw[S.layer]) { setSrc(raw, S.raw[S.layer]); var rw = el.insp.querySelector('[data-rawwait]'); if (rw) rw.hidden = true; }
     var craw = el.insp.querySelector('[data-craw]');
     if (craw && S.raw[S.layer] && craw.getAttribute('src') !== S.raw[S.layer]) { craw.src = S.raw[S.layer]; craw.hidden = false; var w = el.insp.querySelector('[data-cwait]'); if (w) w.hidden = true; }
-    if (keyed && S.captures[S.layer]) { keyed.src = S.captures[S.layer]; keyed.hidden = false; }
+    if (keyed && S.captures[S.layer]) setSrc(keyed, S.captures[S.layer]);
     var chip = el.insp.querySelector('[data-capline]');
     if (chip) { chip.className = 'capchip ' + pageDot(S.layer); chip.title = capLine(S.layer).replace(/<[^>]+>/g, ''); chip.innerHTML = '<span class="dot ' + pageDot(S.layer) + '"></span>' + U.esc(capShort(S.layer)); }
     var note = el.insp.querySelector('[data-capnote]');
@@ -353,6 +365,16 @@
     if (c.state === 'error') return '<b class="err">' + U.esc(c.lastError || 'Capture failed') + '</b>';
     var ch = c.chrome || {};
     return (S.drafted[id] ? 'Draft captured ' : 'Capturing, last picture ') + U.ago(c.lastCaptureAt) + (c.lastCaptureMs != null ? ' in ' + c.lastCaptureMs + ' ms' : '') + (ch.pid ? ', Chrome ' + U.mb(ch.rssBytes) : '') + '.';
+  }
+
+  // the browser on the server loads the saved page's address again; the next captures show the result
+  function reloadPage(id) {
+    var o = byId(id), name = S.name;
+    if (!o || !savedById(id) || ro()) return;
+    U.api.post(ovPath(name) + '/objects/' + U.enc(id) + '/capture', { reload: true }).then(function () {
+      U.toast('Loading ' + host(o.url) + ' again for page ' + id + '. Viewers keep the last picture until it has loaded.');
+      captureSoon(id);
+    }, function (e) { U.toast('Not reloaded: ' + e.message, { level: 'bad' }); });
   }
 
   /* ---------- canvas ---------- */
@@ -467,7 +489,7 @@
       w = Math.max(2, Math.min(w, s.w)); h = Math.max(2, Math.min(h, s.h));
       x = Math.max(0, Math.min(x, s.w - w)); y = Math.max(0, Math.min(y, s.h - h));
       o.x = even(x); o.y = even(y); o.w = even(w); o.h = even(h);
-      position(box, o, s); renderCoords(); syncPlacement(); renderBar();
+      position(box, o, s); afterMove();
     }
     function up() {
       box.removeEventListener('pointermove', move); box.removeEventListener('pointerup', up); box.removeEventListener('pointercancel', up);
@@ -477,6 +499,14 @@
       if (b) b.focus({ preventScroll: true });
     }
     box.addEventListener('pointermove', move); box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
+  }
+
+  // the coordinates, the inspector fields and the save bar after a move, at most once per animation frame: the bar
+  // compares the whole draft with the saved overlay, too much for every pointer event of a drag
+  var moveFrame = 0;
+  function afterMove() {
+    if (moveFrame) return;
+    moveFrame = window.requestAnimationFrame(function () { moveFrame = 0; renderCoords(); syncPlacement(); renderBar(); });
   }
 
   function nudge(dx, dy) {
@@ -504,7 +534,7 @@
         '<div class="thumb"><img alt="" hidden></div><div style="min-width:0"><div class="nm"><span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) +
         (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + pageTag(o.id) + '</div>' +
         '<div class="sub">' + U.esc(o.type === 'webPage' ? host(o.url) : o.type) + '</div></div>' +
-        U.rowMenuHtml('page:' + o.id, 'Actions for page ' + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], '-', ['rm', 'Remove page', true]]) + '</div>';
+        U.rowMenuHtml('page:' + o.id, 'Actions for page ' + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], ['reload', 'Reload page', false, o.type !== 'webPage' || !savedById(o.id)], '-', ['rm', 'Remove page', true]]) + '</div>';
     }).join('');
     var dragId = null;
     el.layers.querySelectorAll('.prow').forEach(function (l) {
@@ -536,6 +566,7 @@
     if (act === 'up') movePage(id, -1);
     else if (act === 'down') movePage(id, 1);
     else if (act === 'rm') removePage(id);
+    else if (act === 'reload') reloadPage(id);
   };
   U.rowActions.overlay = function (name, act) {
     if (act === 'dup') U.newOverlayFrom(name);
@@ -627,7 +658,8 @@
     } else {
       var web = o.type === 'webPage', z = size(o), s = src(), past = (o.x || 0) + z.w > s.w * 0.95 || (o.y || 0) + z.h > s.h * 0.95;
       h = '<div class="pnl-h"><div><h3>' + U.esc(o.id) + '</h3>' + (web ? '<span class="capchip ' + pageDot(o.id) + '" data-capline title="' + U.esc(capLine(o.id).replace(/<[^>]+>/g, '')) + '"><span class="dot ' + pageDot(o.id) + '"></span>' + U.esc(capShort(o.id)) + '</span>' : '') +
-        '</div><span class="spacer"></span><button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
+        '</div><span class="spacer"></span>' + (web && savedById(o.id) && !ro() ? '<button type="button" class="btn sm ghost" data-reloadpage title="Load ' + U.esc(host(o.url)) + ' again in the browser on the server, for a capture that shows the wrong thing">' + U.icon('refresh') + 'Reload page</button>' : '') +
+        '<button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
       var tabs = web ? [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']] : [['place', 'Place']];
       if (!tabs.some(function (t) { return t[0] === S.inspTab; })) S.inspTab = tabs[0][0];
       h += '<div class="itabs" role="tablist" aria-label="Page settings">' + tabs.map(function (t) {
@@ -663,6 +695,8 @@
     el.insp.querySelectorAll('[data-f]').forEach(function (i) { i.addEventListener('input', onField); i.addEventListener('change', onField); });
     var add = el.insp.querySelector('[data-addpage]');
     if (add) add.onclick = startAdd;
+    var rp = el.insp.querySelector('[data-reloadpage]');
+    if (rp) rp.onclick = function () { reloadPage(o.id); };
     var ci = el.insp.querySelector('[data-closeinsp]');
     if (ci) ci.onclick = U.toggleInsp;
     var raw = el.insp.querySelector('[data-raw]');

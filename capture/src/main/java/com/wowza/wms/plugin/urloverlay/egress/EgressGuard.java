@@ -52,11 +52,9 @@ public final class EgressGuard implements Closeable
 		this.name = name;
 		this.rules = rules;
 		this.listener = listener;
-		this.pool = Executors.newCachedThreadPool(r -> {
-			Thread t = new Thread(r, "UrlOverlayEgress-" + name);
-			t.setDaemon(true);
-			return t;
-		});
+		// a page opens many connections, each needing two threads while it lasts (one per direction); virtual threads
+		// make that cheap, where platform threads ran to hundreds for a page that polls
+		this.pool = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("UrlOverlayEgress-" + name + "-", 0).factory());
 	}
 
 	/** Binds to an ephemeral port on 127.0.0.1 and starts accepting. @return the port */
