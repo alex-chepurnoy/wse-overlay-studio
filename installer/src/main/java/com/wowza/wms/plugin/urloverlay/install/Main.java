@@ -328,7 +328,7 @@ public final class Main
 		}
 		if(code != 0)
 		{
-			console.println("URL Overlay could not be taken out of WSE (exit " + code + "); the setup program is removed anyway. README, Uninstall, says how to finish by hand.");
+			console.println("URL Overlay could not be taken out of WSE (exit " + code + "); the setup program is removed anyway. README, Uninstall, says how to finish it.");
 		}
 		// the setup program is going; its folder must be left empty for Windows Installer to remove it
 		try

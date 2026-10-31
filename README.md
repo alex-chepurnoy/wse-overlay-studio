@@ -49,8 +49,8 @@ Source: `ui/` (the page), `bridge/`, `module/`, `capture/`, and `installer/` wit
 |---|---|
 | WSE | 4.11.1 or later (the installer refuses older versions), with the transcoder licensed |
 | WSE Manager | One the bridge was built for: Spring 6 in `WMSManager.war`, Tomcat 10.1, and `--tempDirectory=<manager>/temp` in its start script. The installer checks all three. Checked on 4.12.0 and 4.12.1; on a Manager that fails the check the bridge is not installed and the page cannot reach WSE. In practice this means Manager 4.12 or later (4.11 Managers not checked) |
-| Java | Nothing to install on Windows with the setup program, which carries its own Java 21 runtime. The zip, tarball and `.deb` run the installer and the capture service on WSE's bundled Java, which must be 21 or later for the capture service (WSE 4.12.0 ships 21.0.3; earlier versions not checked) |
-| OS | Windows x64 (Windows 10 or Server 2019 and later, for Unix domain sockets) or Linux x86_64. Chrome for Testing is downloaded for `win64` and `linux64` only |
+| Java | Nothing to install on Windows with the setup program, which carries its own Java 21 runtime. The zip, tarball and `.deb` run the installer and the capture service on WSE's bundled Java, which must be 21 or later for the capture service (WSE 4.12.0 ships 21.0.3; earlier versions not checked). Their scripts look for one (`WMSJAVA_HOME`, then WSE's own, then the `PATH`) and stop with exit 8 when none is 21 or later |
+| OS | Windows x64 (Windows 10 or Server 2019 and later, for Unix domain sockets) or Linux x86_64. Chrome for Testing is downloaded for `win64` and `linux64` only; the `.deb` installs on any architecture, but elsewhere Chrome must be given with `--chrome` ([Chrome](#chrome)) |
 | Rights | Administrator (Windows) or root (Linux): the install creates a service and its account |
 | Network at install | `googlechromelabs.github.io` and `storage.googleapis.com` for Chrome (chrome-headless-shell on Linux, Chrome for Testing on Windows), unless you pass your own Chrome with `--chrome`. A reinstall reuses a complete Chrome already on disk; on Linux, an install from before 1.15.0 downloads the headless shell once |
 | Linux fonts | `fontconfig` and a font package; the `.deb` recommends them with Chrome's libraries |
@@ -89,9 +89,61 @@ Stop WSE first: the installer refuses to change a running WSE. Every file it edi
 5. `sudo systemctl restart WowzaStreamingEngine WowzaStreamingEngineManager`
 
 Useful options: `--dry-run` prints every change and writes nothing; `--yes` asks nothing; `--home <path>` picks the
-WSE install when there are several. `--help` lists all of them. Running the installer again changes only what is
-missing. Uninstall: Windows Settings, Apps (setup program), `uninstall.cmd` (zip), `sudo apt remove wse-url-overlay`
-(`.deb`) or `sudo ./uninstall.sh` (tarball).
+WSE install when there are several; `--pages <n|auto>` sets the pages captured at once ([Upgrade](#upgrade)).
+`--help` lists all of them. Running the installer again changes only what is missing.
+
+### Upgrade
+
+Install the new version the same way as the first time, with WSE stopped, then start WSE and restart the Manager. The
+`.deb` upgrades with `sudo apt install ./wse-url-overlay_<version>_all.deb` and installs over the old version without
+taking it out first. What carries over, and what to know:
+
+- **Pages captured at once.** A new install sizes it from the server's cores and memory. An upgrade keeps the number
+  already set, which is 4 for anything installed before 1.15.0. To size it from the server, run the zip's, the
+  tarball's or the `.deb`'s installer with `--pages auto` (for example `sudo /opt/wse-url-overlay/install.sh
+  --pages auto`), or raise it in **Settings** in the page. The setup program has no `--pages`; use Settings. A number
+  set in Settings is used over the installer's until `--pages` is given, and the installer says which is in force.
+- **Linux Chrome.** An install from before 1.15.0 downloads chrome-headless-shell once.
+- Saved overlays and templates stay.
+
+### Uninstall
+
+1. Stop WSE (`sudo systemctl stop WowzaStreamingEngine`, or the Wowza Streaming Engine service on Windows). Every way of
+   removing URL Overlay stops with exit 3 while WSE runs.
+2. Remove it the way it was installed:
+   - Setup program: Windows Settings, Apps, **Wowza URL Overlay**, Uninstall, or **Uninstall URL Overlay** in the Start
+     menu.
+   - Zip: `uninstall.cmd` in the unzipped folder.
+   - `.deb`: `sudo apt remove wse-url-overlay`.
+   - Tarball: `sudo ./uninstall.sh` in the unpacked folder; unpack it again if it is gone.
+3. Start WSE and restart the Manager.
+
+Saved overlays in `conf.modules/urloverlay` are kept. `--purge` on `uninstall.cmd` or `uninstall.sh` deletes them as
+well; `apt remove` and `apt purge` keep them, so run `sudo /opt/wse-url-overlay/uninstall.sh --purge` before
+`apt remove` to delete them. If a removal stops partway (the setup program or `apt` reports it), finish it with the zip's
+`uninstall.cmd` or the tarball's `uninstall.sh` of the same version.
+
+### Chrome
+
+The capture service runs its own Chrome: chrome-headless-shell on Linux, Chrome for Testing on Windows, downloaded during
+the install into the service's program folder and updated daily (two versions are kept; `autoUpdate=false` in
+`capture.properties` stops the update). Without network access to the two hosts under Requirements, or on a system
+with no Chrome for Testing build, pass your own: `--chrome <path>` with `--no-download`. When the installer reports
+`Chrome: not found`, pages cannot be captured until one of these is done and the installer is run again.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Done, or nothing to do |
+| 1 | Bad arguments |
+| 2 | WSE not found, or more than one found without `--home` |
+| 3 | Preflight failed: a folder cannot be written, or WSE is running |
+| 4 | WSE older than 4.11.1 |
+| 5 | Failed and rolled back; also a failed daily Chrome update |
+| 6 | Failed and the rollback is incomplete; the log names what is left |
+| 7 | Failed before anything was changed |
+| 8 | The zip's or tarball's script found no Java 21 or later, or no installer jar beside it |
 
 ## Quick start
 
@@ -142,8 +194,8 @@ Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). 
   publishers; any other pushed stream must be restarted at its encoder.
 - A stream runs either a Video Intelligence (VIF) template or a URL Overlay template, never both.
 - A page can still signal through the DNS names it looks up, even when the connection is refused.
-- Pages at once (`maxCaptures`) are sized from the server's cores and memory at install, 2 to 32; `--pages` sets
-  another number. Streams showing the same page share one capture.
+- Pages at once (`maxCaptures`) are sized from the server's cores and memory on a new install, 2 to 32; an upgrade
+  keeps the number set ([Upgrade](#upgrade)). Streams showing the same page share one capture.
 - The setup program is not code signed.
 - No automated test runs the module in a real WSE, the bridge in a real Manager, or the page in a browser
   ([docs/DESIGN.md](docs/DESIGN.md#testing)).
