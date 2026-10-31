@@ -355,6 +355,16 @@
     return (S.drafted[id] ? 'Draft captured ' : 'Capturing, last picture ') + U.ago(c.lastCaptureAt) + (c.lastCaptureMs != null ? ' in ' + c.lastCaptureMs + ' ms' : '') + (ch.pid ? ', Chrome ' + U.mb(ch.rssBytes) : '') + '.';
   }
 
+  // the browser on the server loads the saved page's address again; the next captures show the result
+  function reloadPage(id) {
+    var o = byId(id), name = S.name;
+    if (!o || !savedById(id) || ro()) return;
+    U.api.post(ovPath(name) + '/objects/' + U.enc(id) + '/capture', { reload: true }).then(function () {
+      U.toast('Loading ' + host(o.url) + ' again for page ' + id + '. Viewers keep the last picture until it has loaded.');
+      captureSoon(id);
+    }, function (e) { U.toast('Not reloaded: ' + e.message, { level: 'bad' }); });
+  }
+
   /* ---------- canvas ---------- */
   function renderStage() {
     if (S.player) { S.player.stop(); S.player = null; }
@@ -504,7 +514,7 @@
         '<div class="thumb"><img alt="" hidden></div><div style="min-width:0"><div class="nm"><span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) +
         (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + pageTag(o.id) + '</div>' +
         '<div class="sub">' + U.esc(o.type === 'webPage' ? host(o.url) : o.type) + '</div></div>' +
-        U.rowMenuHtml('page:' + o.id, 'Actions for page ' + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], '-', ['rm', 'Remove page', true]]) + '</div>';
+        U.rowMenuHtml('page:' + o.id, 'Actions for page ' + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], ['reload', 'Reload page', false, o.type !== 'webPage' || !savedById(o.id)], '-', ['rm', 'Remove page', true]]) + '</div>';
     }).join('');
     var dragId = null;
     el.layers.querySelectorAll('.prow').forEach(function (l) {
@@ -536,6 +546,7 @@
     if (act === 'up') movePage(id, -1);
     else if (act === 'down') movePage(id, 1);
     else if (act === 'rm') removePage(id);
+    else if (act === 'reload') reloadPage(id);
   };
   U.rowActions.overlay = function (name, act) {
     if (act === 'dup') U.newOverlayFrom(name);
@@ -627,7 +638,8 @@
     } else {
       var web = o.type === 'webPage', z = size(o), s = src(), past = (o.x || 0) + z.w > s.w * 0.95 || (o.y || 0) + z.h > s.h * 0.95;
       h = '<div class="pnl-h"><div><h3>' + U.esc(o.id) + '</h3>' + (web ? '<span class="capchip ' + pageDot(o.id) + '" data-capline title="' + U.esc(capLine(o.id).replace(/<[^>]+>/g, '')) + '"><span class="dot ' + pageDot(o.id) + '"></span>' + U.esc(capShort(o.id)) + '</span>' : '') +
-        '</div><span class="spacer"></span><button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
+        '</div><span class="spacer"></span>' + (web && savedById(o.id) && !ro() ? '<button type="button" class="btn sm ghost" data-reloadpage title="Load ' + U.esc(host(o.url)) + ' again in the browser on the server, for a capture that shows the wrong thing">' + U.icon('refresh') + 'Reload page</button>' : '') +
+        '<button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
       var tabs = web ? [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']] : [['place', 'Place']];
       if (!tabs.some(function (t) { return t[0] === S.inspTab; })) S.inspTab = tabs[0][0];
       h += '<div class="itabs" role="tablist" aria-label="Page settings">' + tabs.map(function (t) {
@@ -663,6 +675,8 @@
     el.insp.querySelectorAll('[data-f]').forEach(function (i) { i.addEventListener('input', onField); i.addEventListener('change', onField); });
     var add = el.insp.querySelector('[data-addpage]');
     if (add) add.onclick = startAdd;
+    var rp = el.insp.querySelector('[data-reloadpage]');
+    if (rp) rp.onclick = function () { reloadPage(o.id); };
     var ci = el.insp.querySelector('[data-closeinsp]');
     if (ci) ci.onclick = U.toggleInsp;
     var raw = el.insp.querySelector('[data-raw]');

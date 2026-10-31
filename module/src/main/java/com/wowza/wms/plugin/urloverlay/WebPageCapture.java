@@ -77,6 +77,8 @@ public class WebPageCapture
 	private final Object lock = new Object();
 	private String remoteId = null;
 	private int sentDelay = Integer.MIN_VALUE;
+	// a reload asked for from the page, sent with the next request to the service
+	private boolean reloadWanted = false;
 	private double sentRate = -1;
 	private long sentInterval = -1;
 	// how often the service takes a frame: the overlay's refresh, learned from the draws' maxAgeMs
@@ -149,6 +151,18 @@ public class WebPageCapture
 	 * One layer's reload rate for a page that several layers may share. The page reloads at the shortest positive rate
 	 * any layer asks for, so layers asking for different rates do not keep resetting each other's timer.
 	 */
+	/**
+	 * Asks the service to load the page's address again, with the next request. A page opened since never needs it:
+	 * opening loads the address.
+	 */
+	public void reloadNow()
+	{
+		synchronized(lock)
+		{
+			reloadWanted = remoteId != null;
+		}
+	}
+
 	public void reloadEvery(Object layer, double rate)
 	{
 		if(rate > 0)
@@ -371,23 +385,39 @@ public class WebPageCapture
 				since = -1;
 			}
 		}
-		else if(delay != sentDelay || rate != sentRate || interval != sentInterval)
+		else
 		{
-			Map<String, Object> h = Wire.header(Wire.UPDATE);
-			h.put("capture", id);
-			h.put("pageDelayMs", delay);
-			h.put("reloadRate", rate);
-			h.put("intervalMs", interval);
-			Message u = c.call(h, CALL_TIMEOUT_MS);
-			if(!u.ok())
-			{
-				return u;
-			}
+			boolean reload;
 			synchronized(lock)
 			{
-				sentDelay = delay;
-				sentRate = rate;
-				sentInterval = interval;
+				reload = reloadWanted;
+			}
+			if(reload || delay != sentDelay || rate != sentRate || interval != sentInterval)
+			{
+				Map<String, Object> h = Wire.header(Wire.UPDATE);
+				h.put("capture", id);
+				h.put("pageDelayMs", delay);
+				h.put("reloadRate", rate);
+				h.put("intervalMs", interval);
+				if(reload)
+				{
+					h.put("reload", true);
+				}
+				Message u = c.call(h, CALL_TIMEOUT_MS);
+				if(!u.ok())
+				{
+					return u;
+				}
+				synchronized(lock)
+				{
+					sentDelay = delay;
+					sentRate = rate;
+					sentInterval = interval;
+					if(reload)
+					{
+						reloadWanted = false;
+					}
+				}
 			}
 		}
 		Map<String, Object> h = Wire.header(Wire.FRAME);

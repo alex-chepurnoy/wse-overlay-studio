@@ -38,6 +38,13 @@ class ServiceTest
 	{
 		final byte[] png = { (byte)0x89, 'P', 'N', 'G', 1, 2, 3 };
 		final List<Runnable> listeners = new ArrayList<>();
+		final List<String> reloads = new ArrayList<>();
+
+		@Override
+		public void reloadNow(String why)
+		{
+			reloads.add(why);
+		}
 		int delay = -1;
 		double rate = -1;
 		long interval = -1;
@@ -191,6 +198,16 @@ class ServiceTest
 		assertTrue(none.ok());
 		assertEquals(0, none.body().length, "nothing taken yet");
 		assertEquals(true, none.header().get("unchanged"));
+
+		// an update asking for a reload has the page load its address again; one without it does not
+		Map<String, Object> up = Wire.header(Wire.UPDATE);
+		up.put("capture", id);
+		up.put("reloadRate", 5.0);
+		assertTrue(h.handle(new Message(up)).ok());
+		assertEquals(List.of(), pages.page.reloads);
+		up.put("reload", true);
+		assertTrue(h.handle(new Message(up)).ok());
+		assertEquals(List.of("asked from the page"), pages.page.reloads);
 
 		pages.page.frame();
 		Message f = frame(h, id, -1, 0);

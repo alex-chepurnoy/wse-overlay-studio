@@ -113,6 +113,23 @@ class CaptureServiceTest
 	}
 
 	@Test
+	void aBrowserOffItsPageIsNoticed()
+	{
+		// what Chrome shows when it is not on the page: its new tab page, a blank page, its error page
+		for(String off: new String[] { "chrome://new-tab-page/", "chrome://newtab/", "about:blank", "chrome-error://chromewebdata/", "data:text/html,x" })
+		{
+			assertEquals(off, WebPageCapture.offPageAddress(off), off);
+		}
+		assertEquals("an empty page", WebPageCapture.offPageAddress(""));
+		// a web page, including one the address redirected to, is on the page
+		for(String on: new String[] { "https://digitalclock.live/", "http://10.0.0.5:8080/score", "HTTPS://Example.com/x" })
+		{
+			assertNull(WebPageCapture.offPageAddress(on), on);
+		}
+		assertNull(WebPageCapture.offPageAddress(null), "unknown is not off");
+	}
+
+	@Test
 	void theCgroupLimitsAreReadOnV2V1AndHybridHosts()
 	{
 		java.util.Map<String, String> files = new java.util.HashMap<>();

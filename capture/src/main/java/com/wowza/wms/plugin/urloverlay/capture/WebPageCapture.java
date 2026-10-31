@@ -121,6 +121,9 @@ public class WebPageCapture
 	private int memoryRestarts = 0;
 	private long overSince = 0;
 	private final java.util.List<Long> restartTimes = new java.util.ArrayList<>();
+	// where the browser was found at the last check when it was not on the page, and when that last caused a reload
+	private String offPage = null;
+	private long offPageReloadAt = 0;
 
 	// the latest screenshot as Chrome encoded it, sent to the module as it came; never decoded here
 	private byte[] lastPng = null;
@@ -246,11 +249,22 @@ public class WebPageCapture
 					return shot;
 				}
 				memoryCheckedAt = System.currentTimeMillis();
+				offPage = offPage(webDriver);
 			}
 		}
 		if(open)
 		{
 			return openThenCapture(maxAgeMs);
+		}
+		String off;
+		synchronized(lock)
+		{
+			off = offPage;
+			offPage = null;
+		}
+		if(off != null)
+		{
+			reloadNow("the browser was on " + off + ", not the page");
 		}
 		// measured outside the lock: listing processes can take a second on Windows
 		Path profile;
@@ -261,6 +275,68 @@ public class WebPageCapture
 		CaptureService service = CaptureService.get();
 		checkMemory(service.findBrowser(profile).map(service::treeRss).orElse(-1L));
 		return lastPng();
+	}
+
+	/**
+	 * Where the browser is when it is not on a web page: Chrome's new tab page, a blank or error page, or anything else
+	 * that is not http or https. A page that redirects to another web address is still on a web page. Null when it is,
+	 * or when the address cannot be read. Caller holds the lock.
+	 */
+	private String offPage(Object driver)
+	{
+		if(driver == null || reloading)
+		{
+			return null;
+		}
+		try
+		{
+			return offPageAddress(((WebDriver)driver).getCurrentUrl());
+		}
+		catch(Exception e)
+		{
+			return null;
+		}
+	}
+
+	/** The address when it is not a web page (http or https), else null. */
+	static String offPageAddress(String url)
+	{
+		if(url == null)
+		{
+			return null;
+		}
+		String u = url.trim().toLowerCase(java.util.Locale.ROOT);
+		return u.startsWith("http://") || u.startsWith("https://") ? null : (url.isBlank() ? "an empty page" : url.trim());
+	}
+
+	/** Not reloaded again for this long after a reload of a browser found off its page, so a page that keeps leaving does not loop. */
+	static final long OFF_PAGE_RETRY_MS = 30_000;
+
+	/**
+	 * Loads the page's address again now, whatever the reload rate: when the browser is found off its page, or when
+	 * asked from the page. Viewers keep the last picture until the page has loaded and waited its delay.
+	 */
+	public void reloadNow(String why)
+	{
+		synchronized(lock)
+		{
+			if(closed || webDriver == null || reloading)
+			{
+				return;
+			}
+			long now = System.currentTimeMillis();
+			if(why.startsWith("the browser was on") && now - offPageReloadAt < OFF_PAGE_RETRY_MS)
+			{
+				return;
+			}
+			if(why.startsWith("the browser was on"))
+			{
+				offPageReloadAt = now;
+			}
+			cancelReload();
+		}
+		log.warn("UrlOverlay capture: reloading " + settings.label() + " now: " + why);
+		reloadExecutor.execute(() -> startReload(true));
 	}
 
 	/** Why a browser using rssBytes must be restarted under a limit of capMb, or null when it is within it or unknown. */
@@ -965,7 +1041,7 @@ public class WebPageCapture
 	// Caller must hold lock.
 	private void scheduleReload()
 	{
-		reloadFuture = reloadExecutor.schedule(this::startReload, (long)(reloadRate * 1000.0), TimeUnit.MILLISECONDS);
+		reloadFuture = reloadExecutor.schedule(() -> startReload(false), (long)(reloadRate * 1000.0), TimeUnit.MILLISECONDS);
 	}
 
 	// Caller must hold lock.
@@ -978,19 +1054,23 @@ public class WebPageCapture
 		}
 	}
 
-	private void startReload()
+	// now: a reload asked for at once, which runs even when the page does not reload on its own
+	private void startReload(boolean now)
 	{
 		Object driver;
 		synchronized(lock)
 		{
 			reloadFuture = null;
-			if(closed || reloadRate <= 0)
+			if(closed || (reloadRate <= 0 && !now) || reloading)
 			{
 				return;
 			}
 			if(webDriver == null)
 			{
-				scheduleReload();
+				if(!now)
+				{
+					scheduleReload();
+				}
 				return;
 			}
 			driver = webDriver;
@@ -1028,7 +1108,7 @@ public class WebPageCapture
 			{
 				log.error("UrlOverlay capture: error preparing reloaded page " + settings.label(), e);
 			}
-			if(reloadRate > 0)
+			if(reloadRate > 0 && reloadFuture == null)
 			{
 				scheduleReload();
 			}

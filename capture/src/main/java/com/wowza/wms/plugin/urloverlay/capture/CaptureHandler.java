@@ -59,6 +59,11 @@ public final class CaptureHandler
 		void addReloadListener(Runnable r);
 
 		void removeReloadListener(Runnable r);
+
+		/** Loads the page's address again now. */
+		default void reloadNow(String why)
+		{
+		}
 	}
 
 	/** Opens or shares the browser for a request, and lets it go. */
@@ -171,6 +176,10 @@ public final class CaptureHandler
 		if(m.header().get("intervalMs") instanceof Number n)
 		{
 			h.page().interval(n.longValue());
+		}
+		if(Boolean.TRUE.equals(m.header().get("reload")))
+		{
+			h.page().reloadNow("asked from the page");
 		}
 		return new Message(Wire.ok());
 	}
@@ -309,6 +318,12 @@ public final class CaptureHandler
 			public void start()
 			{
 				c.startLoop();
+			}
+
+			@Override
+			public void reloadNow(String why)
+			{
+				c.reloadNow(why);
 			}
 
 			@Override
