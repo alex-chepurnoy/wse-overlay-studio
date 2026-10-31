@@ -92,12 +92,17 @@ A master is edited in three parts:
 - **Hardware** for the whole template: CPU, NVIDIA, Intel or NETINT, and the device. Beside it, what decodes, scales
   and encodes. Anything but CPU needs that hardware on the server, and an overlay makes GPU frames go through system
   memory to be drawn on.
-- **Decode**: deinterlace and a minimum frame rate for the source; the **URL overlay** this template draws, or **New URL
-  overlay**; whether it is drawn on the input (once, before scaling, on every output) or on chosen outputs; and up to
-  eight **image layers** (a file from the virtual host's `content/` folder, or one uploaded into `content/urloverlay/`,
-  at most 2 MB and 4096 pixels a side), each at one of nine positions with an offset, size and opacity.
-- **Encode**: the outputs, with an estimate of the encoding load (it assumes a 1080p, 30 fps source). A new master
-  starts from a ladder: **Original + overlay copy**, **1080p, 720p, 360p**, **720p, 360p**, **Single 720p** or
+- **Decode**: deinterlace and a minimum frame rate for the source, and **Overlays**: what is drawn on the input, once
+  and before scaling, so every video output shows it, in source pixels.
+- **Encode**: the outputs, with an estimate of the encoding load (it assumes a 1080p, 30 fps source), and **Overlays on
+  outputs**: what is drawn after scaling on the outputs picked for it, in each output's pixels.
+- In either Overlays section, **+ URL overlay** adds one of the application's overlays (or opens **New URL overlay**
+  when there is none), and **+ Image** adds an image: a file from the virtual host's `content/` folder, or one uploaded
+  into `content/urloverlay/`, at most 2 MB and 4096 pixels a side, at one of nine positions with an offset, size and
+  opacity. Up to eight images in a template, drawn under the URL overlay. A template carries one URL overlay, which can
+  hold several pages; **Move the URL overlay here** moves it between the input and the outputs. On outputs with every
+  output picked, it is saved on the input, which every output then shows.
+- A new master starts from a ladder: **Original + overlay copy**, **1080p, 720p, 360p**, **720p, 360p**, **Single 720p** or
   **Audio only**. Each output shows what scales and encodes it, and **Edit** opens Picture (size, fit, a region of the
   source), Frame rate, Video (H.264, H.265, VP8, VP9, profile, bitrate, and for H.264 rate control and speed), Audio,
   Captions and Expert (any encoder parameter by name). **Playback** sets adaptive groups: players open each output as
