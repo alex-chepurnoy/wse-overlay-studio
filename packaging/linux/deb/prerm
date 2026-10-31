@@ -11,7 +11,7 @@ if [ "${1:-}" = "remove" ]; then
 		exit 1
 	fi
 	if [ "$code" -ne 0 ]; then
-		echo "URL Overlay could not be taken out of WSE; run the installer jar's Uninstall by hand (README)."
+		echo "URL Overlay could not be taken out of WSE; finish with the tarball's uninstall.sh of the same version (README, Uninstall)."
 	fi
 fi
 exit 0

@@ -484,7 +484,7 @@
         : '<p class="muted small">No image in the content folder yet. Upload one.</p>') +
       '<div class="fld" style="margin-top:12px"><label class="f" for="uo-img-up">Upload an image (PNG, JPEG, GIF or BMP, up to 2 MB)</label><input id="uo-img-up" type="file" accept=".png,.jpg,.jpeg,.gif,.bmp">' +
       '<div class="hint">Uploads go to the server\'s <code>content/urloverlay/</code> folder.</div></div>' +
-      '<div class="hrow end" style="margin-top:8px"><button type="button" class="btn sm" data-pickcancel>Cancel</button><button type="button" class="btn sm primary" data-pickok' + (lib.length ? '' : ' disabled') + '>Add layer</button></div></div>';
+      '<div class="hrow end" style="margin-top:8px"><button type="button" class="btn sm" data-pickcancel>Cancel</button><button type="button" class="btn sm primary" data-pickok' + (lib.length ? '' : ' disabled') + '>Add image</button></div></div>';
   }
   function addImage(d, file, stage) {
     d.images = d.images || [];

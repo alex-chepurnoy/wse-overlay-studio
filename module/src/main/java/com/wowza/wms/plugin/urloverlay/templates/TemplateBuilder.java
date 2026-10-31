@@ -217,7 +217,7 @@ public final class TemplateBuilder
 		}
 		if(raw.size() > MAX_IMAGES)
 		{
-			throw bad("At most " + MAX_IMAGES + " image layers.");
+			throw bad("At most " + MAX_IMAGES + " images in a template.");
 		}
 		for(Object o: raw)
 		{
