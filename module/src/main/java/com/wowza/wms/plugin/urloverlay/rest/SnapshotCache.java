@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * timeoutMs for a permit and the picture, and a decode that outlives its caller still finishes, fills the cache and
  * holds its permit until then, so the cap counts what the native decoders are really doing.
  */
-// Spike for the snapshot decision (docs/ux/spec.md 5.5); may be removed once that decision is made.
+// Spike for a snapshot preview in the page, which does not use it yet; may be removed once that is decided.
 public final class SnapshotCache
 {
 	/** Server.xml property: decodes at once. */

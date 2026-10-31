@@ -236,7 +236,7 @@ final class CaptureSetup
 	 * the capture service is given a quarter of the cores at 16% of a core a page and a quarter of the memory at 128 MB
 	 * a page; the smaller wins, from 2 to MAX_PAGES. Measured with 1.15.0 on an 8-core server, 12 pages at 1920 x 1080
 	 * (docs/USAGE.md, "Pages at once"): a page that changes once a second costs 4.5% of a core, one that changes every
-	 * 0.1 s at the Fast rate 40 to 46%, and 105 to 124 MB each. So the count suits overlays that change now and then;
+	 * 0.1 s at the Fastest speed 40 to 46%, and 105 to 124 MB each. So the count suits overlays that change now and then;
 	 * pages that animate all the time are held back by the unit's CPUQuota and get fewer frames.
 	 */
 	static int recommendedPages(int cores, long memoryMb)
@@ -372,7 +372,7 @@ final class CaptureSetup
 	String unit(Config c)
 	{
 		long memory = (long)c.maxBrowserMemoryMB() * Math.max(1, c.room()) + SERVICE_OWN_MB;
-		// 200% as before, or 16% of a core for each page of room at the Fast rate, in whole cores
+		// 200% as before, or 16% of a core for each page of room at the Fastest speed, in whole cores
 		int cpu = Math.max(200, (c.room() * 16 + 99) / 100 * 100);
 		return String.join("\n",
 				"# Written by the URL Overlay installer. URL Overlay's capture service: draws web pages with Chrome for WSE.",

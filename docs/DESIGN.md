@@ -22,8 +22,9 @@ installer and the page's "add to application" use.
 
 ## One frame
 
-1. The capture service screenshots each page in a loop at the interval the overlay asks for (`refreshRate`, default
-   0.5 s), numbers each frame and keeps Chrome's PNG as it came.
+1. The capture service captures each page at the interval the overlay asks for (`refreshRate`, default 0.5 s), by
+   screencast or by screenshots, whichever costs less for that page (**Browsers**, below), numbers each frame and keeps
+   Chrome's PNG as it came.
 2. In WSE, one fetcher thread per capture asks for a frame newer than the last it has (waiting up to a second), decodes
    it, and publishes it.
 3. A draw takes the latest decoded frame without waiting. Each page is keyed (pixels within `keyTolerance` of
@@ -46,6 +47,7 @@ the way, a template in use), `422` template not usable.
 | Path (under base) | Verbs | Purpose |
 |---|---|---|
 | `/info` | GET | Versions, OS, CPU count, capture service and Chrome state, egress rules and recent blocks, Chrome update state, write access |
+| `/capture/limit` | GET, POST | Pages captured at once: what the service runs at, its ceiling, and a new number with no restart (**Settings** in the page); kept in `conf.modules/urloverlay/capture-limit.json` and used over `maxCaptures` |
 | `/vhosts/{vh}/applications` | GET | Applications with the module, read from disk |
 | `/vhosts/{vh}/applications/{app}/state` | GET | Everything one application's page shows, with a revision; `?rev=` answers `unchanged` |
 | `/vhosts/{vh}/applications/{app}/streams` | GET | Streams, the template each loads, restart needed |
@@ -53,7 +55,7 @@ the way, a template in use), `422` template not usable.
 | `/vhosts/{vh}/applications/{app}/overlays` | GET | Named overlays |
 | `.../overlays/{name}` | GET, POST, DELETE | One named overlay |
 | `.../overlays/{name}/preview` | POST | Capture an unsaved page once and return keyed and raw PNGs; writes nothing |
-| `.../overlays/{name}/objects/{id}/capture` | GET | Last capture of a named overlay's page |
+| `.../overlays/{name}/objects/{id}/capture` | GET, POST | Last capture of a named overlay's page; POST `{"reload": true}` reloads the page |
 | `/vhosts/{vh}/applications/{app}/templates/assign` | GET, POST | Dry run (GET) or apply (POST) a template to a stream or the application |
 | `/vhosts/{vh}/applications/{app}/templates/order` | GET, POST | The application's `Transcoder/Templates` list |
 | `.../instances/{inst}/streams/{stream}/overlay` | GET, POST, PUT, DELETE | Per-stream overlay (older setups; the page uses templates) |
@@ -62,6 +64,7 @@ the way, a template in use), `422` template not usable.
 | `.../streams/{stream}/overlay/objects/{id}/capture` | GET | Last keyed capture as base64 PNG; `?raw=true` unkeyed |
 | `.../streams/{stream}/status` | GET | Transcoder state and outputs, draw timing, each capture's state |
 | `.../streams/{stream}/preview` | GET | HLS URLs for the source and each output |
+| `.../streams/{stream}/outputs/{encode}/snapshot` | GET | A JPEG of an output's last key frame, decoded by WSE's thumbnailer, with what it cost; `?since=` answers unchanged. Experimental: the page does not depend on it |
 | `.../streams/{stream}/restart` | POST | Reset a pulled stream or disconnect an RTMP or RTP publisher |
 | `/vhosts/{vh}/templates` | POST | Write a new template from the builder's spec |
 | `/vhosts/{vh}/templates/{t}/spec` | POST | Rewrite a template the module wrote |
@@ -137,7 +140,7 @@ does not stop the Manager from writing the REST password into plugin pages.
 | Settings | `/etc/wse-url-overlay/capture.properties` (root:wse-url-overlay 0640) | `C:\ProgramData\WowzaURLOverlay\capture.properties` |
 | Work and logs | `/var/lib/wse-url-overlay/`, `/var/log/wse-url-overlay/` | `C:\ProgramData\WowzaURLOverlay\work\` (service account only), `logs\` |
 | Socket | `/run/wse-url-overlay/capture.sock` | `C:\ProgramData\WowzaURLOverlay\capture.sock` |
-| Limits | `MemoryMax` (browsers times memory per browser plus 768 MB), `CPUQuota=200%`, `TasksMax=1024` | Per-browser memory restart in the service only |
+| Limits | `MemoryMax` (`maxBrowserMemoryMB` for each page the server is sized for, at least `maxCaptures`, within three quarters of its memory, plus 768 MB), `CPUQuota` (the larger of 200% and 16% of a core for each such page, in whole cores), `TasksMax=1024` | Per-page memory restart in the service only |
 | Hardening | `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `NoNewPrivileges`, `UMask=0007` | ACLs: data folder for SYSTEM, Administrators and the service; `work\` for the service only |
 | Supervision | `Restart=on-failure` | nssm restarts on exit |
 
@@ -154,7 +157,8 @@ and, for installs from before the headless shell, `chrome-for-testing/*/chrome-l
 
 **Browsers.** Captures are pooled by page (URL, browser size, key color, background): every layer showing the same
 page, on any stream, uses one browser, kept open 15 s after its last user so an edit reuses it. Layers sharing a page
-reload it at the shortest `reloadRate` any of them asks for. At most `maxCaptures` pages (4). One Chrome holds up to
+reload it at the shortest `reloadRate` any of them asks for. At most `maxCaptures` pages: 4 when nothing sets it, sized
+from the server by a new install (2 to 32), and changed from **Settings** while the service runs. One Chrome holds up to
 `pagesPerBrowser` pages (4) with the same network rules, each in a browser context of its own with its own egress proxy
 and storage, as a window of its own. A Chrome over `maxBrowserMemoryMB` (1024) per page it holds restarts the page with
 the largest JavaScript heap and takes no new pages until it has emptied and closed. Each DevTools call times out after
@@ -176,7 +180,7 @@ header, and a binary body (the PNG, never base64). Every connection starts with 
 (currently 2) both ways; a different version is refused with a message to install matching versions. Then `open`
 (page, viewport, key color, label, delay, reload rate, frame interval and WSE's egress rules), `update`, `frame`
 (names the last frame number held; waits up to a second for a newer one, or answers "unchanged" with no body),
-`status` and `close`. The module keeps up to four connections, one request at a time on each, so a slow page holds up
+`status` and `close`. The module keeps up to 40 connections, one request at a time on each, so a slow page holds up
 only its own connection; the service serves each connection on its own virtual thread. A restarted service answers
 "Unknown capture" and the module opens the capture again.
 

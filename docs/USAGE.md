@@ -13,7 +13,8 @@ CC BY 3.0, with a public clock page as the overlay.
 
 ## The page
 
-The header shows the capture service, the browsers in use, the pages capturing, streams waiting for a restart,
+The header shows the capture service, the pages open against the limit, the pages capturing (and any failing or
+blocked), streams waiting for a restart,
 unsaved work and the streams on air. Each item opens the status drawer, except On air, which opens the On air list. **Help** lists the keyboard shortcuts, the
 gear opens **Settings**, and the last button switches between the light and dark theme.
 
@@ -54,7 +55,7 @@ An overlay is a named set of pages placed on the video, saved per application in
 `conf.modules/urloverlay/<application>/<overlay>.json`.
 
 - **Pages** are listed under the open overlay in the list column; the top one draws on top, and rows can be dragged
-  to reorder. **Add page** is last. Each page's menu moves it up or down or removes it.
+  to reorder. **Add page** is last. Each page's menu moves it up or down, reloads it (**Reload page**), or removes it.
 - **The overlay's menu** adds a page, duplicates the overlay, or deletes it. An overlay a template carries cannot be
   deleted until no template names it.
 - **The canvas** shows the pages on a publishing stream picked under **Background**. The background is only for placing
@@ -71,13 +72,13 @@ An overlay is a named set of pages placed on the video, saved per application in
 
 Edits show on the canvas within about a second, marked unsaved. Nobody watching sees them until **Save**, which says
 how many live streams it updates. **Discard** drops them; `Ctrl+Z` undoes. Saving updates every running stream showing
-the overlay at once, with no restart. Streams showing the same page share one browser.
+the overlay at once, with no restart. Streams showing the same page share one capture.
 
 ## Templates
 
 ![Template editor](images/usage-4-template.png)
 
-Every transcoder template in the virtual host's `transcoder/templates/` is listed:
+Every transcoder template in the virtual host's `transcoder/templates/` is listed, except Video Intelligence ones:
 
 - **Master templates** are the ones made here. You edit a master; putting it on a stream gives that stream its own
   copy, `transcoder/templates/<stream>.xml`, listed under the master. Saving a master changes no stream until its copy
@@ -96,21 +97,23 @@ A master is edited in three parts:
   and before scaling, so every video output shows it, in source pixels.
 - **Encode**: the outputs, with an estimate of the encoding load (it assumes a 1080p, 30 fps source), and **Overlays on
   outputs**: what is drawn after scaling on the outputs picked for it, in each output's pixels.
-- In either Overlays section, **+ URL overlay** adds one of the application's overlays (or opens **New URL overlay**
-  when there is none), and **+ Image** adds an image: a file from the virtual host's `content/` folder, or one uploaded
-  into `content/urloverlay/`, at most 2 MB and 4096 pixels a side, at one of nine positions with an offset, size and
+- In either Overlays section, **+ URL overlay** adds one of the application's overlays (or opens a new overlay when
+  there is none), and **+ Image** adds an image: a file from the virtual host's `content/` folder (up to 8 MB), or one
+  uploaded into `content/urloverlay/` (up to 2 MB), at most 4096 pixels a side, at one of nine positions with an offset, size and
   opacity. Up to eight images in a template, drawn under the URL overlay. A template carries one URL overlay, which can
   hold several pages; **Move the URL overlay here** moves it between the input and the outputs. On outputs with every
-  output picked, it is saved on the input, which every output then shows.
+  output picked, it is saved on the input, which every output then shows. With one video output there is no
+  difference, so the URL overlay stays in Decode.
 - A new master starts from a ladder: **Original + overlay copy**, **1080p, 720p, 360p**, **720p, 360p**, **Single 720p** or
   **Audio only**. Each output shows what scales and encodes it, and **Edit** opens Picture (size, fit, a region of the
   source), Frame rate, Video (H.264, H.265, VP8, VP9, profile, bitrate, and for H.264 rate control and speed), Audio,
   Captions and Expert (any encoder parameter by name). **Playback** sets adaptive groups: players open each output as
   `<stream>_<output>` and each group as `ngrp:<stream>_<group>`.
 
-WSE's own templates have dynamic overlays off, so they cannot carry an overlay as they are. **Use with an overlay**
-writes a copy that can. A template of your own can instead be changed in place; it is backed up first, and the dialog
-names the applications that use it. VIF templates are listed but cannot be used here.
+WSE's own templates have dynamic overlays off, so they cannot carry an overlay as they are. **Use it with an overlay**,
+under the template, offers **Make a copy with the overlay**, or, for a template of your own, **Change <name> itself**:
+changed in place after a backup, naming the applications that list it. Video Intelligence templates are not listed; a
+stream running one says so and cannot carry an overlay.
 
 ## Streams
 
@@ -133,7 +136,7 @@ address of every output and adaptive group for HLS and MPEG-DASH, when the appli
 a copy button. The addresses use the host name the page was opened with.
 
 **What applies at once:** which overlay a template carries, and on which outputs. **What waits for a restart:** new
-outputs, sizes or bitrates, or a different template; such a stream is marked in the header. **Restart** resets a pulled
+outputs, sizes or bitrates, images, the hardware, or a different template; such a stream is marked in the header. **Restart** resets a pulled
 stream, disconnects an RTMP or RTP (RTSP, WebRTC) publisher so its encoder reconnects with the new template, or restarts
 the application for a stream published inside WSE. Viewers see a short gap. Other pushed streams must be restarted at
 the encoder.
@@ -210,7 +213,7 @@ Written by the installer; restart `WowzaURLOverlayCapture` after a change.
 | `pagesPerBrowser` | `4` | Pages one Chrome holds. Fewer means fewer pages lost when one Chrome exits, more means less memory |
 | `maxBrowserMemoryMB` | `1024` | Memory a Chrome may use for each page it holds; above it, its largest page is restarted |
 | `logFile` | standard output | The service's log; the installer sets `capture.log` in the service's log folder |
-| `autoUpdate` | on | `false` stops the daily Chrome update. Read by the updater; the service itself logs it as an unknown setting and ignores it |
+| `autoUpdate` | on | `false` stops the daily Chrome update. Read by the daily updater; the service ignores it |
 
 On Linux the systemd unit's `MemoryMax` and `CPUQuota` are computed at install time from `maxBrowserMemoryMB` and the
 larger of `maxCaptures` and the number of pages the server is sized for; run the installer again after raising them.
@@ -218,7 +221,7 @@ larger of `maxCaptures` and the number of pages the server is sized for; run the
 ### Pages at once, from the server's size
 
 A new install, and `--pages auto`, set `maxCaptures` from the server: a quarter of its cores at about 16% of a core per
-page, and a quarter of its memory at 128 MB per page, whichever is smaller, from 2 to 32. WSE's own transcoding is
+page (a page at the Fastest speed, 0.1 s, in the first 1.15.0 measurement), and a quarter of its memory at 128 MB per page, whichever is smaller, from 2 to 32. WSE's own transcoding is
 given the rest. Examples: 2 cores, 3 pages; 4 cores, 6; 8 cores and 16 GB, 12; 16 cores and 64 GB, 25. A reinstall
 without `--pages` keeps the number set.
 
@@ -227,13 +230,13 @@ on an 8-core server, 1920 x 1080 pages, 12 at once:
 
 | Pages | CPU, all 12 | Per page | Memory per page |
 |---|---|---|---|
-| A clock that changes once a second, Standard or Fast | 0.54 core | 0.045 core | 105 MB |
-| Text that changes every 0.1 s, Fast | 4.85 cores | 0.40 core | 109 MB |
-| A 60 fps animation, Fast | 5.56 cores | 0.46 core | 124 MB |
+| A clock that changes once a second, Standard or Fastest | 0.54 core | 0.045 core | 105 MB |
+| Text that changes every 0.1 s, Fastest | 4.85 cores | 0.40 core | 109 MB |
+| A 60 fps animation, Fastest | 5.56 cores | 0.46 core | 124 MB |
 | A 60 fps animation, Standard | 1.90 cores | 0.16 core | 66 MB |
 
 So 12 overlays that change now and then, such as scoreboards and lower thirds, use under a tenth of such a server,
-while 12 that change many times a second at Fast would use more than half of it. On Linux the systemd unit caps the
+while 12 that change many times a second at Fastest would use more than half of it. On Linux the systemd unit caps the
 service's CPU (`CPUQuota`, 2 cores unless the server is sized for more than 12 pages), so heavy pages get fewer frames
 rather than taking CPU from WSE: those 12 changing every 0.1 s, held to 2 cores, delivered 39% of their frames. Set
 fewer pages, or Standard, for pages that animate all the time.
