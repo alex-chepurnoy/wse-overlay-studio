@@ -24,8 +24,9 @@ PKG = os.path.join(ROOT, 'packaging')
 FIXED_TIME = 1767225600  # 2026-01-01 00:00 UTC
 APP_NAME = 'Wowza URL Overlay'
 # java.net.http fetches Chrome for Testing over TLS, whose handshakes need jdk.crypto.ec on Java 21; without it
-# every download fails with handshake_failure. java.desktop is Swing, for
-# the setup window.
+# every download fails with handshake_failure. jdeps cannot see that, so it is named here with the rest of what the
+# setup window needs; every other module the installer uses comes from jdeps on its jar. 1.15.0's first
+# build missed java.management this way, and the setup window and urloverlay-cli failed at start.
 RUNTIME_MODULES = 'java.base,java.desktop,java.net.http,jdk.crypto.ec'
 # The same runtime is copied next to the capture service on Windows, so it also carries every module the service and
 # any libraries it has need, as jdeps lists them from the payload the installer jar was built with.
@@ -178,27 +179,30 @@ def build_deb(path, ver, jar_name, jar, maintainer):
     ar(path, [('debian-binary', b'2.0\n'), ('control.tar.gz', ctrl), ('data.tar.gz', data)])
 
 
-def capture_modules():
-    """The JDK modules the capture service and its libraries use, from jdeps."""
-    jars = sorted(glob.glob(os.path.join(CAPTURE_PAYLOAD, '*.jar')))
-    libs = sorted(glob.glob(os.path.join(CAPTURE_PAYLOAD, 'lib', '*.jar')))
-    if not jars:
-        raise SystemExit('The installer payload has no capture service in ' + CAPTURE_PAYLOAD)
-    # the service has had no libraries since 1.15.0, and jdeps refuses an empty --class-path
+def jdeps_modules(what, jars, libs=()):
+    """The JDK modules these jars and their libraries use, from jdeps."""
+    # jdeps refuses an empty --class-path, and the capture service has had no libraries since 1.15.0
     cp = ['--class-path', os.pathsep.join(libs)] if libs else []
-    r = subprocess.run(['jdeps', '--print-module-deps', '--ignore-missing-deps', '--multi-release', '21'] + cp + jars + libs,
+    r = subprocess.run(['jdeps', '--print-module-deps', '--ignore-missing-deps', '--multi-release', '21'] + cp + list(jars) + list(libs),
                        capture_output=True, text=True)
     if r.returncode != 0:
-        raise SystemExit('jdeps could not list the modules the capture service needs:\n' + r.stdout + r.stderr)
+        raise SystemExit('jdeps could not list the modules ' + what + ' needs:\n' + r.stdout + r.stderr)
     # jdeps prints split-package warnings first; the module list is its last line
     lines = [l for l in r.stdout.splitlines() if l.strip() and not l.startswith('Warning:')]
     if not lines:
-        raise SystemExit('jdeps printed no module list for the capture service')
+        raise SystemExit('jdeps printed no module list for ' + what)
     return {m for m in lines[-1].strip().split(',') if m}
 
 
-def runtime_modules():
-    return ','.join(sorted(set(RUNTIME_MODULES.split(',')) | capture_modules()))
+def capture_modules():
+    jars = sorted(glob.glob(os.path.join(CAPTURE_PAYLOAD, '*.jar')))
+    if not jars:
+        raise SystemExit('The installer payload has no capture service in ' + CAPTURE_PAYLOAD)
+    return jdeps_modules('the capture service', jars, sorted(glob.glob(os.path.join(CAPTURE_PAYLOAD, 'lib', '*.jar'))))
+
+
+def runtime_modules(jar_path):
+    return ','.join(sorted(set(RUNTIME_MODULES.split(',')) | capture_modules() | jdeps_modules('the installer', [jar_path])))
 
 
 def check_runtime(runtime, modules):
@@ -214,7 +218,7 @@ def check_runtime(runtime, modules):
 
 def build_exe(out_dir, ver, jar_path):
     stage = os.path.join(ROOT, 'build', 'pkg')
-    modules = runtime_modules()
+    modules = runtime_modules(jar_path)
     for d in ('input', 'temp', 'out'):
         remove(os.path.join(stage, d))
     os.makedirs(os.path.join(stage, 'input'))

@@ -259,9 +259,16 @@ final class CaptureSetup
 				return fixed;
 			}
 			long mb = 0;
-			if(java.lang.management.ManagementFactory.getOperatingSystemMXBean() instanceof com.sun.management.OperatingSystemMXBean os)
+			try
 			{
-				mb = os.getTotalMemorySize() / (1024 * 1024);
+				if(java.lang.management.ManagementFactory.getOperatingSystemMXBean() instanceof com.sun.management.OperatingSystemMXBean os)
+				{
+					mb = os.getTotalMemorySize() / (1024 * 1024);
+				}
+			}
+			catch(LinkageError e)
+			{
+				// a Java runtime without jdk.management: memory unknown, which sizes for the fewest pages
 			}
 			return new Machine(Runtime.getRuntime().availableProcessors(), mb);
 		}
