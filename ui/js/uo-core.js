@@ -476,9 +476,8 @@
     chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'
   };
   U.debounce = function (fn, ms) { var t = null; return function () { var a = arguments, me = this; clearTimeout(t); t = setTimeout(function () { fn.apply(me, a); }, ms); }; };
-  // how often an overlay's pages are captured, as three named speeds plus the exact value. Measured on one page:
-  // 0.5 s about 12% of a CPU core, 0.25 s about 23%, 0.1 s about 54%, for the capture service
-  // (docs/perf/2026-10-30-thread-drawing-and-capture-rate.md)
+  // how often an overlay's pages are captured, as three named speeds plus the exact value. What a page costs depends
+  // more on how often it changes than on the speed (docs/USAGE.md, "Pages at once")
   U.SPEEDS = [[0.5, 'Standard', 'Scoreboards and lower thirds'], [0.25, 'Fast', 'Clocks and counters'], [0.1, 'Fastest', 'Tickers; costs most on pages that animate all the time']];
   // field: the exact seconds, shown on the same line, so the named speeds and the number are one control
   U.speedHtml = function (value, attr, disabled, field) {

@@ -46,7 +46,7 @@ import com.wowza.wms.vhost.VHostSingleton;
  * to 320 to 960 (640 by default); ?since=<keyFrameTimecode> answers {unchanged:true} when the key frame is the same.
  * Reads only, so no administrator is needed. Decodes are capped across the server by SnapshotCache.
  */
-// Spike for the snapshot decision (docs/ux/spec.md 5.5); may be removed once that decision is made.
+// Spike for a snapshot preview in the page, which does not use it yet; may be removed once that is decided.
 @WMSConfig(restLocation = "/v1/{server}/plugin/urloverlay/vhosts/{vhostName}/applications/{appName}/instances/{instance}/streams/{stream}/outputs/{encode}/snapshot", restVerbs = "GET", xmlFilename = "")
 public class SnapshotConfig extends VHostResourceBase
 {
