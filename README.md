@@ -61,7 +61,7 @@ Stop WSE first: the installer refuses to change a running WSE. Every file it edi
 `<file>.urloverlay-<time>.bak`, and the run is logged to `logs/urloverlay-install-<time>.log` in the WSE folder.
 
 **Windows, setup program**
-1. Stop the Wowza Streaming Engine service, then run `Wowza URL Overlay-<version>.exe`; it asks for administrator rights.
+1. Stop the Wowza Streaming Engine service, then run `Wowza-URL-Overlay-<version>.exe`; it asks for administrator rights.
 2. Pick the WSE install and the live applications to add URL Overlay to.
 3. Choose to download Chrome, point at your own, or skip.
 4. Review every change, file by file, then Install. It can restart the Manager for you.

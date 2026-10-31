@@ -593,6 +593,7 @@ class InstallerTest
 		assertTrue(Files.exists(home.resolve("manager/wse-plugins/server/url-overlay/config.json")));
 		// the page plays HLS with its own hls.js, so it works on a WSE without VIF (whose page carries another copy)
 		assertTrue(Files.size(home.resolve("manager/wse-plugins/server/url-overlay/vendor/hls.min.js")) > 100_000);
+		assertTrue(Files.readString(home.resolve("manager/wse-plugins/server/url-overlay/vendor/hls.js-LICENSE.txt")).contains("Apache License"), "hls.js goes with its license");
 		String index = text("manager/wse-plugins/server/url-overlay/index.html");
 		assertTrue(index.contains("wse-plugins/server/url-overlay/vendor/hls.min.js") && !index.contains("/vif/"), "loads its own copy, nothing of VIF's");
 		java.util.regex.Matcher scripts = java.util.regex.Pattern.compile("wse-plugins/server/url-overlay/(js/[^\"?]+)").matcher(index);
