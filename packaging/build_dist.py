@@ -28,7 +28,7 @@ APP_NAME = 'Wowza URL Overlay'
 # the setup window.
 RUNTIME_MODULES = 'java.base,java.desktop,java.net.http,jdk.crypto.ec'
 # The same runtime is copied next to the capture service on Windows, so it also carries every module the service and
-# its libraries (Selenium) need, as jdeps lists them from the payload the installer jar was built with.
+# any libraries it has need, as jdeps lists them from the payload the installer jar was built with.
 CAPTURE_PAYLOAD = os.path.join(ROOT, 'installer', 'build', 'payload', 'payload', 'capture')
 UPGRADE_UUID = '6f0b6b8e-3c1e-4c55-9f0e-2a7d6b1f4e21'  # stays the same across versions, so a new setup program upgrades
 DEB_NAME = 'wse-url-overlay'
@@ -184,8 +184,10 @@ def capture_modules():
     libs = sorted(glob.glob(os.path.join(CAPTURE_PAYLOAD, 'lib', '*.jar')))
     if not jars:
         raise SystemExit('The installer payload has no capture service in ' + CAPTURE_PAYLOAD)
-    r = subprocess.run(['jdeps', '--print-module-deps', '--ignore-missing-deps', '--multi-release', '21',
-                        '--class-path', os.pathsep.join(libs)] + jars + libs, capture_output=True, text=True)
+    # the service has had no libraries since 1.15.0, and jdeps refuses an empty --class-path
+    cp = ['--class-path', os.pathsep.join(libs)] if libs else []
+    r = subprocess.run(['jdeps', '--print-module-deps', '--ignore-missing-deps', '--multi-release', '21'] + cp + jars + libs,
+                       capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit('jdeps could not list the modules the capture service needs:\n' + r.stdout + r.stderr)
     # jdeps prints split-package warnings first; the module list is its last line
