@@ -31,10 +31,10 @@ import com.wowza.wms.rest.WMSConfig;
 /**
  * Everything the plugin page shows for one application, with a revision. The revision is
  * computed on each call from the names, sizes and modification times of the application's files and the transcoder
- * templates, the application's settings file, the streams publishing, which streams show each overlay, and each
- * publishing stream's viewers on this server (Viewers); so an edit from another browser, by REST or by hand changes
- * it, with no file watcher, and so does a viewer joining or leaving. ?rev= with the current revision gets a short
- * "unchanged" answer.
+ * templates, the application's settings file, the streams publishing, and which streams show each overlay; so an
+ * edit from another browser, by REST or by hand changes it, with no file watcher. ?rev= with the current revision gets
+ * a short "unchanged" answer, which still carries each publishing stream's viewers on this server (Viewers): viewers
+ * come and go all the time, and a count moving is no reason to read every template again.
  */
 @WMSConfig(restLocation = "/v1/{server}/plugin/urloverlay/vhosts/{vhostName}/applications/{appName}/state", restVerbs = "GET", xmlFilename = "")
 public class AppStateConfig extends VHostResourceBase
@@ -46,12 +46,13 @@ public class AppStateConfig extends VHostResourceBase
 		Path vhostDir = vhostDir(vhost);
 		List<String> publishing = AppStreamsConfig.publishing(vhost, app);
 		Map<String, Integer> viewers = viewers(vhost, app, publishing);
-		String rev = revision(vhostDir, app, publishing, showing(vhostDir, vhost, app), viewers);
+		String rev = revision(vhostDir, app, publishing, showing(vhostDir, vhost, app));
 		Map<String, Object> m = new LinkedHashMap<>();
 		m.put("revision", rev);
 		if(rev.equals(query.get("rev")))
 		{
 			m.put("unchanged", true);
+			m.put("viewers", new TreeMap<>(viewers));
 			return m;
 		}
 		m.put("overlays", OverlaysConfig.overlays(vhost, app).get("overlays"));
@@ -101,7 +102,7 @@ public class AppStateConfig extends VHostResourceBase
 	}
 
 	/** The revision: a digest over what the page shows, cheap enough to compute on every poll. */
-	static String revision(Path vhostDir, String app, List<String> publishing, String showing, Map<String, Integer> viewers) throws IOException
+	static String revision(Path vhostDir, String app, List<String> publishing, String showing) throws IOException
 	{
 		MessageDigest d;
 		try
@@ -135,8 +136,6 @@ public class AppStateConfig extends VHostResourceBase
 		}
 		stamp(b, "application", vhostDir.resolve("conf").resolve(app).resolve("Application.xml"));
 		b.append("publishing:").append(publishing).append('\n').append("showing:").append(showing);
-		// the numbers only, sorted by stream, so the revision moves when a count changes and at no other time
-		b.append('\n').append("viewers:").append(new TreeMap<>(viewers));
 		return HexFormat.of().formatHex(d.digest(b.toString().getBytes(StandardCharsets.UTF_8))).substring(0, 16);
 	}
 
@@ -170,6 +169,28 @@ public class AppStateConfig extends VHostResourceBase
 		}
 	}
 
+	// what the validator read from each template file, kept while the file's size and time stay the same
+	private record Validated(long size, long modified, Map<String, Object> map)
+	{
+	}
+	private static final java.util.concurrent.ConcurrentHashMap<String, Validated> VALIDATED = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private static Map<String, Object> validated(File f) throws Exception
+	{
+		String key = f.getAbsolutePath();
+		long size = f.length(), modified = f.lastModified();
+		Validated v = VALIDATED.get(key);
+		if(v == null || v.size() != size || v.modified() != modified)
+		{
+			try(InputStream in = Files.newInputStream(f.toPath()))
+			{
+				v = new Validated(size, modified, java.util.Collections.unmodifiableMap(new LinkedHashMap<>(TemplateValidator.validate(in).toMap())));
+			}
+			VALIDATED.put(key, v);
+		}
+		return v.map();
+	}
+
 	/** Every template with what the validator reads from it, as GET .../templates/{name}/validate returns it. */
 	static List<Map<String, Object>> templates(Path dir) throws IOException
 	{
@@ -187,9 +208,9 @@ public class AppStateConfig extends VHostResourceBase
 			m.put("template", f.getName());
 			m.put("modified", f.lastModified());
 			m.put("shipped", TemplateFiles.WSE_SHIPPED.contains(m.get("name")));
-			try(InputStream in = Files.newInputStream(f.toPath()))
+			try
 			{
-				m.putAll(TemplateValidator.validate(in).toMap());
+				m.putAll(validated(f));
 				// a stream's copy says whether it still matches its master, so the list can offer an update
 				String base = TemplateFiles.copyBase(f.getName(), m.get("description") == null ? null : String.valueOf(m.get("description")));
 				if(base != null)

@@ -388,18 +388,24 @@
 
   /* ---------- step 4: what viewers get ---------- */
   function stopPlayer() { if (T.player) { T.player.stop(); T.player = null; } T.watching = false; }
+  // at most one round of reads out at a time: a slow server with the state moving every poll does not pile them up
+  var previewOut = false;
   function loadPreview() {
     var n = T.made.stream, r = n && U.streamRow(n);
-    if (!r || !r.publishing) return;
-    if (T.watching) { U.api.get(U.streamPath(U.app, n) + '/status').then(function (st) { T.status = st; var c = el.main.querySelector('[data-tchips]'); if (c && T.step === 4) c.innerHTML = chipsHtml(U.streamRow(n) || {}); }, function () {}); return; }
+    if (!r || !r.publishing || previewOut) return;
+    previewOut = true;
+    var done = function () { previewOut = false; };
+    if (T.watching) { U.api.get(U.streamPath(U.app, n) + '/status').then(function (st) { T.status = st; var c = el.main.querySelector('[data-tchips]'); if (c && T.step === 4) c.innerHTML = chipsHtml(U.streamRow(n) || {}); }, function () {}).then(done); return; }
     var p = U.streamPath(U.app, n);
-    U.api.get(p + '/preview').then(function (pv) { T.preview = pv; if (T.step === 4 && !T.watching) render(); }, function () {});
-    U.api.get(p + '/status').then(function (st) {
-      T.status = st;
-      if (T.step !== 4) return;
-      // while a rendition plays only the chips change, so the video is not replaced
-      if (T.watching) { var c = el.main.querySelector('[data-tchips]'); if (c) c.innerHTML = chipsHtml(U.streamRow(n) || {}); } else render();
-    }, function () {});
+    Promise.all([
+      U.api.get(p + '/preview').then(function (pv) { T.preview = pv; if (T.step === 4 && !T.watching) render(); }, function () {}),
+      U.api.get(p + '/status').then(function (st) {
+        T.status = st;
+        if (T.step !== 4) return;
+        // while a rendition plays only the chips change, so the video is not replaced
+        if (T.watching) { var c = el.main.querySelector('[data-tchips]'); if (c) c.innerHTML = chipsHtml(U.streamRow(n) || {}); } else render();
+      }, function () {})
+    ]).then(done);
   }
   function chipsHtml(r) {
     var st = T.status || {}, tr = st.transcoder || {}, caps = (st.objects || []).filter(function (x) { return x.capture; }), pend = r.restartNeeded;

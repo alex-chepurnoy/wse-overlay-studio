@@ -333,6 +333,23 @@ public class OverlayConfig extends JsonApplicationConfigBase
 		uuid = UUID.randomUUID();
 	}
 
+	/** Whether any web page on this overlay has a frame that has not been drawn yet. */
+	public boolean hasNewFrame()
+	{
+		List<ObjectConfig> list = objects;
+		if(list != null)
+		{
+			for(ObjectConfig o: list)
+			{
+				if(o.hasNewFrame())
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	@Override
 	protected boolean exists(String restVerb)
 	{

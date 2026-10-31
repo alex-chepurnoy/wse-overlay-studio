@@ -33,7 +33,7 @@
     var own = r.own && U.copyBase(r);
     el.head.innerHTML = '<span class="dot ' + (r.publishing ? 'live' : '') + '"></span><h2>' + U.esc(r.name) + '</h2>' +
       (r.publishing ? '<span class="bdg on">On air</span><span class="small muted">' + (r.pulled ? 'Pulled' : r.arrives === 'server' ? 'Inside WSE' : 'Pushed') + (dec ? ', ' + dec : '') + '</span>' : '<span class="bdg">Not publishing</span>') +
-      '<span class="spacer"></span>' + (r.publishing && n != null ? '<span class="small muted">' + U.viewersText(n) + '</span>' : '') +
+      '<span class="spacer"></span>' + (r.publishing && n != null ? '<span class="small muted" data-svw>' + U.viewersText(n) + '</span>' : '') +
       (r.publishing ? '<button type="button" class="btn sm" data-write data-restart>' + U.icon('refresh') + 'Restart ' + U.esc(r.name) + '</button>' : '') +
       U.rowMenuHtml('stream:' + r.name, 'Actions for ' + r.name, streamItems(r));
     var b = el.head.querySelector('[data-restart]');
@@ -139,10 +139,10 @@
   }
   function renderSide() {
     var r = row(), o = S.out, oo = outputs().filter(function (x) { return x.name === o; })[0];
-    el.scope.innerHTML = scopeHtml();
+    writeIf(el.scope, scopeHtml());
     var v = oo && (oo.passthrough || oo.audio) ? ['', U.esc(o) + (oo.audio ? ' is audio only' : ' is the stream as it arrives') + ', so no overlay is drawn on it.'] : verdict();
-    el.why.innerHTML = '<p class="verdict">' + (v[0] ? '<span class="dot ' + v[0] + '"></span>' : '') + '<span>' + v[1] + '</span></p>' +
-      (r.restartNeeded ? '<p class="small warn-text" style="margin-top:6px">Its template builds other outputs since it started; they take effect when ' + U.esc(r.name) + ' restarts.</p>' : '');
+    writeIf(el.why, '<p class="verdict">' + (v[0] ? '<span class="dot ' + v[0] + '"></span>' : '') + '<span>' + v[1] + '</span></p>' +
+      (r.restartNeeded ? '<p class="small warn-text" style="margin-top:6px">Its template builds other outputs since it started; they take effect when ' + U.esc(r.name) + ' restarts.</p>' : ''));
     renderPlay();
   }
 
@@ -171,8 +171,11 @@
       }).join('') + '</ul>' +
       '<p class="small faint">Addresses on this server as you reach it' + (k[0] === 'rtmp' ? '' : '; viewers outside your network may need its public name') + '.</p>';
   }
+  // writes html into node only when it differs from what was written last, so a poll that changes nothing keeps a
+  // selection, the focus and the scroll position
+  function writeIf(node, html) { if (node.__uoHtml === html) return false; node.__uoHtml = html; node.innerHTML = html; return true; }
   function renderPlay() {
-    el.play.innerHTML = '<div class="sec-h">Playback' + U.tip('Where a player opens each output of ' + S.name + '. Adaptive groups let a player switch between outputs as bandwidth allows. Types are the ones ' + U.app + ' serves.') + '</div>' + playHtml();
+    if (!writeIf(el.play, '<div class="sec-h">Playback' + U.tip('Where a player opens each output of ' + S.name + '. Adaptive groups let a player switch between outputs as bandwidth allows. Types are the ones ' + U.app + ' serves.') + '</div>' + playHtml())) return;
     el.play.querySelectorAll('[data-ptype]').forEach(function (b) { b.onclick = function () { S.ptype = b.getAttribute('data-ptype'); renderPlay(); }; });
     el.play.querySelectorAll('[data-copyurl]').forEach(function (b) { b.onclick = function () { copyText(b.getAttribute('data-copyurl')); }; });
   }
@@ -413,6 +416,11 @@
       startStatus();
     },
     hide: function () { stopWatch(); S.watching = false; if (S.timer) { S.timer.stop(); S.timer = null; } el.watch.removeAttribute('data-url'); },
+    viewers: function () {
+      if (U.current() !== 'stream' || !S.name) return;
+      var c = el.head.querySelector('[data-svw]'), n = U.viewers(row());
+      if (c && n != null) c.textContent = U.viewersText(n);
+    },
     state: function () {
       if (U.current() !== 'stream' || !S.name) return;
       renderHead(); renderPipe(); renderSide(); renderBar();

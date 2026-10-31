@@ -91,6 +91,14 @@ public class WebPageCapture
 		return thread;
 	});
 
+	// page loads for reloads: each can block for the page load timeout, so they get threads of their own, as many as
+	// pages are reloading (at most one per page)
+	private static final java.util.concurrent.ExecutorService NAVIGATE = Executors.newCachedThreadPool(r -> {
+		Thread thread = new Thread(r, "WebPageNavigate");
+		thread.setDaemon(true);
+		return thread;
+	});
+
 	/** What one browser is for: the page, and the egress rules of the WSE that asked for it. */
 	public record Key(Settings settings, EgressRules rules)
 	{
@@ -121,9 +129,10 @@ public class WebPageCapture
 	private int memoryRestarts = 0;
 	private long overSince = 0;
 	private final java.util.List<Long> restartTimes = new java.util.ArrayList<>();
-	// where the browser was found at the last check when it was not on the page, and when that last caused a reload
-	private String offPage = null;
+	// when a browser found off its page last caused a reload
 	private long offPageReloadAt = 0;
+	// set while a screenshot is taken outside the lock
+	private boolean shooting = false;
 
 	// the latest screenshot as Chrome encoded it, sent to the module as it came; never decoded here
 	private byte[] lastPng = null;
@@ -207,7 +216,8 @@ public class WebPageCapture
 	 */
 	public byte[] capture(long maxAgeMs) throws Exception
 	{
-		boolean open = false;
+		boolean open = false, check = false;
+		Object driver = null;
 		synchronized(lock)
 		{
 			if(closed)
@@ -243,24 +253,46 @@ public class WebPageCapture
 			}
 			if(!open)
 			{
-				byte[] shot = screenshot();
-				if(System.currentTimeMillis() - memoryCheckedAt < MEMORY_CHECK_MS)
+				// one screenshot at a time; another caller meanwhile gets the last one
+				if(shooting)
 				{
-					return shot;
+					return lastPng;
 				}
-				memoryCheckedAt = System.currentTimeMillis();
-				offPage = offPage(webDriver);
+				shooting = true;
+				driver = webDriver;
+				if(System.currentTimeMillis() - memoryCheckedAt >= MEMORY_CHECK_MS)
+				{
+					memoryCheckedAt = System.currentTimeMillis();
+					check = true;
+				}
 			}
 		}
 		if(open)
 		{
 			return openThenCapture(maxAgeMs);
 		}
-		String off;
-		synchronized(lock)
+		// Chrome is asked outside the lock: a screenshot takes 50 to 300 ms, and frame answers, status and closing
+		// must not wait on it
+		byte[] shot;
+		String off = null;
+		try
 		{
-			off = offPage;
-			offPage = null;
+			shot = screenshot(driver);
+			if(check)
+			{
+				off = offPage(driver);
+			}
+		}
+		finally
+		{
+			synchronized(lock)
+			{
+				shooting = false;
+			}
+		}
+		if(!check)
+		{
+			return shot;
 		}
 		if(off != null)
 		{
@@ -280,11 +312,11 @@ public class WebPageCapture
 	/**
 	 * Where the browser is when it is not on a web page: Chrome's new tab page, a blank or error page, or anything else
 	 * that is not http or https. A page that redirects to another web address is still on a web page. Null when it is,
-	 * or when the address cannot be read. Caller holds the lock.
+	 * or when the address cannot be read. Asked without the lock; a reload under way is left alone by reloadNow.
 	 */
 	private String offPage(Object driver)
 	{
-		if(driver == null || reloading)
+		if(driver == null)
 		{
 			return null;
 		}
@@ -422,12 +454,33 @@ public class WebPageCapture
 	}
 
 	// Caller must hold lock.
-	private byte[] screenshot()
+	// Takes a screenshot of driver without the lock, then records it under the lock, unless the browser was closed or
+	// replaced meanwhile.
+	private byte[] screenshot(Object driver)
 	{
+		long t0 = System.nanoTime();
+		byte[] png;
 		try
 		{
-			long t0 = System.nanoTime();
-			byte[] png = ((TakesScreenshot)webDriver).getScreenshotAs(OutputType.BYTES);
+			png = ((TakesScreenshot)driver).getScreenshotAs(OutputType.BYTES);
+		}
+		catch(Exception e)
+		{
+			synchronized(lock)
+			{
+				if(webDriver == driver && !closed)
+				{
+					fail(e);
+				}
+				return lastPng;
+			}
+		}
+		synchronized(lock)
+		{
+			if(webDriver != driver || closed)
+			{
+				return lastPng;
+			}
 			lastCaptureMs = (System.nanoTime() - t0) / 1_000_000;
 			lastCaptureAt = Instant.now();
 			lastPng = png;
@@ -444,11 +497,6 @@ public class WebPageCapture
 				log.warn("UrlOverlay capture: capture is " + size[0] + "x" + size[1] + ", expected " + w + "x" + h
 						+ "; it will be scaled to fit for " + settings.label());
 			}
-			return lastPng;
-		}
-		catch(Exception e)
-		{
-			fail(e);
 			return lastPng;
 		}
 	}
@@ -1077,17 +1125,21 @@ public class WebPageCapture
 			reloading = true;
 			state = State.reloading;
 		}
-		// navigate outside the lock so requests are not blocked; they get the last frame until finishReload
-		try
-		{
-			log.info("UrlOverlay capture: reloading " + settings.label());
-			((WebDriver)driver).get(settings.url());
-		}
-		catch(Exception e)
-		{
-			log.error("UrlOverlay capture: error reloading " + settings.label(), e);
-		}
-		reloadExecutor.schedule(this::finishReload, Math.max(pageDelay.getAsInt(), 0), TimeUnit.MILLISECONDS);
+		// navigate outside the lock so requests are not blocked; they get the last frame until finishReload. A load
+		// can take up to the page load timeout, so it runs on its own thread, never on the scheduler that times every
+		// page's reloads and closes
+		NAVIGATE.execute(() -> {
+			try
+			{
+				log.info("UrlOverlay capture: reloading " + settings.label());
+				((WebDriver)driver).get(settings.url());
+			}
+			catch(Exception e)
+			{
+				log.error("UrlOverlay capture: error reloading " + settings.label(), e);
+			}
+			reloadExecutor.schedule(this::finishReload, Math.max(pageDelay.getAsInt(), 0), TimeUnit.MILLISECONDS);
+		});
 	}
 
 	private void finishReload()

@@ -101,15 +101,16 @@ public class NamedOverlayCaptureConfig extends VHostResourceBase
 			capture.usePageDelay(obj::getPageDelay);
 			img = capture.captureWaiting(CaptureConfig.maxAgeMs(overlay.get("refreshRate")), CaptureConfig.FIRST_FRAME_WAIT_MS);
 			status = capture.status();
+			if(img != null && !raw)
+			{
+				// as a stream draws it: keyed, then cropped, the very frame the streams keyed if they show this page;
+				// ?raw=true is the whole page, for picking the key color and the crop
+				img = CaptureConfig.fit(obj.keyedShared(capture, img, capture.frameSeq()), CaptureConfig.width(query.get("width")));
+			}
 		}
 		finally
 		{
 			WebPageCapture.POOL.release(capture);
-		}
-		if(img != null && !raw)
-		{
-			// as a stream draws it: keyed, then cropped; ?raw=true is the whole page, for picking the key color and the crop
-			img = CaptureConfig.fit(obj.cropped(ObjectConfig.keyOut(img, obj.awt_keyColor(), obj.keyTolerance)), CaptureConfig.width(query.get("width")));
 		}
 		Map<String, Object> m = new LinkedHashMap<>();
 		m.put("id", path.get("id"));

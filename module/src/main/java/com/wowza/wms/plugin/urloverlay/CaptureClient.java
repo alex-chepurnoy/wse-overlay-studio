@@ -35,7 +35,12 @@ import com.wowza.wms.plugin.urloverlay.egress.EgressRules;
 public final class CaptureClient
 {
 	public static final String PROP_SOCKET = "UrlOverlayCaptureSocket";
-	static final int MAX_IDLE_CONNECTIONS = 4;
+	/**
+	 * Connections kept open between calls. Every page's fetcher holds one through its long poll, so this is sized for
+	 * the pages a server runs at once (the capture service allows at most 32) plus the calls in between; fewer would close
+	 * and reopen connections every frame.
+	 */
+	static final int MAX_IDLE_CONNECTIONS = 40;
 	static final long MAX_BACKOFF_MS = 30_000;
 
 	/** The service did not answer, or answers with a protocol this module does not speak. */
@@ -50,11 +55,19 @@ public final class CaptureClient
 	}
 
 	private static volatile CaptureClient instance = new CaptureClient(Path.of(defaultSocket(isWindows())), EgressRules.defaults(), 1000);
-	private static final ScheduledExecutorService TIMEOUTS = Executors.newSingleThreadScheduledExecutor(r -> {
-		Thread t = new Thread(r, "UrlOverlayCaptureTimeouts");
-		t.setDaemon(true);
-		return t;
-	});
+	// every call arms a timeout and cancels it when the answer comes: cancelled ones leave the queue at once, instead
+	// of thousands a minute waiting out their delay holding a connection
+	private static final ScheduledExecutorService TIMEOUTS;
+	static
+	{
+		java.util.concurrent.ScheduledThreadPoolExecutor t = new java.util.concurrent.ScheduledThreadPoolExecutor(1, r -> {
+			Thread th = new Thread(r, "UrlOverlayCaptureTimeouts");
+			th.setDaemon(true);
+			return th;
+		});
+		t.setRemoveOnCancelPolicy(true);
+		TIMEOUTS = t;
+	}
 
 	private final Path socket;
 	private final EgressRules egress;

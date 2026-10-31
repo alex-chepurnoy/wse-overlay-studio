@@ -15,7 +15,9 @@
     var q = !force && U.state && U.state.revision ? '?rev=' + U.enc(U.state.revision) : '';
     pending = U.api.get(U.appPath(app) + '/state' + q).then(function (st) {
       pending = null;
-      if (U.app !== app || !st || st.unchanged) return;
+      if (U.app !== app || !st) return;
+      // nothing else changed: viewers come with the short answer, and only the counts on screen are updated
+      if (st.unchanged) { if (st.viewers) applyViewers(st.viewers); return; }
       var before = U.state;
       U.state = st;
       U.overlays = st.overlays || [];
@@ -28,6 +30,18 @@
     }, function () { pending = null; });
     return pending;
   };
+  function applyViewers(counts) {
+    var moved = false;
+    (U.appStreams || []).forEach(function (r) {
+      if (!r.publishing) return;
+      var n = counts[r.name] != null ? counts[r.name] : 0;
+      if (r.viewers !== n) { r.viewers = n; moved = true; }
+    });
+    if (!moved) return;
+    Object.keys(U.screens).forEach(function (k) {
+      if (U.screens[k].viewers) { try { U.screens[k].viewers(); } catch (e) { if (window.console) console.error(e); } }
+    });
+  }
   U.startStatePoll = function () {
     if (statePoll) statePoll.stop();
     // U.every skips a hidden tab; the first poll after it is shown again catches up

@@ -55,8 +55,12 @@
   ApiError.prototype = Object.create(Error.prototype);
 
   // GET as GET; POST, PUT and DELETE as a POST carrying the session token, PUT and DELETE named in ?method=
+  // longer than the bridge's own 60 s read timeout, so a slow capture still answers; a request that hangs past it
+  // ends, and the poll waiting on it starts again
+  var REQUEST_TIMEOUT_MS = 65000;
   function send(method, path, body, fresh) {
     var opts = { method: method === 'GET' ? 'GET' : 'POST', headers: { 'Accept': 'application/json' }, cache: 'no-store', credentials: 'same-origin' };
+    if (window.AbortSignal && AbortSignal.timeout) opts.signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     if (!bridge) return Promise.reject(new ApiError(503, NO_BRIDGE, null));
     if (method === 'GET') return fetch(API + '/rest' + path, opts);
@@ -220,22 +224,28 @@
         if (p && typeof p.then === 'function') p.then(next, next); else next();
       } catch (e) { next(); }
     }
-    t.stop = function () { t.stopped = true; clearTimeout(t.id); };
+    // a stopped timer leaves the list, so screens opened and closed all day do not pile them up
+    t.stop = function () { t.stopped = true; clearTimeout(t.id); var i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); };
     timers.push(t);
     tick();
     return t;
   };
-  U.onShutdown = function (fn) { cleanups.push(fn); };
+  // @return a function that takes fn back off the list, for something stopped before the page goes
+  U.onShutdown = function (fn) {
+    cleanups.push(fn);
+    return function () { var i = cleanups.indexOf(fn); if (i >= 0) cleanups.splice(i, 1); };
+  };
   // a listener on document or window, removed at shutdown so a remount never stacks a second one
   U.listen = function (target, type, fn, opts) {
     target.addEventListener(type, fn, opts);
     U.onShutdown(function () { target.removeEventListener(type, fn, opts); });
   };
   U.shutdown = function () {
-    timers.forEach(function (t) { t.stop(); });
+    timers.slice().forEach(function (t) { t.stop(); });
     timers = [];
-    cleanups.forEach(function (fn) { try { fn(); } catch (e) { /* page is gone */ } });
+    var list = cleanups;
     cleanups = [];
+    list.forEach(function (fn) { try { fn(); } catch (e) { /* page is gone */ } });
   };
 
   /* ---------- banners: problems with the page or the server; results go to toasts ---------- */
@@ -305,10 +315,11 @@
         '<div class="pnl-b">' + bodyHtml + '</div><div class="foot">' + buttons.map(function (b, i) {
           return '<button type="button" class="btn' + (b.kind ? ' ' + b.kind : '') + '" data-i="' + i + '">' + esc(b.label) + '</button>'; }).join('') + '</div></div>';
       U.root.appendChild(m);
-      function done(v) { m.remove(); document.removeEventListener('keydown', key, true); if (back && back.focus && document.body.contains(back)) back.focus(); resolve(v); }
+      var off = null;
+      function done(v) { m.remove(); document.removeEventListener('keydown', key, true); if (off) off(); if (back && back.focus && document.body.contains(back)) back.focus(); resolve(v); }
       function key(e) { if (e.key === 'Escape') { e.stopPropagation(); done(null); } else trapTab(m, e); }
       document.addEventListener('keydown', key, true);
-      U.onShutdown(function () { document.removeEventListener('keydown', key, true); });
+      off = U.onShutdown(function () { document.removeEventListener('keydown', key, true); });
       m.querySelectorAll('[data-i]').forEach(function (b) { b.onclick = function () { done(buttons[+b.getAttribute('data-i')].value); }; });
       m.addEventListener('click', function (e) { if (e.target === m) done(null); });
       var cancel = buttons.map(function (b, i) { return b.value == null || b.value === false ? i : -1; }).filter(function (i) { return i >= 0; })[0];
@@ -542,13 +553,29 @@
         onState('unsupported');
       }
     }
+    var off = null;
     var p = {
-      load: function (u) { if (u === url && (hls || video.src)) return; stop(); url = u; delay = 5000; if (u) start(); else onState('none'); },
-      stop: function () { url = null; stop(); }
+      load: function (u) {
+        if (u === url && (hls || video.src)) return;
+        stop(); url = u; delay = 5000;
+        if (u) { if (!off) off = U.onShutdown(p.stop); playing.add(p); watchVisibility(); start(); } else onState('none');
+      },
+      stop: function () { url = null; stop(); playing.delete(p); if (off) { off(); off = null; } },
+      // a hidden tab stops fetching segments and decoding; shown again, it goes back to live
+      suspend: function () { if (hls) hls.stopLoad(); try { video.pause(); } catch (e) { /* detached */ } },
+      resume: function () { if (hls) hls.startLoad(-1); if (url) video.play().catch(function () {}); }
     };
-    U.onShutdown(p.stop);
     return p;
   };
+  var playing = new Set(), watching = false;
+  function watchVisibility() {
+    if (watching) return;
+    watching = true;
+    U.listen(document, 'visibilitychange', function () {
+      playing.forEach(function (p) { if (document.visibilityState === 'hidden') p.suspend(); else p.resume(); });
+    });
+    U.onShutdown(function () { watching = false; playing.clear(); });
+  }
 
   /* ---------- a page left open across an upgrade runs the old scripts until it is reloaded ---------- */
   function pageVersion() {

@@ -26,13 +26,14 @@
     if (s.publishing && !s.overlay) return '<span class="bdg">No overlay</span>';
     return '';
   }
+  function vwText(s) { var n = U.viewers(s); return s.publishing && n != null ? n + ' viewer' + (n === 1 ? '' : 's') : ''; }
   function row(s) {
     var n = U.viewers(s), ov = s.overlay && U.overlayEntry(s.overlay);
     return '<div class="srow' + (U.view.highlight === s.name ? ' new' : '') + '">' +
       '<span class="dot ' + (s.publishing ? 'live' : '') + '"></span><button type="button" class="nm linkbtn" data-go="stream:' + U.esc(s.name) + '" title="Open ' + U.esc(s.name) + '">' + U.esc(s.name) + '</button>' +
       '<span class="ov">' + (ov ? '<button type="button" class="linkbtn" data-go="overlay:' + U.esc(s.overlay) + '" title="Open the overlay ' + U.esc(s.overlay) + '">' + U.esc(s.overlay) + '</button>' : s.overlay ? U.esc(s.overlay) : '') + ' ' + chip(s) + '</span>' +
       '<span class="outs">' + outsHtml(s) + '</span>' +
-      '<span class="vw" ' + (n != null ? 'title="Viewers on this server"' : '') + '>' + (s.publishing && n != null ? n + ' viewer' + (n === 1 ? '' : 's') : '') + '</span></div>';
+      '<span class="vw" data-vw="' + U.esc(s.name) + '" ' + (n != null ? 'title="Viewers on this server"' : '') + '>' + vwText(s) + '</span></div>';
   }
 
   function render() {
@@ -70,6 +71,11 @@
     init: function (b) { box = b; },
     show: function () { render(); },
     state: function () { if (U.current() === 'home') render(); },
+    // only the counts change: the cells are updated in place
+    viewers: function () {
+      if (U.current() !== 'home' || !box) return;
+      box.querySelectorAll('[data-vw]').forEach(function (c) { var r = U.streamRow(c.getAttribute('data-vw')), t = r ? vwText(r) : ''; if (c.textContent !== t) c.textContent = t; });
+    },
     hide: function () { U.view.highlight = null; }
   };
 })();
