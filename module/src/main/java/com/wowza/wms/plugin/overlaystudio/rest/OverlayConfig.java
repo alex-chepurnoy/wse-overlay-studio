@@ -253,13 +253,17 @@ public class OverlayConfig extends JsonApplicationConfigBase
 		return i != null ? i.lock() : this;
 	}
 
-	/** Disposes removed objects once no draw that may still use them is running. */
+	/**
+	 * After an edit: disposes removed objects once no draw that may still use them is running, and lets the image plan
+	 * its next wake-up from what the overlay now holds (an added clock starts ticking).
+	 */
 	private void retire(List<ObjectConfig> removed)
 	{
 		OverlayImage i = image;
 		if(i != null)
 		{
 			i.retire(removed);
+			i.reschedule();
 		}
 		else
 		{
@@ -369,11 +373,14 @@ public class OverlayConfig extends JsonApplicationConfigBase
 	public boolean hasNewFrame()
 	{
 		List<ObjectConfig> list = objects;
+		OverlayImage i = image;
+		// the scales this overlay goes to now; scale 1.0 for an overlay on no stream
+		java.util.Set<Double> scales = i != null ? i.activeScales() : java.util.Set.of(1.0);
 		if(list != null)
 		{
 			for(ObjectConfig o: list)
 			{
-				if(o.hasNewFrame())
+				if(o.hasNewFrame(scales))
 				{
 					return true;
 				}
@@ -439,15 +446,9 @@ public class OverlayConfig extends JsonApplicationConfigBase
 			ex.addError("","Overlay Module not found");
 			throw ex;
 		}
-		if(this.w > 0)
-		{
-			overlayModule.setStreamWidth(streamName, this.w);
-		}
-		if(this.h > 0)
-		{
-			overlayModule.setStreamHeight(streamName, this.h);
-		}
-		OverlayImage newOverlay = new OverlayImage(this.x ,this.y, overlayModule.getStreamWidth(streamName), overlayModule.getStreamHeight(streamName), this, threadDrawing, maxDrawingTime);
+		// this overlay's own canvas: its w, h, or the source's size; nothing stream-wide is changed (D14)
+		OverlayImage newOverlay = new OverlayImage(this.x ,this.y, OverlayStudioModule.canvasSize(this.w, overlayModule.getSourceWidth(streamName)),
+				OverlayStudioModule.canvasSize(this.h, overlayModule.getSourceHeight(streamName)), this, threadDrawing, maxDrawingTime);
 		newOverlay.setEvenCoords(evenCoords);
 
 		applyDefaults();
@@ -614,6 +615,7 @@ public class OverlayConfig extends JsonApplicationConfigBase
 			sortObjects(n);
 			this.objects = n;
 		}
+		retire(List.of());
 	}
 
 	@SuppressWarnings("Convert2Lambda")

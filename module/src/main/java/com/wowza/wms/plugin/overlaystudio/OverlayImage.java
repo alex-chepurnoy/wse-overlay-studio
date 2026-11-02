@@ -60,9 +60,23 @@ public class OverlayImage
 	private int width = 0;
 	private int height = 0;
 	private boolean evenCoords = false;
-	// set while a background draw runs; at most one at a time
-	private final java.util.concurrent.atomic.AtomicBoolean drawingImage = new java.util.concurrent.atomic.AtomicBoolean();
-	private ScheduledFuture<?> refreshTimer = null;
+	// the scales with a background draw queued or running: one per output scale, so a slow draw at one scale never
+	// holds up another (D13)
+	private final java.util.Set<Double> drawingScales = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	// the scales the overlay goes to on the current frame, set by the module; a page frame is new while one of them
+	// has not published it
+	private volatile java.util.Set<Double> activeScales = java.util.Set.of();
+
+	/** Redraws are at most this often per overlay, whatever its layers ask for. */
+	static final long MIN_REDRAW_MS = 100;
+	/** The clock the scheduler reads; tests replace it. */
+	static volatile java.util.function.LongSupplier clock = System::currentTimeMillis;
+	// the scheduler: one wake-up per overlay, at the earliest change a layer reports or the next page frame check
+	private final Object scheduleLock = new Object();
+	private ScheduledFuture<?> wake = null;
+	private boolean running = false;
+	private volatile long changeDueAt = Long.MAX_VALUE;
+	private volatile long lastChangeAt = Long.MIN_VALUE / 2;
 
 	/**
 	 * Background draws for every stream, on a few threads rather than one new thread per draw: each overlay has at most
@@ -212,26 +226,110 @@ public class OverlayImage
 	}
 	public void start()
 	{
-		if(mainOverlayConfig != null)
+		synchronized(scheduleLock)
 		{
-			if(mainOverlayConfig.getRefreshRate() > 0)
-			{
-				if(refreshTimer != null)
-				{
-					refreshTimer.cancel(false);
-				}
-				long ms = Math.max(1, (long)(mainOverlayConfig.getRefreshRate() * 1000.0));
-				refreshTimer = REFRESH.scheduleAtFixedRate(new RefreshTimer(), ms, ms, TimeUnit.MILLISECONDS);
-			}
+			running = true;
 		}
+		reschedule();
 	}
 
 	public void stop()
 	{
-		if(refreshTimer != null)
+		synchronized(scheduleLock)
 		{
-			refreshTimer.cancel(false);
-			refreshTimer = null;
+			running = false;
+			if(wake != null)
+			{
+				wake.cancel(false);
+				wake = null;
+			}
+		}
+	}
+
+	/** The scales the overlay goes to on this frame (see activeScales). */
+	public void setActiveScales(java.util.Set<Double> scales)
+	{
+		if(!scales.equals(activeScales))
+		{
+			activeScales = java.util.Set.copyOf(scales);
+		}
+	}
+
+	public java.util.Set<Double> activeScales()
+	{
+		return activeScales;
+	}
+
+	/**
+	 * When the scheduler next wakes, after now: the earliest change a layer reports (D1: a clock ticks with no page on
+	 * the overlay), or the next page frame check at refreshRate when the overlay has pages; never sooner than
+	 * MIN_REDRAW_MS after the last change. Long.MAX_VALUE when nothing will change by itself.
+	 */
+	long nextWakeAt(long now)
+	{
+		OverlayConfig c = mainOverlayConfig;
+		if(c == null)
+		{
+			return Long.MAX_VALUE;
+		}
+		long due = Long.MAX_VALUE;
+		boolean pages = false;
+		for(ObjectConfig o: c.getObjects())
+		{
+			due = Math.min(due, o.nextChangeAt(now));
+			pages |= "webPage".equals(o.getType());
+		}
+		changeDueAt = due;
+		long next = due;
+		if(pages && c.getRefreshRate() > 0)
+		{
+			next = Math.min(next, now + Math.max(1, (long)(c.getRefreshRate() * 1000.0)));
+		}
+		return next == Long.MAX_VALUE ? next : Math.max(next, lastChangeAt + MIN_REDRAW_MS);
+	}
+
+	/** One wake-up: a layer's change came due, or a page has a frame not drawn yet; either redraws. */
+	void wakeUp(long now)
+	{
+		OverlayConfig c = mainOverlayConfig;
+		if(c != null && (now >= changeDueAt || c.hasNewFrame()))
+		{
+			c.resetUuid();
+			lastChangeAt = now;
+		}
+	}
+
+	/** Plans the next wake-up from what the overlay holds now; called at start, after each wake-up and after edits. */
+	public void reschedule()
+	{
+		synchronized(scheduleLock)
+		{
+			if(!running)
+			{
+				return;
+			}
+			if(wake != null)
+			{
+				wake.cancel(false);
+				wake = null;
+			}
+			long now = clock.getAsLong();
+			long at = nextWakeAt(now);
+			if(at == Long.MAX_VALUE)
+			{
+				return;
+			}
+			wake = REFRESH.schedule(() -> {
+				try
+				{
+					wakeUp(clock.getAsLong());
+				}
+				catch(RuntimeException e)
+				{
+					log.error("OverlayStudio: the redraw check for " + streamName + " failed: " + e, e);
+				}
+				reschedule();
+			}, Math.max(1, at - now), TimeUnit.MILLISECONDS);
 		}
 	}
 
@@ -250,25 +348,6 @@ public class OverlayImage
 		retire(objects);
 	}
 
-	public class RefreshTimer implements Runnable
-	{
-
-		public RefreshTimer()
-		{
-		}
-
-		// a refresh redraws only when a page has a frame not drawn yet; the rest of an overlay changes only on save,
-		// which redraws by itself
-		@Override
-		public void run()
-		{
-			OverlayConfig c = mainOverlayConfig;
-			if(c != null && c.hasNewFrame())
-			{
-				c.resetUuid();
-			}
-		}
-	}
 
 	public void mergeOverlayConfig(OverlayConfig overlayConfig)
 	{
@@ -327,6 +406,7 @@ public class OverlayImage
 			overlayConfig.resetUuid();
 		}
 		retire(replacedObjs);
+		reschedule();
 	}
 
 
@@ -369,10 +449,10 @@ public class OverlayImage
 		return mainOverlayConfig.getOverlayIndex();
 	}
 
-	/** Whether a background draw is running. */
+	/** Whether a background draw is running at any scale. */
 	boolean isDrawing()
 	{
-		return drawingImage.get();
+		return !drawingScales.isEmpty();
 	}
 
 	public long getMaxDrawingTime()
@@ -410,7 +490,7 @@ public class OverlayImage
 			if(threadDrawing)
 			{
 				//don't block the transcoder with complicated drawing
-				if (drawingImage.compareAndSet(false, true))
+				if (drawingScales.add(scaled))
 				{
 					try
 					{
@@ -418,7 +498,7 @@ public class OverlayImage
 					}
 					catch(RuntimeException | Error e)
 					{
-						drawingImage.set(false);
+						drawingScales.remove(scaled);
 						throw e;
 					}
 				}
@@ -465,7 +545,7 @@ public class OverlayImage
 			}
 			finally
 			{
-				drawingImage.set(false);
+				drawingScales.remove(scaled);
 			}
 		}
 
@@ -560,6 +640,14 @@ public class OverlayImage
 			if(old != null && old.buffer().length == retVal.length)
 			{
 				spareByteImageMap.put(scaled, old.buffer());
+			}
+		}
+		// published: the page frames this draw used now count as drawn at this scale
+		if (objects != null)
+		{
+			for (ObjectConfig obj : objects)
+			{
+				obj.commitDrawn(scaled);
 			}
 		}
 		g.dispose();

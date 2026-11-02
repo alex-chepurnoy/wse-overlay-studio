@@ -231,8 +231,11 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	protected Integer cropH = null;
 
 	private transient volatile long lastKeyMs = -1;
-	// the page frame this layer drew last, so a refresh with no new frame does not redraw
-	private transient volatile long drawnSeq = Long.MIN_VALUE;
+	// The page frame this layer drew last, per output scale, so a refresh with no new frame does not redraw. Scales draw
+	// in parallel, so one marker would let a scale that drew a newer frame hide it from another. A draw notes the frame
+	// in pendingSeq and commitDrawn moves it to drawnSeq once that draw is published.
+	private transient final java.util.concurrent.ConcurrentHashMap<Double, Long> pendingSeq = new java.util.concurrent.ConcurrentHashMap<>();
+	private transient final java.util.concurrent.ConcurrentHashMap<Double, Long> drawnSeq = new java.util.concurrent.ConcurrentHashMap<>();
 	private transient volatile long lastScaleMs = -1;
 	// the keyed frame scaled to the size it is drawn at, made once per frame and size
 	private transient volatile BufferedImage scaledFrom = null;
@@ -979,7 +982,8 @@ public class ObjectConfig extends JsonApplicationConfigBase
                             long seq = capture.frameSeq();
                             BufferedImage source = image;
                             BufferedImage keyed = keyedShared(capture, source, seq);
-                            drawnSeq = seq;
+                            // committed for this scale once its draw publishes (commitDrawn)
+                            pendingSeq.put(scaled, seq);
                             lastKeyedImage = keyed;
                             int[] size = webPageDrawSize(this.w, this.h, keyed.getWidth(), keyed.getHeight(), scaled);
                             BufferedImage drawn = size[0] <= 0 || size[1] <= 0 || (size[0] == keyed.getWidth() && size[1] == keyed.getHeight()) ? keyed
@@ -1064,10 +1068,18 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	}
 
 	/**
-	 * Whether drawing again would show something new: a web page with a frame this layer has not drawn yet. Every other
-	 * kind is the same until the overlay is saved, which redraws by itself.
+	 * Whether drawing again would show something new: a web page with a frame this layer has not drawn yet at its
+	 * image's active scales (scale 1.0 when it is on no image). Every other kind changes only when the overlay is edited,
+	 * which redraws by itself, or at its nextChangeAt.
 	 */
 	public boolean hasNewFrame()
+	{
+		OverlayImage img = oImage;
+		return hasNewFrame(img != null ? img.activeScales() : java.util.Set.of(1.0));
+	}
+
+	/** Whether any of these scales has not drawn this page's latest frame. */
+	public boolean hasNewFrame(java.util.Collection<Double> scales)
 	{
 		if(!"webPage".equals(type))
 		{
@@ -1079,7 +1091,95 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			c = webPageCapture;
 		}
 		// no capture yet: the next draw opens it
-		return c == null || c.frameSeq() != drawnSeq;
+		if(c == null)
+		{
+			return true;
+		}
+		long seq = c.frameSeq();
+		for(Double s: scales)
+		{
+			Long drawn = drawnSeq.get(s);
+			if(drawn == null || drawn != seq)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The frame this layer's draw at this scale used now counts as drawn: that draw was published. */
+	public void commitDrawn(double scaled)
+	{
+		Long s = pendingSeq.remove(scaled);
+		if(s != null)
+		{
+			drawnSeq.put(scaled, s);
+		}
+	}
+
+	/**
+	 * When this layer next looks different without an edit, in epoch milliseconds after now, or Long.MAX_VALUE: date
+	 * text at the next boundary of the smallest unit its pattern shows, a display window at its start or stop. A web
+	 * page changes when its page does, which the frame check finds.
+	 */
+	public long nextChangeAt(long now)
+	{
+		long next = Long.MAX_VALUE;
+		if("string".equals(type) && useDate != null && useDate && text != null)
+		{
+			next = Math.min(next, nextDateBoundary(text, now));
+		}
+		for(String spec: new String[] { displayStart, displayStop })
+		{
+			DateTime at = displayTime(spec);
+			if(at != null && at.getMillis() > now)
+			{
+				next = Math.min(next, at.getMillis());
+			}
+		}
+		return next;
+	}
+
+	/** The next boundary of the smallest unit a SimpleDateFormat pattern shows, after now; quoted text is ignored. */
+	static long nextDateBoundary(String pattern, long now)
+	{
+		String letters = pattern.replaceAll("'[^']*'", "");
+		java.time.ZonedDateTime t = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault());
+		if(letters.indexOf('S') >= 0)
+		{
+			// tenths at the finest: redraws are capped at 10 a second
+			return (now / 100 + 1) * 100;
+		}
+		java.time.temporal.ChronoUnit unit = letters.indexOf('s') >= 0 ? java.time.temporal.ChronoUnit.SECONDS
+				: letters.indexOf('m') >= 0 ? java.time.temporal.ChronoUnit.MINUTES
+				: letters.matches(".*[HhKka].*") ? java.time.temporal.ChronoUnit.HOURS : java.time.temporal.ChronoUnit.DAYS;
+		return t.truncatedTo(unit).plus(1, unit).toInstant().toEpochMilli();
+	}
+
+	/** A displayStart or displayStop: an ISO date-time, or +N / -N seconds from the last update; null when absent or bad. */
+	private DateTime displayTime(String spec)
+	{
+		if(spec == null)
+		{
+			return null;
+		}
+		try
+		{
+			if(spec.startsWith("+") || spec.startsWith("-"))
+			{
+				if(updated_at == null)
+				{
+					return null;
+				}
+				int n = Integer.parseInt(spec.substring(1));
+				return spec.startsWith("+") ? updated_at.plusSeconds(n) : updated_at.minusSeconds(n);
+			}
+			return ISODateTimeFormat.dateTimeNoMillis().parseDateTime(spec);
+		}
+		catch(IllegalArgumentException e)
+		{
+			return null;
+		}
 	}
 
 	private WebPageCapture getWebPageCapture()
