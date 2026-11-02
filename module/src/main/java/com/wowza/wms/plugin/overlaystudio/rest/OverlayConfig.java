@@ -73,7 +73,7 @@ public class OverlayConfig extends JsonApplicationConfigBase
 	protected int opacity = -1;
 
 	@JsonProperty("overlayIndex")
-	// 0 means the application's OverlayStudioIndex (default DEFAULT_OVERLAY_INDEX)
+	// read and kept for 1.x-shaped requests, never used: the slot sets the index (plan 3.9)
 	protected int overlayIndex = 0;
 
 	@JsonProperty("refreshRate")
@@ -140,6 +140,9 @@ public class OverlayConfig extends JsonApplicationConfigBase
 	// set when this overlay came from a named overlay through the stream's template; such an overlay is not saved per stream
 	@JsonIgnore
 	private String namedOverlay = null;
+	// the template slot, 1 to 4, this overlay is shown in; the per-stream REST overlay is slot 1
+	@JsonIgnore
+	private int slot = 1;
 
 	@JsonIgnore
 	protected BufferedImage backgroundImage = null;
@@ -175,6 +178,10 @@ public class OverlayConfig extends JsonApplicationConfigBase
 	public String getNamedOverlay() { return namedOverlay; }
 	@JsonIgnore
 	public void setNamedOverlay(String name) { this.namedOverlay = name; }
+	@JsonIgnore
+	public int getSlot() { return slot; }
+	@JsonIgnore
+	public void setSlot(int slot) { this.slot = slot; }
 
 	@JsonIgnore
 	public String getBoundVHostName() { return vhostName; }
@@ -476,7 +483,7 @@ public class OverlayConfig extends JsonApplicationConfigBase
 		}
 		sortAndSaveObjects();
 		newOverlay.setOverlayConfig(this);
-		overlayModule.setOverlayImage(streamName, newOverlay);
+		overlayModule.setOverlayImage(streamName, slot, newOverlay);
 		resetUuid();
 		OverlayStudioLog.change(this, "set overlay on " + OverlayStudioLog.stream(vhostName, appName, instanceName, streamName) + " with "
 				+ (objects == null ? 0 : objects.size()) + " object(s)");
