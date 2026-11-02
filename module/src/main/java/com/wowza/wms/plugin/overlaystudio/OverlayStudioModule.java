@@ -129,6 +129,8 @@ public class OverlayStudioModule extends ModuleBase
 		m.put("overlayFrom", from);
 
 		m.put("draw", overlay == null ? null : overlay.drawStats());
+		// image layers that draw nothing (a missing or unusable file), and why
+		m.put("imageProblems", overlay == null ? java.util.List.of() : overlay.imageProblems());
 		List<java.util.Map<String, Object>> objects = new ArrayList<>();
 		if(overlay != null && overlay.getOverlayConfig() != null && overlay.getOverlayConfig().getObjects() != null)
 		{

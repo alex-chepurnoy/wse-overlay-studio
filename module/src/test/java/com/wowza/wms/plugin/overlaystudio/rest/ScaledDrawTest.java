@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 
 import javax.imageio.ImageIO;
 
@@ -35,6 +34,9 @@ class ScaledDrawTest
 		assertArrayEquals(new int[] { 400, 300 }, ObjectConfig.webPageDrawSize(0, 0, 800, 600, 0.5));
 	}
 
+	@org.junit.jupiter.api.io.TempDir
+	java.nio.file.Path content;
+
 	@Test
 	void imageObjectIsScaledOnASmallerFrame() throws Exception
 	{
@@ -45,20 +47,23 @@ class ScaledDrawTest
 		sg.setColor(Color.RED);
 		sg.fillRect(10, 5, 10, 10);
 		sg.dispose();
-		ByteArrayOutputStream png = new ByteArrayOutputStream();
-		ImageIO.write(src, "png", png);
+		ImageIO.write(src, "png", content.resolve("square.png").toFile());
+		java.util.function.Function<String, java.nio.file.Path> was = com.wowza.wms.plugin.overlaystudio.ImageFiles.contentDirOf;
+		com.wowza.wms.plugin.overlaystudio.ImageFiles.contentDirOf = vhost -> content;
 
 		ObjectConfig obj = new ObjectConfig();
 		obj.setType("image");
 		obj.setX(100);
 		obj.setY(50);
 		obj.setOpacity(100); // normally filled in from the overlay's defaults
-		obj.base64Image = com.wowza.util.Base64.encodeBytes(png.toByteArray());
+		obj.imageFile = "square.png";
 
 		BufferedImage canvas = new BufferedImage(200, 100, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g = canvas.createGraphics();
 		obj.draw(g, 0.5, false);
 		g.dispose();
+		obj.dispose();
+		com.wowza.wms.plugin.overlaystudio.ImageFiles.contentDirOf = was;
 
 		assertTrue(isRed(canvas.getRGB(57, 30)), "inside the scaled square");
 		// where the unscaled square would have landed: (50+10, 25+5) .. (70, 40)
