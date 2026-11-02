@@ -1,0 +1,52 @@
+{
+  "Scoreboard": {
+    "refreshRate": 0.5,
+    "threadDrawing": true,
+    "maxDrawingTime": 100,
+    "objects": [
+      {
+        "id": "score",
+        "type": "webPage",
+        "url": "https://scores.example.com/bug",
+        "x": 1188,
+        "y": 44,
+        "w": 672,
+        "h": 378,
+        "zOrder": 1,
+        "opacity": 100,
+        "viewportWidth": 1280,
+        "viewportHeight": 720,
+        "pageDelay": 1000,
+        "reloadRate": 0,
+        "keyColor": "rgb(1,2,3)",
+        "keyTolerance": 0,
+        "paintBackground": true
+      }
+    ]
+  },
+  "LowerThird": {
+    "refreshRate": 1,
+    "threadDrawing": true,
+    "maxDrawingTime": 100,
+    "objects": [
+      {
+        "id": "name",
+        "type": "webPage",
+        "url": "https://graphics.example.com/lower-third",
+        "x": 96,
+        "y": 860,
+        "w": 960,
+        "h": 120,
+        "zOrder": 1,
+        "opacity": 100,
+        "viewportWidth": 1600,
+        "viewportHeight": 200,
+        "pageDelay": 1000,
+        "reloadRate": 0,
+        "keyColor": "rgb(1,2,3)",
+        "keyTolerance": 0,
+        "paintBackground": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "overlay-studio-ui-tests",
+  "private": true,
+  "description": "Playwright smoke flows for the Overlay Studio page, with the Manager bridge faked by page.route",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
