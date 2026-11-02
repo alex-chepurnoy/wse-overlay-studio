@@ -53,9 +53,7 @@ test('an overlay edit is saved with the session token, and Discard drops one', a
   await expect(url).toHaveValue('https://scores.example.com/bug');
 
   const bar = page.getByRole('region', { name: 'Unsaved changes' });
-  // leaving the field first: clicking Save or Discard straight from the field is the known defect below
   await url.fill('https://scores.example.com/other');
-  await url.press('Tab');
   await expect(bar).toContainText('score page url');
   await bar.getByRole('button', { name: 'Discard' }).click();
   await expect(bar).toBeHidden();
@@ -63,7 +61,6 @@ test('an overlay edit is saved with the session token, and Discard drops one', a
   expect(wse.posts).toEqual([]);
 
   await url.fill('https://scores.example.com/bug2');
-  await url.press('Tab');
   await expect(bar).toContainText('score page url');
   await bar.getByRole('button', { name: /^Save/ }).click();
   await expect(bar).toBeHidden();
@@ -75,13 +72,11 @@ test('an overlay edit is saved with the session token, and Discard drops one', a
   expect(sent.path).toContain('wowzaSecurityToken=token-1');
 });
 
-// Known defect, found by this harness: leaving a field rebuilds the save bar, and the field is left on the mousedown
-// of the click, so the button under the pointer is replaced before mouseup and the first click on Save or Discard
-// does nothing. The second click works. Marked as failing until the page is fixed; Playwright reports it when it
-// starts passing.
+// D15: leaving a field fires its change event on the mousedown of the click, and the render it causes used to
+// replace the bar's buttons before mouseup, so the first click on Save or Discard did nothing. Typed with the
+// keyboard and clicked with the mouse, as a person does.
 for (const button of ['Save', 'Discard']) {
   test('the first click on ' + button + ' straight from a field takes effect', async ({ page, studio, wse }) => {
-    test.fail(true, 'known defect: the save bar is rebuilt on blur and eats the first click');
     await studio.open();
     await openTab(page, 'overlays', 'Scoreboard');
     const url = page.locator('#ovs-f-url');
@@ -104,7 +99,6 @@ test('a save refused for an old token fetches a new one and goes through', async
   const bar = page.getByRole('region', { name: 'Unsaved changes' });
   async function save(value) {
     await url.fill(value);
-    await url.press('Tab');
     await expect(bar).toContainText('score page url');
     await bar.getByRole('button', { name: /^Save/ }).click();
     await expect(bar).toBeHidden();

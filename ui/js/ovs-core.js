@@ -401,26 +401,34 @@
 
   /* ---------- the save bar: one per screen, covering only the object on that screen ---------- */
   // o: { changes: [text], impact, saving, problem, conflict, saveLabel, saved, onSave, onDiscard, onTheirs, onMine }
+  // The bar is rewritten only when what it shows changes. A field's change event fires on the mousedown that clicks
+  // Save or Discard, and the render it causes draws the same bar; replacing the buttons then would lose that click.
+  function barHtml(bar, html) {
+    if (bar.ovsHtml === html) return;
+    bar.ovsHtml = html;
+    bar.innerHTML = html;
+  }
   U.saveBar = function (bar, o) {
     if (!bar) return;
     var n = (o.changes || []).length;
-    if (U.readOnly || (!n && !o.saved && !o.conflict)) { bar.hidden = true; bar.innerHTML = ''; return; }
+    if (U.readOnly || (!n && !o.saved && !o.conflict)) { bar.hidden = true; barHtml(bar, ''); return; }
     bar.hidden = false;
     bar.className = 'savebar' + (n || o.conflict ? '' : ' saved');
     bar.setAttribute('role', 'region');
     bar.setAttribute('aria-label', n ? 'Unsaved changes' : 'Last save');
     if (!n && !o.conflict) {
-      bar.innerHTML = '<span class="dot on"></span><div class="what"><b>' + esc(o.saved.title) + '</b><span>' + esc(o.saved.detail || '') + '</span></div>';
+      barHtml(bar, '<span class="dot on"></span><div class="what"><b>' + esc(o.saved.title) + '</b><span>' + esc(o.saved.detail || '') + '</span></div>');
       return;
     }
     var what = o.changes.join(', ');
     var sub = o.conflict ? '<span class="err">Changed in another session since you started. Load theirs, or keep yours and Save over it.</span>'
       : o.problem ? '<span class="err">' + esc(o.problem) + '</span>' : '<span title="' + esc(o.impact || '') + '">' + esc(o.impact || '') + '</span>';
-    bar.innerHTML = '<span class="chip-draft">Unsaved</span><div class="what"><b title="' + esc(what) + '">' + esc(what || 'No changes') + '</b>' + sub + '</div><div class="acts">' +
+    barHtml(bar, '<span class="chip-draft">Unsaved</span><div class="what"><b title="' + esc(what) + '">' + esc(what || 'No changes') + '</b>' + sub + '</div><div class="acts">' +
       (o.conflict ? '<button type="button" class="btn" data-a="theirs">Load theirs</button><button type="button" class="btn" data-a="mine">Keep mine</button>' : '') +
       '<span class="hint"><span class="kbd">Ctrl</span>+<span class="kbd">S</span></span>' +
       '<button type="button" class="btn" data-a="discard"' + (o.saving || !n ? ' disabled' : '') + '>Discard</button>' +
-      '<button type="button" class="btn primary" data-a="save"' + (o.saving || o.problem || o.conflict || !n ? ' disabled' : '') + '>' + esc(o.saving ? 'Saving...' : o.saveLabel || 'Save') + '</button></div>';
+      '<button type="button" class="btn primary" data-a="save"' + (o.saving || o.problem || o.conflict || !n ? ' disabled' : '') + '>' + esc(o.saving ? 'Saving...' : o.saveLabel || 'Save') + '</button></div>');
+    // the handlers are set on every call, kept bar or not, so they always run this render's callbacks
     bar.querySelector('[data-a=save]').onclick = o.onSave;
     bar.querySelector('[data-a=discard]').onclick = o.onDiscard;
     var t = bar.querySelector('[data-a=theirs]'), m = bar.querySelector('[data-a=mine]');

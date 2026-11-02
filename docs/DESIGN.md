@@ -370,7 +370,7 @@ The page has its own tests in `tests/ui`, outside Gradle:
 
 | Test | Covers |
 |---|---|
-| `smoke.spec.js` (Playwright) | The page in Chromium as the Manager shows it, with the bridge faked by `fake-wse.js`: opening on On air, no bridge, capture service stopped, an overlay saved with the session token and a renewed token, Discard, a template and a stream opening, read-only, Settings, Help, an application without the module, a phone-width window. Every flow fails on a script error, a request the fake does not know, or a request to anywhere else |
+| `smoke.spec.js` (Playwright) | The page in Chromium as the Manager shows it, with the bridge faked by `fake-wse.js`: opening on On air, no bridge, capture service stopped, an overlay saved with the session token and a renewed token, Discard, the first click on Save or Discard straight from a field, a template and a stream opening, read-only, Settings, Help, an application without the module, a phone-width window. Every flow fails on a script error, a request the fake does not know, or a request to anywhere else |
 | `labels_test.py` | Each field in `ovs-fields.js` against the module's REST classes and WSE's own template REST classes |
 
 The fake serves templates and overlays that `UiFakeContractTest` in `module` checks against the validator and the
