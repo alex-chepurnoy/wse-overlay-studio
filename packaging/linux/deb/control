@@ -5,6 +5,7 @@ Maintainer: {maintainer}
 Installed-Size: {size_kb}
 Section: video
 Priority: optional
+Depends: fontconfig, fonts-dejavu-core
 Recommends: {recommends}
 # 1x-compat:begin
 Conflicts: wse-url-overlay

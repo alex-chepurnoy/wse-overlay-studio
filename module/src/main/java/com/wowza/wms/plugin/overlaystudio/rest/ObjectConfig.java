@@ -39,6 +39,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import com.wowza.util.Base64;
+import com.wowza.wms.plugin.overlaystudio.Fonts;
 import com.wowza.wms.plugin.overlaystudio.OverlayImage;
 import com.wowza.wms.plugin.overlaystudio.OverlayStudioLog;
 import com.wowza.wms.plugin.overlaystudio.OverlayStudioModule;
@@ -360,8 +361,10 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	public Color awt_fillColor() { return awt_color(fillColor); }
 	public Color awt_shadowColor() { return awt_color(shadowColor); };
 	public Color awt_gradientColor() { return awt_color(gradientColor); };
-	public Font awt_font() { return  getFont(font, aws_fontStyle(font), fontSize); };
-	public Font awt_font(double scaled) { return getFont(font, aws_fontStyle(font), (int)(fontSize*scaled)); };
+	/** The text's font at source size: its family, fontStyle and fontSize (D2, D3); null when text cannot be drawn here. */
+	public Font awt_font() { return getFont(font, fontStyle, fontSize); };
+	/** The same at an output's scale. */
+	public Font awt_font(double scaled) { return getFont(font, fontStyle, (float)(fontSize * scaled)); };
 
 	public ObjectConfig()
 	{
@@ -398,10 +401,11 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		setPathMap();
 	}
 
-	private Font getFont(String name, int style, int size)
+	// built from its arguments; the cache key and the font agree (D2)
+	private static Font getFont(String name, String style, float size)
 	{
-		String key= name+":"+style+":"+size;
-		return fontCache.computeIfAbsent(key, k -> new Font(font, style, fontSize));
+		String key = name + ":" + Fonts.style(style) + ":" + size;
+		return fontCache.computeIfAbsent(key, k -> Fonts.font(name, style, size));
 	}
 
 	private Color getColor(int r, int g, int b)
@@ -644,17 +648,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		return System.identityHashCode(this);
 	}
 
-	public int aws_fontStyle(String font)
-	{
-		//style constant for the Font. The style argument is an integer bitmask that may be PLAIN, or a bitwise union of BOLD and/or ITALIC (for example, ITALIC or BOLD|ITALIC).
-		int retVal = Font.PLAIN;
-		if(font.toLowerCase().contains("bold"))
-			retVal = retVal + Font.BOLD;
-		if(font.toLowerCase().contains("italic"))
-			retVal = retVal + Font.ITALIC;
-		return retVal;
-	}
-
 	public Color awt_color(String srt)
 	{
 		try
@@ -802,7 +795,12 @@ public class ObjectConfig extends JsonApplicationConfigBase
                     g.drawLine(this.getX(scaled), this.getY(scaled), this.getX2(scaled), this.getY2(scaled));
 				}
                 case "string" -> {
-                    Font newFont = this.awt_font().deriveFont((float)(this.awt_font().getSize() * scaled));
+                    Font newFont = this.awt_font(scaled);
+                    if(newFont == null)
+                    {
+                        // no fonts on this server (Fonts.unavailable): the text is left out, the other layers draw
+                        return;
+                    }
                     g.setFont(newFont);
                     String theText = text;
                     if(useDate != null && useDate)
@@ -1089,7 +1087,11 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			case "line" -> r = span(new int[] { getX(scaled), getX2(scaled) }, new int[] { getY(scaled), getY2(scaled) });
 			case "triangle" -> r = span(new int[] { getX(scaled), getX2(scaled), getX3(scaled) }, new int[] { getY(scaled), getY2(scaled), getY3(scaled) });
 			case "string" -> {
-				Font f = awt_font().deriveFont((float)(awt_font().getSize() * scaled));
+				Font f = awt_font(scaled);
+				if(f == null)
+				{
+					return new java.awt.Rectangle();
+				}
 				java.awt.font.LineMetrics lm = f.getLineMetrics("Hgjy", new java.awt.font.FontRenderContext(null, true, true));
 				int top = (int)Math.floor(getY(scaled) - lm.getAscent() - lm.getLeading());
 				int bottom = (int)Math.ceil(getY(scaled) + lm.getDescent());

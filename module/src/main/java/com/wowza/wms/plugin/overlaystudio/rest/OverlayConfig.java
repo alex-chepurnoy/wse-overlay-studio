@@ -29,6 +29,7 @@ import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import com.wowza.wms.module.ModuleBase;
+import com.wowza.wms.plugin.overlaystudio.Fonts;
 import com.wowza.wms.plugin.overlaystudio.OverlayImage;
 import com.wowza.wms.plugin.overlaystudio.OverlayStudioLog;
 import com.wowza.wms.plugin.overlaystudio.OverlayStudioModule;
@@ -116,7 +117,7 @@ public class OverlayConfig extends JsonApplicationConfigBase
 
 	//Java defines five logical font families that are Serif, SansSerif, Monospaced, Dialog, and DialogInput.
 	@JsonProperty("font")
-	protected String font = "Serif";
+	protected String font = Fonts.DEFAULT_FAMILY;
 
 	@JsonProperty("fontStyle")
 	protected String fontStyle = "plain";
@@ -329,7 +330,7 @@ public class OverlayConfig extends JsonApplicationConfigBase
 		fillColor = null;
 		shadowColor = null;
 		shadowOffset = 2;
-		font = "Serif";
+		font = Fonts.DEFAULT_FAMILY;
 		fontStyle = "plain";
 		fontSize = 16;
 		objects = new ArrayList<>();
