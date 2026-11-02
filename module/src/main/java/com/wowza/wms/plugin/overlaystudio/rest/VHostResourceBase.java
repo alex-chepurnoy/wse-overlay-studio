@@ -156,7 +156,16 @@ public abstract class VHostResourceBase extends ConfigBase
 		catch(TemplateFiles.Refused e)
 		{
 			OverlayStudioLog.refused(this, verb + " " + request.getResourceRef().getPath(), e.status(), e.getMessage());
-			return reply(Status.valueOf(e.status()), error(e.status(), e.getMessage()));
+			Map<String, Object> err = error(e.status(), e.getMessage());
+			if(e.id() != null)
+			{
+				err.put("id", e.id());
+			}
+			if(e.field() != null)
+			{
+				err.put("field", e.field());
+			}
+			return reply(Status.valueOf(e.status()), err);
 		}
 		catch(ModuleFiles.BadName e)
 		{

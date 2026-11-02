@@ -271,6 +271,12 @@ public class OverlayStudioModule extends ModuleBase
 			cfg.setOverlaySource(enc.isEmpty());
 			cfg.setOverlayEncodes(new ArrayList<>(enc));
 			cfg.saveNewObject();
+			// read after the new image is in place, so a live write meanwhile reaches either it or this read (plan 3.6)
+			OverlayImage img = getOverlayImage(streamName);
+			if(img != null)
+			{
+				img.getOverlayConfig().applyLive(LiveValues.get(new LiveValues.Key(appInstance.getVHost().getName(), appName, name), overlayDir()));
+			}
 			logger.info(logPrefix + "stream " + streamName + ": overlay '" + name + "' from its template, " + (enc.isEmpty() ? "on every encode" : "on " + enc));
 		}
 		catch(Exception e)
@@ -278,6 +284,34 @@ public class OverlayStudioModule extends ModuleBase
 			logger.error(logPrefix + "stream " + streamName + ": could not apply overlay '" + name + "': " + e);
 		}
 		return true;
+	}
+
+	/**
+	 * After a live value changes: every running stream of every instance of the application that shows the overlay
+	 * draws the store's values, with no new image and no file read (plan 3.6).
+	 * @return the streams updated
+	 */
+	public static List<String> applyLive(LiveValues.Key key)
+	{
+		List<String> out = new ArrayList<>();
+		for(OverlayStudioModule mod: RUNNING)
+		{
+			IApplicationInstance ai = mod.appInstance;
+			if(ai == null || !key.app().equals(mod.appName) || !key.vhost().equals(ai.getVHost().getName()))
+			{
+				continue;
+			}
+			for(java.util.Map.Entry<String, String> e: mod.streamOverlayNames.entrySet())
+			{
+				OverlayImage img = key.name().equals(e.getValue()) ? mod.getOverlayImage(e.getKey()) : null;
+				if(img != null)
+				{
+					img.getOverlayConfig().applyLive(LiveValues.get(key, mod.overlayDir()));
+					out.add(e.getKey());
+				}
+			}
+		}
+		return out;
 	}
 
 	/**
