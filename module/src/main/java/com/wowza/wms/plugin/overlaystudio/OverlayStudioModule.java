@@ -351,7 +351,7 @@ public class OverlayStudioModule extends ModuleBase
 		try(java.io.InputStream in = new java.io.FileInputStream(f))
 		{
 			java.util.Map<String, Object> m = new java.util.TreeMap<>(com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator.validate(in).toMap());
-			for(String k: new String[] { "overlay", "overlayEncodes", "description", "problems", "usable", "managed" })
+			for(String k: new String[] { "overlay", "overlayEncodes", "overlays", "description", "problems", "usable", "managed" })
 			{
 				m.remove(k);
 			}

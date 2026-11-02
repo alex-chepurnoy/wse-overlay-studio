@@ -216,11 +216,149 @@ public final class TemplateFiles
 	private static final Pattern COPY_OF = Pattern.compile("copy of ([A-Za-z0-9._-]+) for stream ([A-Za-z0-9._-]+)\\.");
 
 	/**
-	 * Sets, or with a null overlay removes, the template properties naming the overlay it carries and the encodes that
-	 * carry it (none listed: the overlay is drawn on the source, so every encode gets it). Only on templates the module
-	 * wrote. Other content is left as it is; new elements get the file's tab indentation.
+	 * Sets, or with a null overlay removes, the overlay in slot 1 and the encodes that carry it (none listed: drawn on
+	 * the source, so every encode gets it), keeping slots 2 to 4. Only on templates the module wrote.
 	 */
 	public static synchronized void setOverlay(Path templatesDir, String template, String overlay, List<String> encodes) throws Refused, IOException
+	{
+		List<TemplateValidator.Slot> slots = new ArrayList<>(slotsOf(templatesDir, template));
+		slots.removeIf(x -> x.slot() == 1);
+		if(overlay != null)
+		{
+			slots.add(new TemplateValidator.Slot(1, overlay, encodes == null ? List.of() : List.copyOf(encodes)));
+		}
+		setOverlays(templatesDir, template, slots);
+	}
+
+	/** The overlays a template carries now, in slot order. */
+	public static List<TemplateValidator.Slot> slotsOf(Path templatesDir, String template) throws Refused, IOException
+	{
+		Path file = templatesDir.resolve(safeName(template) + ".xml");
+		if(!Files.isRegularFile(file))
+		{
+			throw new Refused(404, "No template '" + safeName(template) + "'");
+		}
+		try(InputStream in = Files.newInputStream(file))
+		{
+			return TemplateValidator.validate(in).overlays();
+		}
+	}
+
+	/**
+	 * The slots with overlay on them: where it already is, with these encodes, else in the lowest free slot.
+	 * Refused when all SLOTS are taken.
+	 */
+	public static List<TemplateValidator.Slot> withAdded(List<TemplateValidator.Slot> slots, String template, String overlay, List<String> encodes) throws Refused
+	{
+		safeName(overlay);
+		List<String> on = encodes == null ? List.of() : List.copyOf(encodes);
+		List<TemplateValidator.Slot> out = new ArrayList<>();
+		boolean placed = false;
+		for(TemplateValidator.Slot x: slots)
+		{
+			if(x.name().equals(overlay))
+			{
+				out.add(new TemplateValidator.Slot(x.slot(), overlay, on));
+				placed = true;
+			}
+			else
+			{
+				out.add(x);
+			}
+		}
+		for(int n = 1; !placed && n <= TemplateValidator.SLOTS; n++)
+		{
+			final int slot = n;
+			if(slots.stream().noneMatch(x -> x.slot() == slot))
+			{
+				out.add(new TemplateValidator.Slot(n, overlay, on));
+				placed = true;
+			}
+		}
+		if(!placed)
+		{
+			throw new Refused(409, template + " already carries " + TemplateValidator.SLOTS + " overlays; take one off first.");
+		}
+		out.sort(java.util.Comparator.comparingInt(TemplateValidator.Slot::slot));
+		return out;
+	}
+
+	/**
+	 * The overlays a request names, as {"overlays": [{name, encodes, slot}]}: slot defaults to the entry's position.
+	 * Refused (400) for more than SLOTS, a slot outside 1 to SLOTS or used twice, or an overlay named twice.
+	 */
+	@SuppressWarnings("unchecked")
+	public static List<TemplateValidator.Slot> slotsFrom(Object raw) throws Refused
+	{
+		if(!(raw instanceof List<?> list))
+		{
+			throw new Refused(400, "overlays must be a list of {\"name\", \"encodes\", \"slot\"}", null, "overlays");
+		}
+		if(list.size() > TemplateValidator.SLOTS)
+		{
+			throw new Refused(400, "A template carries at most " + TemplateValidator.SLOTS + " overlays", null, "overlays");
+		}
+		List<TemplateValidator.Slot> out = new ArrayList<>();
+		for(int i = 0; i < list.size(); i++)
+		{
+			if(!(list.get(i) instanceof Map<?, ?> m) || !(m.get("name") instanceof String name) || name.isBlank())
+			{
+				throw new Refused(400, "overlays[" + i + "] needs a name", null, "overlays");
+			}
+			int slot = i + 1;
+			if(m.get("slot") != null)
+			{
+				if(!(m.get("slot") instanceof Number n) || n.intValue() != n.doubleValue())
+				{
+					throw new Refused(400, "overlays[" + i + "]: slot must be a whole number", null, "overlays");
+				}
+				slot = n.intValue();
+			}
+			List<String> encodes = new ArrayList<>();
+			if(m.get("encodes") instanceof List)
+			{
+				for(Object e: (List<Object>)m.get("encodes"))
+				{
+					encodes.add(String.valueOf(e));
+				}
+			}
+			else if(m.get("encodes") != null)
+			{
+				throw new Refused(400, "overlays[" + i + "]: encodes must be a list of encode names", null, "overlays");
+			}
+			out.add(new TemplateValidator.Slot(slot, safeName(name.trim()), encodes));
+		}
+		checkSlots(out);
+		return out;
+	}
+
+	private static void checkSlots(List<TemplateValidator.Slot> slots) throws Refused
+	{
+		java.util.Set<Integer> used = new java.util.HashSet<>();
+		java.util.Set<String> names = new java.util.HashSet<>();
+		for(TemplateValidator.Slot x: slots)
+		{
+			if(x.slot() < 1 || x.slot() > TemplateValidator.SLOTS)
+			{
+				throw new Refused(400, "Overlay " + x.name() + ": slot must be from 1 to " + TemplateValidator.SLOTS, null, "overlays");
+			}
+			if(!used.add(x.slot()))
+			{
+				throw new Refused(400, "Slot " + x.slot() + " is given two overlays", null, "overlays");
+			}
+			if(!names.add(x.name()))
+			{
+				throw new Refused(400, "Overlay " + x.name() + " is named twice; a template carries each overlay once", null, "overlays");
+			}
+		}
+	}
+
+	/**
+	 * Sets the overlays a template carries, replacing every overlayStudio1 to 4 property (and its encodes) with these
+	 * slots. Only on templates the module wrote. Other content is left as it is; new elements get the file's tab
+	 * indentation.
+	 */
+	public static synchronized void setOverlays(Path templatesDir, String template, List<TemplateValidator.Slot> slots) throws Refused, IOException
 	{
 		String t = safeName(template);
 		Path file = templatesDir.resolve(t + ".xml");
@@ -232,10 +370,13 @@ public final class TemplateFiles
 		{
 			throw new Refused(409, t + ".xml was not written by Overlay Studio; it is not changed.");
 		}
-		if(overlay != null)
+		for(TemplateValidator.Slot x: slots)
 		{
-			safeName(overlay);
+			safeName(x.name());
 		}
+		checkSlots(slots);
+		List<TemplateValidator.Slot> sorted = new ArrayList<>(slots);
+		sorted.sort(java.util.Comparator.comparingInt(TemplateValidator.Slot::slot));
 		try
 		{
 			Document doc = parse(Files.readAllBytes(file), t);
@@ -250,12 +391,15 @@ public final class TemplateFiles
 				transcode.insertBefore(props, closing);
 				props.appendChild(doc.createTextNode("\n\t\t"));
 			}
-			removeProperty(props, TemplateValidator.PROP_OVERLAY);
-			removeProperty(props, TemplateValidator.PROP_ENCODES);
-			if(overlay != null)
+			for(int n = 1; n <= TemplateValidator.SLOTS; n++)
 			{
-				addProperty(doc, props, TemplateValidator.PROP_OVERLAY, overlay);
-				addProperty(doc, props, TemplateValidator.PROP_ENCODES, encodes == null ? "" : String.join(",", encodes));
+				removeProperty(props, TemplateValidator.propOverlay(n));
+				removeProperty(props, TemplateValidator.propEncodes(n));
+			}
+			for(TemplateValidator.Slot x: sorted)
+			{
+				addProperty(doc, props, TemplateValidator.propOverlay(x.slot()), x.name());
+				addProperty(doc, props, TemplateValidator.propEncodes(x.slot()), String.join(",", x.encodes()));
 			}
 			replace(file, serialize(doc, Files.readString(file, StandardCharsets.UTF_8).contains("\r\n")).getBytes(StandardCharsets.UTF_8));
 		}
@@ -355,8 +499,8 @@ public final class TemplateFiles
 	}
 
 	/**
-	 * Copies a template as newName with dynamic overlays on and the overlay set, leaving the original as it is
-	 *.
+	 * Copies a template as newName with dynamic overlays on, keeping the overlays it carries and adding overlay in
+	 * the next free slot (or giving it these encodes where it already is), leaving the original as it is.
 	 */
 	public static synchronized Path copyWithOverlay(Path templatesDir, String source, String newName, String overlay, List<String> encodes) throws Refused, IOException
 	{
@@ -384,14 +528,20 @@ public final class TemplateFiles
 		{
 			throw new IOException("Could not copy " + src + ".xml: " + e.getMessage(), e);
 		}
+		List<TemplateValidator.Slot> slots = TemplateValidator.validate(new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8))).overlays();
+		if(overlay != null)
+		{
+			// checked before the copy is written, so a full template leaves no copy behind
+			slots = withAdded(slots, src, overlay, encodes);
+		}
 		Path written = write(templatesDir, dst, text.getBytes(StandardCharsets.UTF_8), false);
-		setOverlay(templatesDir, dst, overlay, encodes);
+		setOverlays(templatesDir, dst, slots);
 		return written;
 	}
 
 	/**
-	 * Switches dynamic overlays on in a customer's own template and sets the overlay, in place. Not for the templates
-	 * WSE installs, nor VIF's. @return the file's bytes before the change, for the caller's backup
+	 * Switches dynamic overlays on in a customer's own template and adds the overlay in the next free slot (or gives
+	 * it these encodes where it already is), in place. Not for the templates WSE installs, nor VIF's. @return the file's bytes before the change, for the caller's backup
 	 */
 	public static synchronized byte[] enableInPlace(Path templatesDir, String template, String overlay, List<String> encodes) throws Refused, IOException
 	{
@@ -410,10 +560,12 @@ public final class TemplateFiles
 			throw new Refused(409, t + ".xml ships with WSE; make a copy instead, so WSE's own stays as it is.");
 		}
 		byte[] before = Files.readAllBytes(file);
-		if(TemplateValidator.validate(new ByteArrayInputStream(before)).vif())
+		TemplateValidator.Result was = TemplateValidator.validate(new ByteArrayInputStream(before));
+		if(was.vif())
 		{
 			throw new Refused(409, t + ".xml is a Video Intelligence template; a stream runs one or the other.");
 		}
+		List<TemplateValidator.Slot> slots = overlay == null ? was.overlays() : withAdded(was.overlays(), t, overlay, encodes);
 		if(!isManaged(file))
 		{
 			Document doc = parse(before, t);
@@ -428,7 +580,7 @@ public final class TemplateFiles
 				throw new IOException("Could not update " + t + ".xml: " + e.getMessage(), e);
 			}
 		}
-		setOverlay(templatesDir, t, overlay, encodes);
+		setOverlays(templatesDir, t, slots);
 		return before;
 	}
 
@@ -509,7 +661,7 @@ public final class TemplateFiles
 		return out;
 	}
 
-	/** The templates whose properties name this overlay, stream copies included. */
+	/** The templates whose properties name this overlay in any slot, stream copies included. */
 	public static List<String> templatesUsing(Path templatesDir, String overlay) throws IOException
 	{
 		List<String> out = new ArrayList<>();
@@ -517,7 +669,7 @@ public final class TemplateFiles
 		{
 			try(InputStream in = Files.newInputStream(f))
 			{
-				if(overlay.equals(TemplateValidator.validate(in).overlay()))
+				if(TemplateValidator.validate(in).overlays().stream().anyMatch(x -> overlay.equals(x.name())))
 				{
 					String n = f.getFileName().toString();
 					out.add(n.substring(0, n.length() - 4));

@@ -30,9 +30,51 @@ public final class TemplateValidator
 	public static final String MANAGED_MARKER = "Managed by Overlay Studio";
 	/** The encode every VIF template uses to get frames (vif.xml, vif-cpu.xml, vif-gpu.xml, vif-gpu-eva.xml). */
 	public static final String VIF_ENCODE = "videoIntelligence";
-	/** Template properties (Transcode/Properties) naming the overlay a template carries and the encodes that carry it. */
+	/** Overlays a template carries, in properties overlayStudio1 to overlayStudio4 (plan 3.9). */
+	public static final int SLOTS = 4;
+	/** Template properties (Transcode/Properties) naming the overlay in slot 1 and the encodes that carry it. */
+	// literal, as tests/ui/labels_test.py reads them; propOverlay(1) and propEncodes(1) give the same names
 	public static final String PROP_OVERLAY = "overlayStudio1";
 	public static final String PROP_ENCODES = "overlayStudioEncodes1";
+
+	/** The property naming the overlay in this slot, 1 to SLOTS. */
+	public static String propOverlay(int slot)
+	{
+		return "overlayStudio" + slot;
+	}
+
+	/** The property listing the encodes that carry this slot's overlay; none listed: drawn on the source, so every encode. */
+	public static String propEncodes(int slot)
+	{
+		return "overlayStudioEncodes" + slot;
+	}
+
+	/**
+	 * One overlay a template carries: its slot, 1 to SLOTS (property order, which is stacking order: a higher slot
+	 * draws on top), its name and the encodes that carry it (none: drawn on the source, so every encode gets it).
+	 */
+	public record Slot(int slot, String name, List<String> encodes)
+	{
+		public Map<String, Object> toMap()
+		{
+			Map<String, Object> m = new LinkedHashMap<>();
+			m.put("name", name);
+			m.put("encodes", encodes);
+			m.put("slot", slot);
+			return m;
+		}
+	}
+
+	/** The overlays list for a response: {name, encodes, slot} in slot order. */
+	public static List<Map<String, Object>> toMaps(List<Slot> slots)
+	{
+		List<Map<String, Object>> out = new ArrayList<>();
+		for(Slot s: slots)
+		{
+			out.add(s.toMap());
+		}
+		return out;
+	}
 
 	// implementation names present in WSE's transcoder source; others may still work
 	static final Set<String> DECODERS = Set.of("default", "nvcuvid", "nvcuvid_eva", "quicksync", "netint");
@@ -49,14 +91,22 @@ public final class TemplateValidator
 
 	public record Result(boolean usable, boolean managed, boolean vif, String description, String decoder, String scaler, boolean dynamicOverlays,
 			List<Map<String, Object>> encodes, List<Problem> problems, String overlay, List<String> overlayEncodes, boolean deinterlace, String gpuId,
-			List<Map<String, Object>> groups, String hardware, List<Map<String, Object>> images, String minFrameRate)
+			List<Map<String, Object>> groups, String hardware, List<Map<String, Object>> images, String minFrameRate, List<Slot> overlays)
 	{
+		/** The overlay in slot `slot`, or null. */
+		public Slot slot(int slot)
+		{
+			return overlays.stream().filter(x -> x.slot() == slot).findFirst().orElse(null);
+		}
+
 		public Map<String, Object> toMap()
 		{
 			Map<String, Object> m = new LinkedHashMap<>();
 			m.put("usable", usable);
 			m.put("managed", managed);
 			m.put("vif", vif);
+			m.put("overlays", toMaps(overlays));
+			// slot 1 as before, for the page until it reads overlays (plan section 8, PR 11)
 			m.put("overlay", overlay);
 			m.put("overlayEncodes", overlayEncodes);
 			m.put("description", description);
@@ -95,13 +145,13 @@ public final class TemplateValidator
 		catch(Exception e)
 		{
 			problems.add(new Problem("error", "xml", "Not a readable template: " + e.getMessage()));
-			return new Result(false, false, false, null, null, null, false, List.of(), problems, null, List.of(), false, null, List.of(), null, List.of(), null);
+			return new Result(false, false, false, null, null, null, false, List.of(), problems, null, List.of(), false, null, List.of(), null, List.of(), null, List.of());
 		}
 		Element transcode = child(doc.getDocumentElement(), "Transcode");
 		if(transcode == null)
 		{
 			problems.add(new Problem("error", "Transcode", "No Root/Transcode element"));
-			return new Result(false, false, false, null, null, null, false, List.of(), problems, null, List.of(), false, null, List.of(), null, List.of(), null);
+			return new Result(false, false, false, null, null, null, false, List.of(), problems, null, List.of(), false, null, List.of(), null, List.of(), null, List.of());
 		}
 		String description = text(transcode, "Description");
 		boolean managed = description != null && description.contains(MANAGED_MARKER);
@@ -202,22 +252,39 @@ public final class TemplateValidator
 		}
 		boolean usable = problems.stream().noneMatch(p -> p.level().equals("error"));
 		Map<String, String> props = properties(transcode);
-		String overlay = props.get(PROP_OVERLAY);
-		List<String> overlayEncodes = splitList(props.get(PROP_ENCODES));
-		if(overlay != null && !overlay.isBlank())
+		List<Slot> slots = new ArrayList<>();
+		Map<String, Integer> seen = new LinkedHashMap<>();
+		for(int n = 1; n <= SLOTS; n++)
 		{
-			for(String e: overlayEncodes)
+			String name = props.get(propOverlay(n));
+			if(name == null || name.isBlank())
+			{
+				continue;
+			}
+			name = name.trim();
+			List<String> on = splitList(props.get(propEncodes(n)));
+			for(String e: on)
 			{
 				if(encodes.stream().noneMatch(m -> e.equals(m.get("name")) && Boolean.TRUE.equals(m.get("canCarryOverlay"))))
 				{
-					problems.add(new Problem("warning", "Transcode/Properties/" + PROP_ENCODES, "Encode '" + e + "' is not an enabled encode that can carry an overlay."));
+					problems.add(new Problem("warning", "Transcode/Properties/" + propEncodes(n), "Encode '" + e + "' is not an enabled encode that can carry an overlay."));
 				}
 			}
+			Integer before = seen.putIfAbsent(name, n);
+			if(before != null)
+			{
+				problems.add(new Problem("error", "Transcode/Properties/" + propOverlay(n), "Overlay " + name + " is named in slot " + before + " and slot " + n
+						+ "; a template carries each overlay once."));
+				continue;
+			}
+			slots.add(new Slot(n, name, on));
 		}
+		usable = problems.stream().noneMatch(p -> p.level().equals("error"));
+		Slot first = slots.stream().filter(x -> x.slot() == 1).findFirst().orElse(null);
 		return new Result(usable, managed, vif, description, decoder, scaler, dynamic, encodes, problems,
-				overlay == null || overlay.isBlank() ? null : overlay.trim(), overlayEncodes, deinterlace, gpuId,
+				first == null ? null : first.name(), first == null ? List.of() : first.encodes(), deinterlace, gpuId,
 				groups(transcode), TemplateBuilder.Hardware.of(decoder, encodes.stream().map(x -> (String)x.get("implementation")).filter(x -> x != null).findFirst().orElse(null)).name(),
-				images(transcode), trim(text(video, "MinimumFrameRate")));
+				images(transcode), trim(text(video, "MinimumFrameRate")), List.copyOf(slots));
 	}
 
 	/**

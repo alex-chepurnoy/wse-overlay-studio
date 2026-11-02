@@ -116,7 +116,12 @@ public final class TemplateBuilder
 	private static final Set<String> H_ALIGN = Set.of("left", "right", "hcenter");
 	private static final Set<String> V_ALIGN = Set.of("top", "bottom", "vcenter");
 
-	public record Spec(String name, Hardware hardware, String overlay, List<Output> outputs, List<Group> groups, Advanced advanced, List<ImageLayer> images)
+	/**
+	 * overlay is slot 1, carried by the outputs marked overlay; more holds slots 2 to 4 (plan 3.9), each with the
+	 * encodes it names.
+	 */
+	public record Spec(String name, Hardware hardware, String overlay, List<Output> outputs, List<Group> groups, Advanced advanced, List<ImageLayer> images,
+			List<TemplateValidator.Slot> more)
 	{
 		/** The outputs that show the overlay; empty when every encoding output does (drawn once, before scaling). */
 		public List<String> overlayEncodes()
@@ -168,6 +173,33 @@ public final class TemplateBuilder
 		{
 			TemplateFiles.safeName(overlay);
 		}
+		// {"overlays": [{name, encodes, slot}]}: slot 1 takes its encodes from the outputs, as overlay does
+		List<TemplateValidator.Slot> more = new ArrayList<>();
+		if(body.get("overlays") != null)
+		{
+			for(TemplateValidator.Slot x: TemplateFiles.slotsFrom(body.get("overlays")))
+			{
+				if(x.slot() != 1)
+				{
+					more.add(x);
+				}
+				else if(overlay != null && !overlay.equals(x.name()))
+				{
+					throw bad("overlay and the overlays list name different overlays for slot 1.");
+				}
+				else
+				{
+					overlay = x.name();
+				}
+			}
+			for(TemplateValidator.Slot x: more)
+			{
+				if(x.name().equals(overlay))
+				{
+					throw bad("Overlay " + overlay + " is named twice; a template carries each overlay once.");
+				}
+			}
+		}
 		if(!(body.get("outputs") instanceof List<?> raw) || raw.isEmpty())
 		{
 			throw bad("A template needs at least one output.");
@@ -205,7 +237,7 @@ public final class TemplateBuilder
 		List<Group> groups = groups(body, outs);
 		double minFps = body.get("minFrameRate") == null ? 0 : num(body.get("minFrameRate"), 0, 0, 120, "template", "minimum frame rate");
 		Advanced adv = new Advanced(Boolean.TRUE.equals(body.get("deinterlace")), (int)num(body.get("gpuId"), -1, -1, 15, "template", "GPU"), minFps);
-		return new Spec(n, hw, overlay, outs, groups, adv, images(body, outs));
+		return new Spec(n, hw, overlay, outs, groups, adv, images(body, outs), List.copyOf(more));
 	}
 
 	private static List<ImageLayer> images(Map<String, Object> body, List<Output> outs) throws TemplateFiles.Refused
@@ -522,6 +554,11 @@ public final class TemplateBuilder
 		{
 			property(b, "\t\t\t", TemplateValidator.PROP_OVERLAY, s.overlay(), "String");
 			property(b, "\t\t\t", TemplateValidator.PROP_ENCODES, String.join(",", s.overlayEncodes()), "String");
+		}
+		for(TemplateValidator.Slot x: s.more())
+		{
+			property(b, "\t\t\t", TemplateValidator.propOverlay(x.slot()), x.name(), "String");
+			property(b, "\t\t\t", TemplateValidator.propEncodes(x.slot()), String.join(",", x.encodes()), "String");
 		}
 		b.append("\t\t</Properties>\n\t</Transcode>\n</Root>\n");
 		return b.toString();

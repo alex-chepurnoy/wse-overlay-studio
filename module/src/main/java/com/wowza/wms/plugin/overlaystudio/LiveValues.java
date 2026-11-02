@@ -43,6 +43,7 @@ public final class LiveValues
 
 	private static final class Entry
 	{
+		final Key key;
 		final Path sidecar;
 		// replaced on every write, never changed: readers take it whole
 		volatile Map<String, Map<String, Object>> values;
@@ -52,8 +53,9 @@ public final class LiveValues
 		boolean dirty = false, flushPlanned = false;
 		long lastFlush = 0;
 
-		Entry(Path sidecar, Map<String, Map<String, Object>> values)
+		Entry(Key key, Path sidecar, Map<String, Map<String, Object>> values)
 		{
+			this.key = key;
 			this.sidecar = sidecar;
 			this.values = values;
 			java.util.Arrays.fill(recent, Long.MIN_VALUE / 2);
@@ -103,7 +105,7 @@ public final class LiveValues
 					WMSLoggerFactory.getLogger(LiveValues.class).warn("OverlayStudio: could not read live values " + f + ": " + e);
 				}
 			}
-			return new Entry(f, Collections.unmodifiableMap(v));
+			return new Entry(k, f, Collections.unmodifiableMap(v));
 		});
 	}
 
@@ -231,7 +233,8 @@ public final class LiveValues
 		synchronized(e)
 		{
 			e.flushPlanned = false;
-			if(!e.dirty)
+			// an overlay deleted (or a store forgotten) since this flush was planned writes nothing
+			if(!e.dirty || STORE.get(e.key) != e)
 			{
 				return;
 			}
@@ -283,6 +286,13 @@ public final class LiveValues
 		{
 			flush(e);
 		}
+	}
+
+	/** Waits for a flush the flush thread is running to finish, for tests; one planned later finds its entry forgotten. */
+	static void drainForTest() throws Exception
+	{
+		FLUSH.submit(() -> {
+		}).get(5, TimeUnit.SECONDS);
 	}
 
 	/** Forgets every value held in memory (as a WSE restart does), for tests. */
