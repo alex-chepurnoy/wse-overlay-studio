@@ -124,6 +124,14 @@ public final class OverlayStore
 					throw new TemplateFiles.Refused(400, "Object " + id + ": " + r.getKey() + " was removed in 2.0; use " + r.getValue());
 				}
 			}
+			if("string".equals(m.get("type")))
+			{
+				String[] text = com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig.textProblem(m);
+				if(text != null)
+				{
+					throw new TemplateFiles.Refused(400, "Object " + id + ": " + text[1]);
+				}
+			}
 			String[] timing = com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig.timingProblem(m.get("showFrom"), m.get("hideAt"), m.get("blinkSeconds"), m.get("fadeIn"), m.get("fadeOut"));
 			if(timing != null)
 			{

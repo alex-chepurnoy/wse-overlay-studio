@@ -151,7 +151,7 @@ class ThreadSafetyTest
 		volatile boolean disposedWhileDrawing, drawing, disposed;
 
 		@Override
-		public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing)
+		public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing, long now, long streamStart)
 		{
 			drawing = true;
 			entered.countDown();

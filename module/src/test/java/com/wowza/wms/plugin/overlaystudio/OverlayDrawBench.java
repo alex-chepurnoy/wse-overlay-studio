@@ -65,8 +65,7 @@ public class OverlayDrawBench
 		o.setType("string");
 		o.setX(x);
 		o.setY(y);
-		o.setText("HH:mm:ss");
-		o.setUseDate(true);
+		o.setText("{time:HH:mm:ss}");
 		o.setFont("Monospaced");
 		o.setFontSize(64);
 		o.setColor("white");

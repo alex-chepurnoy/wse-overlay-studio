@@ -4,9 +4,7 @@
  */
 package com.wowza.wms.plugin.overlaystudio;
 
-import java.lang.reflect.Method;
-
-/** Reaches ObjectConfig's package-private date boundary from tests in this package. */
+/** The next boundary of a time pattern in the server's zone, as a {time:...} token wakes for it. */
 final class ObjectConfigAccess
 {
 	private ObjectConfigAccess()
@@ -15,15 +13,6 @@ final class ObjectConfigAccess
 
 	static long boundary(String pattern, long now)
 	{
-		try
-		{
-			Method m = com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig.class.getDeclaredMethod("nextDateBoundary", String.class, long.class);
-			m.setAccessible(true);
-			return (long)m.invoke(null, pattern, now);
-		}
-		catch(ReflectiveOperationException e)
-		{
-			throw new IllegalStateException(e);
-		}
+		return TextTokens.nextTimeBoundary(pattern, now, java.time.ZoneId.systemDefault());
 	}
 }
