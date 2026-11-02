@@ -1,0 +1,18 @@
+===== neither-props (no system fonts, no libfontconfig, sun.awt.fontconfig=yes)
+--- bundled font only
+created family=Fira Sans fontName=Fira Sans Regular
+drawn ok, bright pixels=10381
+--- full spike
+families_before=7 (54 ms)
+Serif        family=Serif fontName=Serif.plain width('Agw0123')=152 latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+SansSerif    family=SansSerif fontName=SansSerif.plain width('Agw0123')=152 latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+Dialog       family=Dialog fontName=Dialog.plain width('Agw0123')=152 latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+FiraSans-Regular.ttf createFont=0.2 ms family=Fira Sans fontName=Fira Sans Regular psName=FiraSans-Regular style=0 registerFont=false
+Fira Mono            plain      -> fontName=Fira Mono Regular family=Fira Mono width('Agw0123')=168
+Fira Sans            plain      -> fontName=Fira Sans Regular family=Fira Sans width('Agw0123')=152
+Fira Sans            bold       -> fontName=Fira Sans Bold family=Fira Sans width('Agw0123')=160
+== unknown family
+new Font("No Such Family 123") -> family=Dialog fontName=Dialog.plain
+heap_used=5.6 MB
+===== after: leftover mounts in the main namespace (expect 0)
+0

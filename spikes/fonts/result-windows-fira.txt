@@ -1,0 +1,58 @@
+java.version=21.0.3 vendor=Eclipse Adoptium
+os=Windows 11 10.0 arch=amd64
+java.awt.headless=true isHeadless=true
+families_before=270 (137 ms)
+families_sample=Agency FB, Alef, Algerian, AlienCaret, Amiri, Amiri Quran, Arial, Arial Black, Arial Narrow, Arial Rounded MT Bold, Bahnschrift, Baskerville Old Face, Bauhaus 93, Bell MT, Berlin Sans FB, Berlin Sans FB Demi, Bernard MT Condensed, Blackadder ITC, Bodoni MT, Bodoni MT Black, Bodoni MT Condensed, Bodoni MT Poster Compressed, Book Antiqua, Bookman Old Style, Bookshelf Symbol 7
+
+== logical fonts
+Serif        family=Serif fontName=Serif.plain width('Agw0123')=158 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+SansSerif    family=SansSerif fontName=SansSerif.plain width('Agw0123')=166 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+Monospaced   family=Monospaced fontName=Monospaced.plain width('Agw0123')=168 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+Dialog       family=Dialog fontName=Dialog.plain width('Agw0123')=166 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+DialogInput  family=DialogInput fontName=DialogInput.plain width('Agw0123')=168 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+
+== bundled fonts
+FiraMono-Bold.ttf createFont=0.2 ms family=Fira Mono fontName=Fira Mono Bold psName=FiraMono-Bold style=0 registerFont=true
+FiraMono-Regular.ttf createFont=0.1 ms family=Fira Mono fontName=Fira Mono Regular psName=FiraMono-Regular style=0 registerFont=true
+FiraSans-Bold.ttf createFont=0.1 ms family=Fira Sans fontName=Fira Sans Bold psName=FiraSans-Bold style=0 registerFont=true
+FiraSans-Italic.ttf createFont=0.1 ms family=Fira Sans fontName=Fira Sans Italic psName=FiraSans-Italic style=0 registerFont=true
+FiraSans-Regular.ttf createFont=0.1 ms family=Fira Sans fontName=Fira Sans Regular psName=FiraSans-Regular style=0 registerFont=true
+FiraSansCondensed-Bold.ttf createFont=0.1 ms family=Fira Sans Condensed fontName=Fira Sans Condensed Bold psName=FiraSansCondensed-Bold style=0 registerFont=true
+FiraSansCondensed-Italic.ttf createFont=0.1 ms family=Fira Sans Condensed fontName=Fira Sans Condensed Italic psName=FiraSansCondensed-Italic style=0 registerFont=true
+FiraSansCondensed-Regular.ttf createFont=0.1 ms family=Fira Sans Condensed fontName=Fira Sans Condensed Regular psName=FiraSansCondensed-Regular style=0 registerFont=true
+register_again=true (same font a second time)
+families_after=273
+
+== style resolution: new Font(family, style, 40) after registering
+Fira Mono            plain      -> fontName=Fira Mono Regular family=Fira Mono width('Agw0123')=168
+Fira Mono            bold       -> fontName=Fira Mono Bold family=Fira Mono width('Agw0123')=168
+Fira Mono            italic     -> fontName=Fira Mono Regular family=Fira Mono width('Agw0123')=168
+Fira Mono            bolditalic -> fontName=Fira Mono Bold family=Fira Mono width('Agw0123')=168
+Fira Mono            coverage: latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+Fira Mono            digits: min=24.00 max=24.00 tabular; clock widths 00:00:00=192 11:11:11=192 12:34:56=192
+Fira Sans            plain      -> fontName=Fira Sans Regular family=Fira Sans width('Agw0123')=152
+Fira Sans            bold       -> fontName=Fira Sans Bold family=Fira Sans width('Agw0123')=160
+Fira Sans            italic     -> fontName=Fira Sans Italic family=Fira Sans width('Agw0123')=153
+Fira Sans            bolditalic -> fontName=Fira Sans Bold family=Fira Sans width('Agw0123')=160
+Fira Sans            coverage: latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+Fira Sans            digits: min=17.32 max=22.32 proportional; clock widths 00:00:00=152 11:11:11=122 12:34:56=139
+Fira Sans Condensed  plain      -> fontName=Fira Sans Condensed Regular family=Fira Sans Condensed width('Agw0123')=139
+Fira Sans Condensed  bold       -> fontName=Fira Sans Condensed Bold family=Fira Sans Condensed width('Agw0123')=146
+Fira Sans Condensed  italic     -> fontName=Fira Sans Condensed Italic family=Fira Sans Condensed width('Agw0123')=141
+Fira Sans Condensed  bolditalic -> fontName=Fira Sans Condensed Bold family=Fira Sans Condensed width('Agw0123')=146
+Fira Sans Condensed  coverage: latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+Fira Sans Condensed  digits: min=15.60 max=20.84 proportional; clock widths 00:00:00=142 11:11:11=112 12:34:56=125
+
+== derived from the created Font object (no registration needed)
+Fira Mono Bold                     deriveFont(BOLD) fontName=Fira Mono Bold width=168 vs plain=168
+Fira Mono Regular                  deriveFont(BOLD) fontName=Fira Mono Regular width=177 vs plain=168
+Fira Sans Bold                     deriveFont(BOLD) fontName=Fira Sans Bold width=160 vs plain=160
+Fira Sans Italic                   deriveFont(BOLD) fontName=Fira Sans Italic width=162 vs plain=153
+Fira Sans Regular                  deriveFont(BOLD) fontName=Fira Sans Regular width=161 vs plain=152
+Fira Sans Condensed Bold           deriveFont(BOLD) fontName=Fira Sans Condensed Bold width=146 vs plain=146
+Fira Sans Condensed Italic         deriveFont(BOLD) fontName=Fira Sans Condensed Italic width=150 vs plain=141
+Fira Sans Condensed Regular        deriveFont(BOLD) fontName=Fira Sans Condensed Regular width=148 vs plain=139
+
+== unknown family
+new Font("No Such Family 123") -> family=Dialog fontName=Dialog.plain
+heap_used=23.5 MB

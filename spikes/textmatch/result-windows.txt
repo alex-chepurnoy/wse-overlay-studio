@@ -1,0 +1,24 @@
+#   sample                                      browser | Java fractional off           | Java fractional on           
+                                                  width |   width  diff%   px>64% edge |   width  diff%   px>64% edge
+1   Fira Sans  48                                 552.3 |   559.0  +1.2%    94.3%    7 |   556.8  +0.8%    68.1%    4
+2   Fira Sans bold 48                             557.3 |   565.0  +1.4%    68.3%    7 |   562.2  +0.9%    48.2%    4
+3   Fira Sans italic 48                           544.5 |   550.0  +1.0%    67.0%    5 |   549.2  +0.9%    68.4%    4
+4   Fira Sans  24                                 434.5 |   435.0  +0.1%    47.6%    0 |   437.1  +0.6%    93.9%    2
+5   Fira Sans bold 72                             137.0 |   137.0  +0.0%     8.5%    0 |   136.9  -0.0%    10.6%    1
+6   Fira Sans Condensed  48                       439.3 |   446.0  +1.5%    75.5%    7 |   442.8  +0.8%    46.0%    3
+7   Fira Sans Condensed bold 48                   447.6 |   453.0  +1.2%    43.1%    5 |   451.2  +0.8%    33.0%    4
+8   Fira Sans Condensed  32                       302.0 |   308.0  +2.0%    80.7%    6 |   305.4  +1.1%    55.5%    3
+9   Fira Mono  48                                 230.4 |   232.0  +0.7%    31.7%    1 |   230.4  -0.0%    18.4%    1
+10  Fira Mono bold 48                             230.4 |   232.0  +0.7%    21.7%    2 |   230.4  -0.0%    17.4%    1
+11  Fira Mono  32                                 441.6 |   437.0  -1.0%    92.1%    5 |   441.6  -0.0%    28.2%    1
+12  PT Serif  48                                  421.4 |   424.0  +0.6%    45.8%    2 |   423.2  +0.4%    39.4%    1
+13  PT Serif bold 48                              454.9 |   458.0  +0.7%    36.8%    3 |   456.7  +0.4%    28.6%    2
+14  PT Serif  32                                  326.0 |   328.0  +0.6%    69.7%    2 |   327.2  +0.4%    41.6%    1
+15  Fira Sans  48                                 308.4 |   309.0  +0.2%    13.7%    1 |   308.8  +0.2%    26.5%    1
+16  Fira Sans  48                                 408.9 |   411.0  +0.5%    63.8%    2 |   414.0  +1.2%   101.1%    5
+17  Fira Sans  18                                 384.7 |   392.0  +1.9%   116.7%    7 |   386.0  +0.3%    54.9%    1
+18  Fira Sans Condensed bold 96                   258.2 |   260.0  +0.7%    15.1%    1 |   260.1  +0.7%    21.1%    2
+19  Fira Sans  48                                 561.8 |   567.0  +0.9%    92.9%    4 |   563.0  +0.2%    24.8%    1
+20  Fira Mono  24                                 259.2 |   252.0  -2.8%   120.2%    7 |   259.2  -0.0%    36.6%    0
+fm_off: width diff median 0.9% max 2.8%; differing ink pixels (>64 levels, as % of the browser's ink) median 67.0% max 120.2%; ink box edges apart median 4 px max 7 px
+fm_on: width diff median 0.4% max 1.2%; differing ink pixels (>64 levels, as % of the browser's ink) median 39.4% max 101.1%; ink box edges apart median 2 px max 5 px

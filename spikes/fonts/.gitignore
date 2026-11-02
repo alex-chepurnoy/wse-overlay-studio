@@ -1,0 +1,5 @@
+# Downloaded font files (SIL OFL, from github.com/google/fonts) and build output stay local; the results and scripts are tracked.
+fonts/
+fonts-fira/
+classes/
+empty/

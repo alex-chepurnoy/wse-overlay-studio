@@ -1,0 +1,101 @@
+libfontconfig=/usr/lib/x86_64-linux-gnu/libfontconfig.so.1
+===== baseline (hide font folders=0, hide libfontconfig=0)
+--- full spike (logical fonts, registration, rendering)
+families_before=12 (85 ms)
+Serif        family=Serif fontName=Serif.plain width('Agw0123')=189 latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+SansSerif    family=SansSerif fontName=SansSerif.plain width('Agw0123')=185 latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+Dialog       family=Dialog fontName=Dialog.plain width('Agw0123')=185 latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+FiraSans-Regular.ttf createFont=0.3 ms family=Fira Sans fontName=Fira Sans Regular psName=FiraSans-Regular style=0 registerFont=true
+families_after=15
+Fira Sans            plain      -> fontName=Fira Sans Regular family=Fira Sans width('Agw0123')=152
+Fira Sans            bold       -> fontName=Fira Sans Bold family=Fira Sans width('Agw0123')=160
+heap_used=6.2 MB
+--- bundled font only
+created family=Fira Sans fontName=Fira Sans Regular
+drawn ok, bright pixels=10381
+===== nofonts (hide font folders=1, hide libfontconfig=0)
+--- full spike (logical fonts, registration, rendering)
+Exception in thread "main" java.lang.RuntimeException: Fontconfig head is null, check your fonts or fonts configuration
+	at java.desktop/sun.awt.FontConfiguration.getVersion(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.readFontConfigFile(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.init(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.createFontConfiguration(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.base/java.security.AccessController.doPrivileged(Unknown Source)
+	at java.desktop/sun.font.SunFontManager.<init>(Unknown Source)
+	at java.desktop/sun.awt.FcFontManager.<init>(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.<init>(Unknown Source)
+	at java.desktop/sun.font.PlatformFontInfo.createFontManager(Unknown Source)
+	at java.desktop/sun.font.FontManagerFactory.getInstance(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getFontManagerForSGE(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+	at java.desktop/sun.java2d.HeadlessGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+--- bundled font only
+Exception in thread "main" java.lang.RuntimeException: Fontconfig head is null, check your fonts or fonts configuration
+	at java.desktop/sun.awt.FontConfiguration.getVersion(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.readFontConfigFile(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.init(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.createFontConfiguration(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.base/java.security.AccessController.doPrivileged(Unknown Source)
+===== nolib (hide font folders=0, hide libfontconfig=1)
+--- full spike (logical fonts, registration, rendering)
+Exception in thread "main" java.lang.RuntimeException: Fontconfig head is null, check your fonts or fonts configuration
+	at java.desktop/sun.awt.FontConfiguration.getVersion(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.readFontConfigFile(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.init(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.createFontConfiguration(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.base/java.security.AccessController.doPrivileged(Unknown Source)
+	at java.desktop/sun.font.SunFontManager.<init>(Unknown Source)
+	at java.desktop/sun.awt.FcFontManager.<init>(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.<init>(Unknown Source)
+	at java.desktop/sun.font.PlatformFontInfo.createFontManager(Unknown Source)
+	at java.desktop/sun.font.FontManagerFactory.getInstance(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getFontManagerForSGE(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+	at java.desktop/sun.java2d.HeadlessGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+--- bundled font only
+Exception in thread "main" java.lang.RuntimeException: Fontconfig head is null, check your fonts or fonts configuration
+	at java.desktop/sun.awt.FontConfiguration.getVersion(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.readFontConfigFile(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.init(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.createFontConfiguration(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.base/java.security.AccessController.doPrivileged(Unknown Source)
+===== neither (hide font folders=1, hide libfontconfig=1)
+--- full spike (logical fonts, registration, rendering)
+Exception in thread "main" java.lang.RuntimeException: Fontconfig head is null, check your fonts or fonts configuration
+	at java.desktop/sun.awt.FontConfiguration.getVersion(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.readFontConfigFile(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.init(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.createFontConfiguration(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.base/java.security.AccessController.doPrivileged(Unknown Source)
+	at java.desktop/sun.font.SunFontManager.<init>(Unknown Source)
+	at java.desktop/sun.awt.FcFontManager.<init>(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.<init>(Unknown Source)
+	at java.desktop/sun.font.PlatformFontInfo.createFontManager(Unknown Source)
+	at java.desktop/sun.font.FontManagerFactory.getInstance(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getFontManagerForSGE(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+	at java.desktop/sun.java2d.SunGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+	at java.desktop/sun.java2d.HeadlessGraphicsEnvironment.getAvailableFontFamilyNames(Unknown Source)
+--- bundled font only
+Exception in thread "main" java.lang.RuntimeException: Fontconfig head is null, check your fonts or fonts configuration
+	at java.desktop/sun.awt.FontConfiguration.getVersion(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.readFontConfigFile(Unknown Source)
+	at java.desktop/sun.awt.FontConfiguration.init(Unknown Source)
+	at java.desktop/sun.awt.X11FontManager.createFontConfiguration(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.desktop/sun.font.SunFontManager$2.run(Unknown Source)
+	at java.base/java.security.AccessController.doPrivileged(Unknown Source)
+===== after: leftover mounts in the main namespace (expect none)
+0

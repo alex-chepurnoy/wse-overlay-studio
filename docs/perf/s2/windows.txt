@@ -1,0 +1,18 @@
+java 21.0.3, Windows 11, cores=24, draw pool would be 8 threads
+Each case: median / p95 / max ms of one drawImage, at each output scale (1080, 720, 480, 360 lines).
+
+empty overlay, full 1920x1080 canvas              1080:  2.21/ 2.94/ 5.13   720:  0.97/ 1.36/ 2.35   480:  0.42/ 0.55/ 1.40   360:  0.24/ 0.33/ 1.11
+clock HH:mm:ss, full canvas                       1080:  2.31/ 3.16/ 4.91   720:  1.01/ 1.29/ 2.33   480:  0.45/ 0.63/ 1.00   360:  0.24/ 0.35/ 1.99
+clock HH:mm:ss, 420x100 bounding box              1080:  0.06/ 0.08/ 0.56   720:  0.03/ 0.07/ 0.32   480:  0.02/ 0.03/ 0.10   360:  0.01/ 0.03/ 0.20
+live badge (rounded box + text), full canvas      1080:  2.30/ 3.09/ 5.78   720:  1.02/ 1.42/ 2.39   480:  0.46/ 0.61/ 1.29   360:  0.26/ 0.41/ 0.75
+lower third (bar + two lines), full canvas        1080:  2.62/ 3.59/ 4.60   720:  1.20/ 1.70/ 2.74   480:  0.55/ 0.77/ 1.23   360:  0.32/ 0.50/ 1.30
+64 layers (32 boxes + 32 strings), full canvas    1080:  4.01/ 5.35/ 6.70   720:  2.08/ 3.44/ 5.48   480:  1.16/ 1.54/ 3.16   360:  0.82/ 1.06/ 2.30
+
+Second-boundary burst: N streams each with a full-canvas clock redraw all 4 scales at once,
+on a pool the size the module uses. Time from the boundary until the last draw finishes.
+   1 streams x 4 scales =   4 draws, full canvas,     pool 8: median   2.29 ms, p95   3.23 ms, max   5.00 ms
+   1 streams x 4 scales =   4 draws, bounding box,    pool 8: median   0.12 ms, p95   0.17 ms, max   0.19 ms
+   4 streams x 4 scales =  16 draws, full canvas,     pool 8: median   5.15 ms, p95   6.23 ms, max   6.40 ms
+   4 streams x 4 scales =  16 draws, bounding box,    pool 8: median   0.22 ms, p95   0.27 ms, max   0.31 ms
+  12 streams x 4 scales =  48 draws, full canvas,     pool 8: median  16.33 ms, p95  18.51 ms, max  19.05 ms
+  12 streams x 4 scales =  48 draws, bounding box,    pool 8: median   0.44 ms, p95   0.52 ms, max   0.53 ms

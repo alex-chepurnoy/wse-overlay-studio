@@ -1,0 +1,72 @@
+java.version=21.0.3 vendor=Eclipse Adoptium
+os=Windows 11 10.0 arch=amd64
+java.awt.headless=true isHeadless=true
+families_before=270 (132 ms)
+families_sample=Agency FB, Alef, Algerian, AlienCaret, Amiri, Amiri Quran, Arial, Arial Black, Arial Narrow, Arial Rounded MT Bold, Bahnschrift, Baskerville Old Face, Bauhaus 93, Bell MT, Berlin Sans FB, Berlin Sans FB Demi, Bernard MT Condensed, Blackadder ITC, Bodoni MT, Bodoni MT Black, Bodoni MT Condensed, Bodoni MT Poster Compressed, Book Antiqua, Bookman Old Style, Bookshelf Symbol 7
+
+== logical fonts
+Serif        family=Serif fontName=Serif.plain width('Agw0123')=158 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+SansSerif    family=SansSerif fontName=SansSerif.plain width('Agw0123')=166 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+Monospaced   family=Monospaced fontName=Monospaced.plain width('Agw0123')=168 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+Dialog       family=Dialog fontName=Dialog.plain width('Agw0123')=166 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+DialogInput  family=DialogInput fontName=DialogInput.plain width('Agw0123')=168 latin=ok accents=ok cyrillic=ok greek=ok cjk=ok emoji=ok
+
+== bundled fonts
+Barlow-Bold.ttf createFont=0.2 ms family=Barlow fontName=Barlow Bold psName=Barlow-Bold style=0 registerFont=true
+Barlow-Regular.ttf createFont=0.1 ms family=Barlow fontName=Barlow Regular psName=Barlow-Regular style=0 registerFont=true
+BarlowCondensed-Bold.ttf createFont=0.1 ms family=Barlow Condensed fontName=Barlow Condensed Bold psName=BarlowCondensed-Bold style=0 registerFont=true
+BarlowCondensed-Regular.ttf createFont=0.1 ms family=Barlow Condensed fontName=Barlow Condensed Regular psName=BarlowCondensed-Regular style=0 registerFont=true
+IBMPlexMono-Bold.ttf createFont=0.1 ms family=IBM Plex Mono fontName=IBM Plex Mono Bold psName=IBMPlexMono-Bold style=0 registerFont=true
+IBMPlexMono-Regular.ttf createFont=0.1 ms family=IBM Plex Mono fontName=IBM Plex Mono Regular psName=IBMPlexMono-Regular style=0 registerFont=true
+Inter[opsz,wght].ttf createFont=0.1 ms family=Inter fontName=Inter Regular psName=Inter-Regular style=0 registerFont=true
+PT_Serif-Web-Bold.ttf createFont=0.1 ms family=PT Serif fontName=PT Serif Bold psName=PTSerif-Bold style=0 registerFont=true
+PT_Serif-Web-Regular.ttf createFont=0.1 ms family=PT Serif fontName=PT Serif psName=PTSerif-Regular style=0 registerFont=true
+register_again=true (same font a second time)
+families_after=275
+
+== style resolution: new Font(family, style, 40) after registering
+Barlow               plain      -> fontName=Barlow Regular family=Barlow width('Agw0123')=153
+Barlow               bold       -> fontName=Barlow Bold family=Barlow width('Agw0123')=161
+Barlow               italic     -> fontName=Barlow Regular family=Barlow width('Agw0123')=153
+Barlow               bolditalic -> fontName=Barlow Bold family=Barlow width('Agw0123')=161
+Barlow               coverage: latin=ok accents=ok cyrillic=stops@0 greek=stops@0 cjk=stops@0 emoji=stops@0
+Barlow               digits: min=14.00 max=22.60 proportional; clock widths 00:00:00=166 11:11:11=112 12:34:56=148
+Barlow Condensed     plain      -> fontName=Barlow Condensed Regular family=Barlow Condensed width('Agw0123')=115
+Barlow Condensed     bold       -> fontName=Barlow Condensed Bold family=Barlow Condensed width('Agw0123')=126
+Barlow Condensed     italic     -> fontName=Barlow Condensed Regular family=Barlow Condensed width('Agw0123')=115
+Barlow Condensed     bolditalic -> fontName=Barlow Condensed Bold family=Barlow Condensed width('Agw0123')=126
+Barlow Condensed     coverage: latin=ok accents=ok cyrillic=stops@0 greek=stops@0 cjk=stops@0 emoji=stops@0
+Barlow Condensed     digits: min=10.24 max=17.76 proportional; clock widths 00:00:00=124 11:11:11=76 12:34:56=107
+IBM Plex Mono        plain      -> fontName=IBM Plex Mono Regular family=IBM Plex Mono width('Agw0123')=168
+IBM Plex Mono        bold       -> fontName=IBM Plex Mono Bold family=IBM Plex Mono width('Agw0123')=168
+IBM Plex Mono        italic     -> fontName=IBM Plex Mono Regular family=IBM Plex Mono width('Agw0123')=168
+IBM Plex Mono        bolditalic -> fontName=IBM Plex Mono Bold family=IBM Plex Mono width('Agw0123')=168
+IBM Plex Mono        coverage: latin=ok accents=ok cyrillic=ok greek=stops@0 cjk=stops@0 emoji=stops@0
+IBM Plex Mono        digits: min=24.00 max=24.00 tabular; clock widths 00:00:00=192 11:11:11=192 12:34:56=192
+Inter                plain      -> fontName=Inter Regular family=Inter width('Agw0123')=176
+Inter                bold       -> fontName=Inter Regular family=Inter width('Agw0123')=185
+Inter                italic     -> fontName=Inter Regular family=Inter width('Agw0123')=176
+Inter                bolditalic -> fontName=Inter Regular family=Inter width('Agw0123')=185
+Inter                coverage: latin=ok accents=ok cyrillic=ok greek=ok cjk=stops@0 emoji=stops@0
+Inter                digits: min=16.27 max=25.84 proportional; clock widths 00:00:00=174 11:11:11=120 12:34:56=164
+PT Serif             plain      -> fontName=PT Serif family=PT Serif width('Agw0123')=161
+PT Serif             bold       -> fontName=PT Serif Bold family=PT Serif width('Agw0123')=175
+PT Serif             italic     -> fontName=PT Serif family=PT Serif width('Agw0123')=161
+PT Serif             bolditalic -> fontName=PT Serif Bold family=PT Serif width('Agw0123')=175
+PT Serif             coverage: latin=ok accents=ok cyrillic=ok greek=stops@0 cjk=stops@0 emoji=stops@0
+PT Serif             digits: min=21.32 max=21.32 tabular; clock widths 00:00:00=152 11:11:11=152 12:34:56=152
+
+== derived from the created Font object (no registration needed)
+Barlow Bold                        deriveFont(BOLD) fontName=Barlow Bold width=161 vs plain=161
+Barlow Regular                     deriveFont(BOLD) fontName=Barlow Regular width=162 vs plain=153
+Barlow Condensed Bold              deriveFont(BOLD) fontName=Barlow Condensed Bold width=126 vs plain=126
+Barlow Condensed Regular           deriveFont(BOLD) fontName=Barlow Condensed Regular width=124 vs plain=115
+IBM Plex Mono Bold                 deriveFont(BOLD) fontName=IBM Plex Mono Bold width=168 vs plain=168
+IBM Plex Mono Regular              deriveFont(BOLD) fontName=IBM Plex Mono Regular width=177 vs plain=168
+Inter Regular                      deriveFont(BOLD) fontName=Inter Regular width=185 vs plain=176
+PT Serif Bold                      deriveFont(BOLD) fontName=PT Serif Bold width=175 vs plain=175
+PT Serif                           deriveFont(BOLD) fontName=PT Serif width=175 vs plain=161
+
+== unknown family
+new Font("No Such Family 123") -> family=Dialog fontName=Dialog.plain
+heap_used=35.2 MB
