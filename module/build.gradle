@@ -97,6 +97,8 @@ test {
     // The coexistence test inspects the built jar.
     dependsOn jar
     systemProperty 'overlaystudio.jar', jar.archiveFile.get().asFile.absolutePath
+    // the page tests' fake bridge serves these; UiFakeContractTest keeps them true to the module
+    systemProperty 'overlaystudio.uiFixtures', rootProject.file('tests/ui/fixtures').absolutePath
     testLogging {
         events 'passed', 'failed', 'skipped'
         exceptionFormat 'full'

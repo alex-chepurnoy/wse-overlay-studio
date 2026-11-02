@@ -366,11 +366,22 @@ Unit tests run with JUnit 5 per subproject (`./gradlew :<subproject>:test`):
 | `bridge` | Allowed paths and methods, path tricks, the method override, body cap, credentials forwarded server side and never returned, target taken from the session |
 | `installer` | Byte-exact edits and restore, edits by others kept on uninstall, rollback after a failure at each step, idempotent re-runs, application discovery, the capture service's unit, AppArmor profile, nssm and ACL commands (through a stand-in system), a running WSE stopping the run before anything is written, Chrome download host, redirect and zip checks, the Chrome updater's rollback |
 
+The page has its own tests in `tests/ui`, outside Gradle:
+
+| Test | Covers |
+|---|---|
+| `smoke.spec.js` (Playwright) | The page in Chromium as the Manager shows it, with the bridge faked by `fake-wse.js`: opening on On air, no bridge, capture service stopped, an overlay saved with the session token and a renewed token, Discard, a template and a stream opening, read-only, Settings, Help, an application without the module, a phone-width window. Every flow fails on a script error, a request the fake does not know, or a request to anywhere else |
+| `labels_test.py` | Each field in `ovs-fields.js` against the module's REST classes and WSE's own template REST classes |
+
+The fake serves templates and overlays that `UiFakeContractTest` in `module` checks against the validator and the
+overlay store, so it cannot drift from what the module answers. It does not prove the bridge or the module answer every
+other field the same way.
+
 Not automated:
 
 - The module inside a real WSE: loading, REST registration, drawing on a live transcode.
 - The bridge inside a real Manager: the Manager's token interceptor, the admin role, class loading from `manager/temp`.
-- The plugin page in a browser.
+- The plugin page against a real Manager and WSE (the page tests use a fake bridge).
 - Real Chrome through the egress guard, and the process reaper.
 - Generated templates loaded by WSE's own transcoder code rather than the module's validator.
 - Write access for a non-admin through real WSE REST authentication.

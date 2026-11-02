@@ -70,6 +70,23 @@ under the shipped folders and docs, except in the 1.x check's own files and betw
 On Windows use `gradlew.bat`. `build_dist.py` runs all four unless `--skip-tests` is given. What the tests cover, and
 what they do not, is in [DESIGN.md](DESIGN.md#testing).
 
+### Page tests
+
+The page's tests live in `tests/ui` and need Node.js 20 or later and Python 3; Gradle does not run them.
+
+```
+cd tests/ui
+npm ci
+npx playwright install chromium     # once; skip if Playwright 1.63's Chromium is already installed
+npx playwright test
+python -I labels_test.py <wse source root>
+```
+
+`npx playwright test` runs the smoke flows in headless Chromium against a fake bridge (`fake-wse.js`), so no WSE or
+Manager is needed. `labels_test.py` reads WSE's own REST classes from a WSE source checkout. After changing a starter
+template or the template validator, regenerate the fake's templates with
+`OVS_WRITE_UI_FIXTURES=1 ./gradlew :module:test --tests '*UiFakeContractTest'`.
+
 `./gradlew :installer:setupScreenshots` paints the setup window's screens with sample data into `docs/images/`.
 
 ### Troubleshooting
