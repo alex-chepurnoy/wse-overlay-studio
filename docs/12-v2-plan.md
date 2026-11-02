@@ -329,6 +329,9 @@ Kept: rectangle (rounded with `arcWidth`/`arcHeight`), ellipse, line, triangle. 
     Italic files are bundled) the module slants the face with a shear transform.
   - **Clocks need same-width digits.** Java2D cannot switch on a font's optional tabular digits, so the date and time
     presets default to a family whose digits are already the same width.
+  - **Text draws with fractional metrics on** (`KEY_FRACTIONALMETRICS`; the module leaves it off today) and
+    antialiasing on: spike S4 (`docs/perf/2026-11-02-s4-browser-vs-java-text.md`) found that closest to the browser's
+    drawing, 0.4% median width difference against Chrome on Windows and Linux.
   - Each license goes into `licenses/` and `THIRD-PARTY-NOTICES.md`.
 - **Linux needs fontconfig and one system font for any text.** S3 showed that without them every font call throws
   ("Fontconfig head is null"), bundled fonts included; web pages, shapes and images still draw. So:
@@ -385,7 +388,10 @@ Kept: rectangle (rounded with `arcWidth`/`arcHeight`), ellipse, line, triangle. 
 - A template carries up to four module overlays, in properties `overlayStudio1` to `overlayStudio4` with
   `overlayStudioEncodes1` to `4` (replacing `urlOverlay`/`urlOverlayEncodes`, `TemplateValidator.java:34-35`).
 - Each gets its own transcoder slot, 16 to 19, from `OverlayStudioIndex` upward; property order is stacking order once
-  spike S1 confirms WSE draws higher slots on top (if it does not, the module maps order to slots the way S1 finds).
+  spike S1 confirmed (`docs/perf/2026-11-02-s1-overlay-stacking.md`): within a stage WSE draws slots in ascending
+  order, so a higher slot is on top, and the module's slots 16 to 19 draw over the template's images 1 to 8; every
+  Encode overlay draws over every Decode overlay. Same on CPU and NVIDIA (EVA). WSE draws no overlays on NETINT
+  zero-copy frames (from source, untested), which the README states.
   A named overlay's own `overlayIndex` (`OverlayStore.java:31`; slot 1 uses it today, `UrlOverlayModule.java:1247`)
   is removed: slots come only from the template. A custom `OverlayStudioIndex` (read like `UrlOverlayIndex` today,
   `UrlOverlayModule.java:225`) moves all four; one whose slots would land on the template's image slots 1 to 8 or on
@@ -579,7 +585,8 @@ from the click or drag instead.
   sit between two pages. Text, shapes and images are drawn in the browser (one small SVG per layer, scaled like
   `position()`,
   `uo-overlay.js:440-446`) for instant feedback while dragging and typing, with the bundled fonts loaded by
-  `@font-face`. Each SVG layer carries an accessible name (kind and content).
+  `@font-face`. Text elements set `white-space: pre`, since SVG otherwise collapses runs of spaces and the
+  browser's text comes out narrower than the server's (S4). Each SVG layer carries an accessible name (kind and content).
 - **What the canvas shows over time:** the canvas is live. Token samples tick once a second from `GET /format`
   results computed ahead (3.7), blink animates, and fades play. Layers outside their show window are drawn faded at
   25% with a "Hidden now, shows at <time>" or "Hidden since <time>" tag, so they stay editable. A layer with a live value shows the live value
@@ -589,7 +596,9 @@ from the click or drag instead.
   server would draw at one frozen `now` (including layers hidden on the canvas, excluding layers
   outside their show window), saved (not live) values, no tags or handles, web page layers masked out. It asks for a
   draft render (3.8) with the same `now`, phase and a stream start equal to `now` (so stream time and `stream+N`
-  read zero in both), and compares the two. Within tolerance (set by spike S4) it shows "Matches the server's drawing"; otherwise "Differs from the server's
+  read zero in both), and compares the two by drawn boxes, not pixels (antialiasing differs on every glyph edge even when
+  text looks the same, S4): each text layer's advance width within 3% and each edge of its drawn box within 8 px at
+  source scale, shapes and images within 2 px. Within that it shows "Matches the server's drawing"; otherwise "Differs from the server's
   drawing" in words, with a toggle to show the server's. It says "server's drawing", not "video", because output
   scaling is not part of the check. The result is announced through the existing polite live region.
 - Read-only users get no check: the panel says "Server check needs write access".
@@ -635,8 +644,9 @@ from the click or drag instead.
     slots and one overlay can hold up to 64 layers.
 - **Image** offers two entries: **Image (fixed)**, WSE's own image layers (`imageCard`, `:439-454`), up to eight,
   drawn by WSE with no timing; and **Image in an overlay**, the picker above filtered to overlays with Image layers
-  (including the Corner bug preset). A tip under the menu says which to use when; what it says about stacking (today
-  "fixed images draw under the overlay", `uo-template.js:421`) is written from spike S1's result.
+  (including the Corner bug preset). A tip under the menu says which to use when; on stacking it keeps today's
+  "fixed images draw under the overlay" (`uo-template.js:421`) for the same stage, which S1 confirmed, and adds that
+  anything on an output draws over everything on the input.
 - **Data for the picker:** `GET .../overlays` (`M/rest/OverlaysConfig.java:42`, today only a page count) adds
   `kinds: [...]`, `imageFiles: [...]`, and `hash` per overlay (of the overlay as `OverlayStore` would write it, keys
   sorted, so a hand-edited file and its copy match); the list today carries
@@ -765,10 +775,10 @@ Each answers a question the design depends on. Results go to `docs/perf/` or the
 
 | # | Question | How | Blocks |
 |---|---|---|---|
-| S1 | Does WSE draw overlay slots 16 to 19 and the 1 to 8 image slots, and in what order? | Read how the native transcoder receives the overlay maps in `C:\wowza\wse`. Both Java maps are `HashMap`s (`TranscoderStreamSourceVideo.java:21-22`): if the native side follows Java's iteration order, keys 16 to 19 come between 1 and 4, not after 8 (an inference, **unverified**). Then draw colored squares overlapping in slots 1, 8, 16, 17, 18, 19 on Windows and Linux, CPU and GPU | 3.9, 4.5 |
+| S1 | Does WSE draw overlay slots 16 to 19 and the 1 to 8 image slots, and in what order? | **Done 2026-11-02** (`docs/perf/2026-11-02-s1-overlay-stacking.md`): native code keeps overlays in a `std::map` by slot and blends in ascending order, so the Java `HashMap` order does not matter; higher slot on top, Encode over Decode; confirmed on video on AWS (CPU) and the local server (NVIDIA EVA). No overlays on NETINT zero-copy frames (source only) | 3.9, 4.5 |
 | S2 | What does one redraw cost at 1080p, with four outputs and many streams? Does a boundary draw finish within one frame interval? | **Done 2026-11-02** (`docs/perf/2026-11-02-s2-redraw-cost.md`): a full-canvas redraw is almost all clearing and converting the frame (2.2 ms Windows, 5.3 ms AWS at 1080p, empty or not); a clock's bounding box is 35 to 40 times cheaper; 12 streams on all four outputs finish in 2.5 ms with boxes, 38 to 56 ms on the 8-core server without. Bounding boxes required, no draw-ahead scheme. Still to measure with the built module: the same burst while WSE transcodes 12 streams | 3.1 |
 | S3 | Do bundled fonts register on headless Linux with WSE's own Java, and do logical fonts resolve there? | **Done 2026-10-31** (`docs/perf/2026-10-31-font-spike.md`): bundled static fonts register and render pixel-identical on Windows and Linux; bold needs a Bold file; variable fonts and italic do not work as hoped; missing characters draw boxes; logical fonts differ by system; on Linux, with no system fonts or no `libfontconfig`, Java draws no text at all, bundled fonts included, unless given its own `fontconfig.properties` | 3.7 |
-| S4 | How close is the browser's text to Java2D's for the bundled fonts, on Windows and Linux? | Pixel difference of 20 text samples, both sides, both servers | 4.4 tolerance, golden image tolerance |
+| S4 | How close is the browser's text to Java2D's for the bundled fonts, on Windows and Linux? | **Done 2026-11-02** (`docs/perf/2026-11-02-s4-browser-vs-java-text.md`): 20 samples, Chrome on Windows and headless Chrome on Linux against Java. Pixel difference is unusable (antialiasing); box and width are. With fractional metrics on: width 0.4% median, 2.9% max; box edges 1 to 2 px median, 7 px max. Java is pixel-identical across systems, so goldens stay exact. SVG needs `white-space: pre` | 3.7, 4.4 tolerance |
 
 ## 7. Tests
 

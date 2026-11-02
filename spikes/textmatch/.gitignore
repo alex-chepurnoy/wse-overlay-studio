@@ -1,0 +1,3 @@
+# Font copies (SIL OFL) and build output stay local; scripts, results and images are tracked.
+fonts/
+classes/
