@@ -19,7 +19,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.UUID;
@@ -40,6 +39,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import com.wowza.util.Base64;
 import com.wowza.wms.plugin.overlaystudio.Fonts;
+import com.wowza.wms.plugin.overlaystudio.TextTokens;
 import com.wowza.wms.plugin.overlaystudio.OverlayImage;
 import com.wowza.wms.plugin.overlaystudio.OverlayStudioLog;
 import com.wowza.wms.plugin.overlaystudio.OverlayStudioModule;
@@ -190,8 +190,51 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@JsonProperty("text")
 	protected String text = null;
 
-	@JsonProperty("useDate")
-	protected Boolean useDate = null;
+	// Text layout (plan 3.2). box: x, y, w, h are a text box that wraps at w and clips at h; without it x, y is the
+	// first line's baseline start. align inside the box: left, center or right. lineHeight: a multiple of the font
+	// size, 1.2 when not set. background, padding and radius: a box behind the text (the whole w, h with box; the
+	// text's extent plus padding without). outlineColor and outlineWidth: a stroke around the letters, 0 to 20 px.
+	// autoFit: shrink the font, down to half, until the text fits the box.
+	@JsonProperty("box")
+	protected Boolean box = null;
+
+	@JsonProperty("align")
+	protected String align = null;
+
+	@JsonProperty("lineHeight")
+	protected Double lineHeight = null;
+
+	@JsonProperty("background")
+	protected String background = null;
+
+	@JsonProperty("padding")
+	protected Integer padding = null;
+
+	@JsonProperty("radius")
+	protected Integer radius = null;
+
+	@JsonProperty("outlineColor")
+	protected String outlineColor = null;
+
+	@JsonProperty("outlineWidth")
+	protected Double outlineWidth = null;
+
+	@JsonProperty("autoFit")
+	protected Boolean autoFit = null;
+
+	// For date and time tokens (plan 3.3): the zone (IANA, the server's when not set), the locale (en-US when not
+	// set), the target of a countdown or count-up (ISO date-time with its offset) and the text shown at and past it.
+	@JsonProperty("timeZone")
+	protected String timeZone = null;
+
+	@JsonProperty("locale")
+	protected String locale = null;
+
+	@JsonProperty("target")
+	protected String target = null;
+
+	@JsonProperty("endText")
+	protected String endText = null;
 
 	@JsonProperty("url")
 	protected String url = null;
@@ -345,8 +388,8 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	public String getText() { return text; };
 	public void setText(String text) { this.text = text; };
 
-	public Boolean getUseDate() { return useDate; };
-	public void setUseDate(Boolean useDate) { this.useDate = useDate; };
+	public void setBox(Boolean box) { this.box = box; }
+	public void setTimeZone(String timeZone) { this.timeZone = timeZone; }
 
 	public String getUrl() { return url; };
 	public void setUrl(String url) { this.url = url; };
@@ -402,7 +445,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	}
 
 	// built from its arguments; the cache key and the font agree (D2)
-	private static Font getFont(String name, String style, float size)
+	static Font getFont(String name, String style, float size)
 	{
 		String key = name + ":" + Fonts.style(style) + ":" + size;
 		return fontCache.computeIfAbsent(key, k -> Fonts.font(name, style, size));
@@ -506,6 +549,22 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		checkTiming();
 	}
 
+	/** Refuses malformed text fields (textProblem) as a client error naming the field. */
+	void checkText() throws ConfigBaseException
+	{
+		if(!"string".equals(type))
+		{
+			return;
+		}
+		String[] problem = textProblem(textFields());
+		if(problem != null)
+		{
+			ConfigBaseException ex = new ConfigBaseException();
+			ex.addError(problem[0], problem[1]);
+			throw ex;
+		}
+	}
+
 	/** Refuses malformed timing fields as a client error naming the field. */
 	void checkTiming() throws ConfigBaseException
 	{
@@ -516,6 +575,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			ex.addError(problem[0], problem[1]);
 			throw ex;
 		}
+		checkText();
 	}
 
 	//this is the POST
@@ -682,12 +742,15 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@SuppressWarnings("UseSpecificCatch")
 	public void draw(Graphics2D g, double scaled, boolean evenCoords )
 	{
-		draw(g, scaled, evenCoords, 1.0);
+		draw(g, scaled, evenCoords, 1.0, System.currentTimeMillis(), 0);
 	}
 
-	/** Draws at this scale with the layer's opacity times timing, 0 to 1 (a fade; see timingAlpha). */
+	/**
+	 * Draws at this scale with the layer's opacity times timing, 0 to 1 (a fade; see timingAlpha). now is the draw's
+	 * one clock and streamStart when the stream's transcoder started (0: not known), for text tokens.
+	 */
 	@SuppressWarnings("UseSpecificCatch")
-	public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing)
+	public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing, long now, long streamStart)
 	{
 		// rounded up to even as the scaled getters read them; the stored fields stay as given
 		even = evenCoords;
@@ -706,7 +769,8 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 		AffineTransform saved = g.getTransform();
 
-		g.setComposite(AlphaComposite.SrcOver.derive((float)(this.opacity / 100.0 * Math.min(1.0, timing))));
+		// opacity not set (-1) is fully opaque
+		g.setComposite(AlphaComposite.SrcOver.derive((float)((this.opacity < 0 ? 100 : Math.min(100, this.opacity)) / 100.0 * Math.min(1.0, timing))));
 
             switch (type) {
                 case "rectangle"-> {
@@ -794,49 +858,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
                     }
                     g.drawLine(this.getX(scaled), this.getY(scaled), this.getX2(scaled), this.getY2(scaled));
 				}
-                case "string" -> {
-                    Font newFont = this.awt_font(scaled);
-                    if(newFont == null)
-                    {
-                        // no fonts on this server (Fonts.unavailable): the text is left out, the other layers draw
-                        return;
-                    }
-                    g.setFont(newFont);
-                    String theText = text;
-                    if(useDate != null && useDate)
-                    {
-                        try
-                        {
-                            theText = new SimpleDateFormat(text).format(new Date());
-                        }
-                        catch(IllegalArgumentException e)
-                        {
-                            log.warn("Could not get date for text, turning off. " + e);
-                            useDate = false;
-                        }
-                    }
-                    if (shadowColor != null)
-                    {
-                        if(this.gradientColor != null)
-                        {
-                            g.setPaint( getGradientPaint(awt_shadowColor(), awt_gradientColor(), this.gradientDirection, this.getX(scaled), this.getY(scaled), this.getX(scaled)+this.getW(scaled), this.getY(scaled)+this.getH(scaled)));
-                        }
-                        else
-                        {
-                            g.setColor(this.awt_shadowColor());
-                        }
-                        g.drawString(theText, this.getX(scaled) + getShadowOffset(scaled), this.getY(scaled) + getShadowOffset(scaled));
-                    }
-                    if(this.gradientColor != null)
-                    {
-                        g.setPaint( getGradientPaint(awt_color(), awt_gradientColor(), this.gradientDirection, this.getX(scaled), this.getY(scaled), this.getX(scaled)+this.getW(scaled), this.getY(scaled)+this.getH(scaled)));
-                    }
-                    else
-                    {
-                        g.setColor(this.awt_color());
-                    }
-                    g.drawString(theText, this.getX(scaled), this.getY(scaled));
-				}
+                case "string" -> TextDraw.draw(this, g, scaled, now, streamStart);
                 case "ellipse" -> {
                     g.setStroke(getBasicStroke(this.getStroke(scaled)));
                     if (shadowColor != null)
@@ -1087,15 +1109,11 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			case "line" -> r = span(new int[] { getX(scaled), getX2(scaled) }, new int[] { getY(scaled), getY2(scaled) });
 			case "triangle" -> r = span(new int[] { getX(scaled), getX2(scaled), getX3(scaled) }, new int[] { getY(scaled), getY2(scaled), getY3(scaled) });
 			case "string" -> {
-				Font f = awt_font(scaled);
-				if(f == null)
+				r = TextDraw.bounds(this, scaled);
+				if(r == null)
 				{
 					return new java.awt.Rectangle();
 				}
-				java.awt.font.LineMetrics lm = f.getLineMetrics("Hgjy", new java.awt.font.FontRenderContext(null, true, true));
-				int top = (int)Math.floor(getY(scaled) - lm.getAscent() - lm.getLeading());
-				int bottom = (int)Math.ceil(getY(scaled) + lm.getDescent());
-				r = new java.awt.Rectangle(0, top, ANY_WIDTH, bottom - top);
 			}
 			case "image" -> {
 				BufferedImage image = decodedImage();
@@ -1164,9 +1182,9 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		{
 			return show;
 		}
-		if("string".equals(type) && useDate != null && useDate && text != null)
+		if("string".equals(type) && text != null)
 		{
-			next = Math.min(next, nextDateBoundary(text, now));
+			next = Math.min(next, TextTokens.nextChange(text, tokenContext(now, streamStart)));
 		}
 		if(hide != Long.MAX_VALUE)
 		{
@@ -1292,22 +1310,164 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	}
 
 	/** Fields 1.x had and 2.0 refuses, with what replaces each. */
-	public static final Map<String, String> REMOVED = Map.of("displayStart", "showFrom", "displayStop", "hideAt", "flashRate", "blinkSeconds", "rotate", "rotation");
+	public static final Map<String, String> REMOVED = Map.of("displayStart", "showFrom", "displayStop", "hideAt", "flashRate", "blinkSeconds", "rotate", "rotation",
+			"useDate", "a {time:...} token in the text");
 
-	/** The next boundary of the smallest unit a SimpleDateFormat pattern shows, after now; quoted text is ignored. */
-	static long nextDateBoundary(String pattern, long now)
+	/** What this layer's tokens draw from at now: its zone, locale, target and end text, and the stream's start. */
+	TextTokens.Context tokenContext(long now, long streamStart)
 	{
-		String letters = pattern.replaceAll("'[^']*'", "");
-		java.time.ZonedDateTime t = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault());
-		if(letters.indexOf('S') >= 0)
+		java.time.ZoneId zone;
+		try
 		{
-			// tenths at the finest: redraws are capped at 10 a second
-			return (now / 100 + 1) * 100;
+			zone = timeZone == null || timeZone.isBlank() ? java.time.ZoneId.systemDefault() : java.time.ZoneId.of(timeZone);
 		}
-		java.time.temporal.ChronoUnit unit = letters.indexOf('s') >= 0 ? java.time.temporal.ChronoUnit.SECONDS
-				: letters.indexOf('m') >= 0 ? java.time.temporal.ChronoUnit.MINUTES
-				: letters.matches(".*[HhKka].*") ? java.time.temporal.ChronoUnit.HOURS : java.time.temporal.ChronoUnit.DAYS;
-		return t.truncatedTo(unit).plus(1, unit).toInstant().toEpochMilli();
+		catch(java.time.DateTimeException e)
+		{
+			zone = java.time.ZoneId.systemDefault();
+		}
+		Long t = null;
+		if(target != null && !target.isBlank())
+		{
+			try
+			{
+				t = java.time.OffsetDateTime.parse(target.trim()).toInstant().toEpochMilli();
+			}
+			catch(java.time.format.DateTimeParseException e)
+			{
+				t = null;
+			}
+		}
+		return new TextTokens.Context(now, zone, textLocale(locale), t, endText, streamStart);
+	}
+
+	static java.util.Locale textLocale(String tag)
+	{
+		return tag == null || tag.isBlank() ? java.util.Locale.US : java.util.Locale.forLanguageTag(tag.trim());
+	}
+
+	static final java.util.List<String> ALIGNS = java.util.List.of("left", "center", "right");
+	/** Text a layer may hold, in characters. */
+	public static final int TEXT_MAX = 2000;
+
+	/**
+	 * Why a text layer's fields are refused, as {field, message}, or null (plan 3.2, 3.3, 3.10): text up to 2,000
+	 * characters whose tokens and braces parse, timeZone an IANA zone, locale a language tag, target a date-time with
+	 * its offset, and the layout fields in range.
+	 */
+	public static String[] textProblem(Map<String, Object> m)
+	{
+		Object locale = m.get("locale");
+		if(locale != null && (!(locale instanceof String l) || java.util.Locale.forLanguageTag(l.trim()).getLanguage().isEmpty()))
+		{
+			return new String[] { "locale", "locale must be a language tag such as en-US" };
+		}
+		Object text = m.get("text");
+		if(text != null)
+		{
+			if(!(text instanceof String t))
+			{
+				return new String[] { "text", "text must be a string" };
+			}
+			if(t.length() > TEXT_MAX)
+			{
+				return new String[] { "text", "text is " + t.length() + " characters; the most is " + TEXT_MAX };
+			}
+			try
+			{
+				TextTokens.parse(t, textLocale((String)locale));
+			}
+			catch(IllegalArgumentException e)
+			{
+				return new String[] { "text", e.getMessage() };
+			}
+		}
+		Object zone = m.get("timeZone");
+		if(zone != null)
+		{
+			try
+			{
+				java.time.ZoneId.of(zone.toString());
+			}
+			catch(java.time.DateTimeException e)
+			{
+				return new String[] { "timeZone", "timeZone must be an IANA zone such as America/New_York" };
+			}
+		}
+		Object target = m.get("target");
+		if(target != null)
+		{
+			try
+			{
+				java.time.OffsetDateTime.parse(target.toString().trim());
+			}
+			catch(java.time.format.DateTimeParseException e)
+			{
+				return new String[] { "target", "target must be a date and time with its offset, such as 2027-01-01T18:00:00-05:00" };
+			}
+		}
+		if(m.get("endText") != null && (!(m.get("endText") instanceof String e) || e.length() > TEXT_MAX))
+		{
+			return new String[] { "endText", "endText must be a string of at most " + TEXT_MAX + " characters" };
+		}
+		Object size = m.get("fontSize");
+		if(size != null && !(size instanceof Number n && n.doubleValue() >= 1 && n.doubleValue() <= 1000))
+		{
+			return new String[] { "fontSize", "fontSize must be from 1 to 1000" };
+		}
+		Object style = m.get("fontStyle");
+		if(style != null && !Fonts.STYLES.contains(style.toString()))
+		{
+			return new String[] { "fontStyle", "fontStyle must be one of " + Fonts.STYLES };
+		}
+		Object align = m.get("align");
+		if(align != null && !ALIGNS.contains(align.toString()))
+		{
+			return new String[] { "align", "align must be one of " + ALIGNS };
+		}
+		Object[][] ranges = { { "lineHeight", 0.5, 5.0 }, { "padding", 0.0, 500.0 }, { "radius", 0.0, 500.0 }, { "outlineWidth", 0.0, 20.0 } };
+		for(Object[] r: ranges)
+		{
+			Object v = m.get(r[0]);
+			if(v != null && !(v instanceof Number n && n.doubleValue() >= (double)r[1] && n.doubleValue() <= (double)r[2]))
+			{
+				return new String[] { (String)r[0], r[0] + " must be a number from " + fmt((double)r[1]) + " to " + fmt((double)r[2]) };
+			}
+		}
+		for(String b: new String[] { "box", "autoFit" })
+		{
+			if(m.get(b) != null && !(m.get(b) instanceof Boolean))
+			{
+				return new String[] { b, b + " must be true or false" };
+			}
+		}
+		return null;
+	}
+
+	private static String fmt(double d)
+	{
+		return d == Math.rint(d) ? Long.toString((long)d) : Double.toString(d);
+	}
+
+	/** This layer's text fields, for textProblem. */
+	private Map<String, Object> textFields()
+	{
+		Map<String, Object> m = new java.util.LinkedHashMap<>();
+		m.put("text", text);
+		m.put("locale", locale);
+		m.put("timeZone", timeZone);
+		m.put("target", target);
+		m.put("endText", endText);
+		m.put("fontSize", fontSize == -1 ? null : fontSize);
+		m.put("fontStyle", fontStyle);
+		m.put("align", align);
+		m.put("lineHeight", lineHeight);
+		m.put("padding", padding);
+		m.put("radius", radius);
+		m.put("outlineWidth", outlineWidth);
+		m.put("box", box);
+		m.put("autoFit", autoFit);
+		m.values().removeIf(java.util.Objects::isNull);
+		return m;
 	}
 
 	private WebPageCapture getWebPageCapture()
@@ -1836,10 +1996,19 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			{
 				this.text = obj.text;
 			}
-			if(this.useDate == null)
-			{
-				this.useDate = obj.useDate;
-			}
+			if(this.box == null) { this.box = obj.box; }
+			if(this.align == null) { this.align = obj.align; }
+			if(this.lineHeight == null) { this.lineHeight = obj.lineHeight; }
+			if(this.background == null) { this.background = obj.background; }
+			if(this.padding == null) { this.padding = obj.padding; }
+			if(this.radius == null) { this.radius = obj.radius; }
+			if(this.outlineColor == null) { this.outlineColor = obj.outlineColor; }
+			if(this.outlineWidth == null) { this.outlineWidth = obj.outlineWidth; }
+			if(this.autoFit == null) { this.autoFit = obj.autoFit; }
+			if(this.timeZone == null) { this.timeZone = obj.timeZone; }
+			if(this.locale == null) { this.locale = obj.locale; }
+			if(this.target == null) { this.target = obj.target; }
+			if(this.endText == null) { this.endText = obj.endText; }
 		}
 		if (this.type.equals("webPage"))
 		{

@@ -637,7 +637,7 @@ public class OverlayImage
 				long now = clock.getAsLong();
 				for (ObjectConfig obj : objects)
 				{
-					obj.draw(g, scaled, evenCoords, obj.timingAlpha(now, streamStart));
+					obj.draw(g, scaled, evenCoords, obj.timingAlpha(now, streamStart), now, streamStart);
 				}
 			}
 		}

@@ -99,6 +99,8 @@ test {
     systemProperty 'overlaystudio.jar', jar.archiveFile.get().asFile.absolutePath
     // the page tests' fake bridge serves these; UiFakeContractTest keeps them true to the module
     systemProperty 'overlaystudio.uiFixtures', rootProject.file('tests/ui/fixtures').absolutePath
+    // golden images for the draw tests (TextLayerTest)
+    systemProperty 'overlaystudio.goldens', file('src/test/resources/goldens').absolutePath
     testLogging {
         events 'passed', 'failed', 'skipped'
         exceptionFormat 'full'

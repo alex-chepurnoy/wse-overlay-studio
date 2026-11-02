@@ -85,7 +85,7 @@ class BoundingBoxTest
 	@Test
 	void textSpansTheWholeWidthOverItsLineHeight()
 	{
-		ObjectConfig clock = layer(Map.of("id", "clock", "type", "string", "text", "HH:mm:ss", "useDate", true, "x", 60, "y", 120,
+		ObjectConfig clock = layer(Map.of("id", "clock", "type", "string", "text", "{time:HH:mm:ss}", "x", 60, "y", 120,
 				"font", "SansSerif", "fontSize", 64, "color", "rgb(255,255,255)"));
 		Rectangle b = image(0, 0, 1280, 720, clock).drawBox(java.util.List.of(clock), 1.0);
 		assertEquals(0, b.x);

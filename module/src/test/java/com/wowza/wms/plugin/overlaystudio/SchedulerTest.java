@@ -32,7 +32,7 @@ class SchedulerTest
 
 	static ObjectConfig dateText(String pattern)
 	{
-		ObjectConfig o = JSON.convertValue(Map.of("id", "clock", "type", "string", "text", pattern, "useDate", true, "x", 0, "y", 20), ObjectConfig.class);
+		ObjectConfig o = JSON.convertValue(Map.of("id", "clock", "type", "string", "text", "{time:" + pattern + "}", "x", 0, "y", 20), ObjectConfig.class);
 		o.applyDefaults();
 		return o;
 	}
@@ -119,7 +119,7 @@ class SchedulerTest
 		final CountDownLatch release = new CountDownLatch(1);
 
 		@Override
-		public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing)
+		public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing, long now, long streamStart)
 		{
 			if(scaled == 1.0)
 			{

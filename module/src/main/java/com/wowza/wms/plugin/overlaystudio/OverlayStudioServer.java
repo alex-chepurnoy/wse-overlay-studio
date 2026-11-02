@@ -15,6 +15,7 @@ import com.wowza.wms.plugin.overlaystudio.rest.CaptureLimitConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.InfoConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.FontsConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.FontsCheckConfig;
+import com.wowza.wms.plugin.overlaystudio.rest.FormatConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.ObjectsConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.OverlayConfig;
@@ -52,7 +53,7 @@ public class OverlayStudioServer implements IServerNotify2
 			NamedOverlayConfig.class, NamedOverlayCaptureConfig.class, TemplateOverlayConfig.class, TemplateCopiesConfig.class, AppStreamsConfig.class,
 			AppStateConfig.class, NamedOverlayPreviewConfig.class, AppModuleConfig.class, TemplatesBuildConfig.class, TemplateSpecConfig.class,
 			TemplateUseConfig.class, ImagesConfig.class, StreamRestartConfig.class, TemplateOrderConfig.class, SnapshotConfig.class,
-			CaptureLimitConfig.class, FontsConfig.class, FontsCheckConfig.class };
+			CaptureLimitConfig.class, FontsConfig.class, FontsCheckConfig.class, FormatConfig.class };
 
 	public static final Class<OverlayStudioServer> CLASS = OverlayStudioServer.class;
 	public static String MODULE_NAME = CLASS.getSimpleName();
