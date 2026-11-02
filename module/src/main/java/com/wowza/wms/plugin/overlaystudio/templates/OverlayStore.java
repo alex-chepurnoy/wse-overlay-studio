@@ -27,8 +27,12 @@ import com.fasterxml.jackson.databind.SerializationFeature;
  */
 public final class OverlayStore
 {
-	/** Overlay-level fields a named overlay keeps. overlaySource and overlayEncodes come from the template. */
-	static final List<String> OVERLAY_KEYS = List.of("refreshRate", "threadDrawing", "maxDrawingTime", "even_coords", "opacity", "overlayIndex");
+	/**
+	 * Overlay-level fields a named overlay keeps, its style defaults included (objects fall back on them).
+	 * overlaySource and overlayEncodes come from the template.
+	 */
+	static final List<String> OVERLAY_KEYS = List.of("refreshRate", "threadDrawing", "maxDrawingTime", "even_coords", "opacity", "overlayIndex",
+			"stroke", "color", "fillColor", "shadowColor", "shadowOffset", "font", "fontStyle", "fontSize");
 	private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
 	private OverlayStore()
@@ -125,7 +129,24 @@ public final class OverlayStore
 		}
 		out.put("objects", clean);
 		Files.createDirectories(dir);
-		JSON.writeValue(f.toFile(), out);
+		// written beside the file and moved into place, so a stream loading it never reads half of it
+		Path tmp = Files.createTempFile(dir, "." + f.getFileName(), ".tmp");
+		try
+		{
+			JSON.writeValue(tmp.toFile(), out);
+			try
+			{
+				Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+			}
+			catch(java.nio.file.AtomicMoveNotSupportedException e)
+			{
+				Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			}
+		}
+		finally
+		{
+			Files.deleteIfExists(tmp);
+		}
 		return out;
 	}
 

@@ -247,7 +247,8 @@ def build_exe(out_dir, ver, jar_path):
     if not os.path.isfile(os.path.join(wix, 'candle.exe')):
         raise SystemExit('WiX 3.14.1 is missing from ' + wix + ' (wix314-binaries.zip from the wix3141rtm release)')
     env = dict(os.environ, PATH=wix + os.pathsep + os.environ.get('PATH', ''))
-    run(['jpackage', '--type', 'exe', '--name', APP_NAME, '--app-version', ver,
+    # an MSI's version is numbers only, so a -SNAPSHOT build installs as its release number; the file name keeps it
+    run(['jpackage', '--type', 'exe', '--name', APP_NAME, '--app-version', ver.split('-')[0],
          '--vendor', 'Wowza Media Systems, LLC', '--description', 'Overlay Studio for Wowza Streaming Engine',
          '--input', os.path.join(stage, 'input'), '--main-jar', os.path.basename(jar_path),
          '--main-class', 'com.wowza.wms.plugin.overlaystudio.install.Main',
@@ -258,7 +259,7 @@ def build_exe(out_dir, ver, jar_path):
     check_runtime(os.path.join(stage, 'temp', 'images', 'win-msi.image', APP_NAME, 'runtime'), modules)
     # no spaces: GitHub turns them into dots in a release file's name, and SHA256SUMS would no longer match it
     exe = '%s-%s.exe' % (APP_NAME.replace(' ', '-'), ver)
-    shutil.copy2(os.path.join(stage, 'out', '%s-%s.exe' % (APP_NAME, ver)), os.path.join(out_dir, exe))
+    shutil.copy2(os.path.join(stage, 'out', '%s-%s.exe' % (APP_NAME, ver.split('-')[0])), os.path.join(out_dir, exe))
     return exe
 
 

@@ -76,6 +76,44 @@ class NamedOverlayTest
 		assertEquals("https://scores.example/bug", ((Map<?, ?>)((List<?>)OverlayStore.read(d, "Scoreboard").get("objects")).get(0)).get("url"));
 	}
 
+	// D4: the overlay's own style defaults, which its objects fall back on, are kept
+	@Test
+	void writeKeepsOverlayLevelStyleDefaults() throws Exception
+	{
+		Path d = OverlayStore.dir(dir, "live");
+		Map<String, Object> o = overlay(page("score", "https://scores.example/bug"));
+		Map<String, Object> style = new LinkedHashMap<>();
+		style.put("stroke", 3);
+		style.put("color", "white");
+		style.put("fillColor", "rgb(0,0,0,128)");
+		style.put("shadowColor", "black");
+		style.put("shadowOffset", 4);
+		style.put("font", "Fira Sans");
+		style.put("fontStyle", "bold");
+		style.put("fontSize", 48);
+		o.putAll(style);
+		OverlayStore.write(d, "Styled", o, NamedOverlayTest::noPrivate);
+		Map<String, Object> back = OverlayStore.read(d, "Styled");
+		for(Map.Entry<String, Object> e: style.entrySet())
+		{
+			assertEquals(e.getValue(), back.get(e.getKey()), e.getKey());
+		}
+	}
+
+	// a reader never sees half a file: the overlay is written beside it and moved into place
+	@Test
+	void writeLeavesOnlyTheOverlayFile() throws Exception
+	{
+		Path d = OverlayStore.dir(dir, "live");
+		OverlayStore.write(d, "A", overlay(page("p", "https://a/")), NamedOverlayTest::noPrivate);
+		OverlayStore.write(d, "A", overlay(page("p", "https://b/")), NamedOverlayTest::noPrivate);
+		try(java.util.stream.Stream<Path> s = java.nio.file.Files.list(d))
+		{
+			assertEquals(List.of("A.json"), s.map(p -> p.getFileName().toString()).toList());
+		}
+		assertEquals("https://b/", ((Map<?, ?>)((List<?>)OverlayStore.read(d, "A").get("objects")).get(0)).get("url"));
+	}
+
 	@Test
 	void writeRefusals() throws Exception
 	{
