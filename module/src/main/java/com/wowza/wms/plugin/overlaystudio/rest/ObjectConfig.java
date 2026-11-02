@@ -1078,6 +1078,12 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	private transient volatile String imageProblem = null;
 
 	/** The virtual host this layer belongs to: its own, else its overlay's. */
+	/** Names the virtual host whose content folder an off-air draw reads image files from. */
+	void bindVHost(String vhost)
+	{
+		vhostName = vhost;
+	}
+
 	private String vhost()
 	{
 		if(vhostName != null)
@@ -2137,6 +2143,52 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		int vw = num(viewportWidth) > 0 ? num(viewportWidth) : w;
 		int vh = num(viewportHeight) > 0 ? num(viewportHeight) : h;
 		return new WebPageCapture.Settings(url, vw, vh, awt_keyColor(), paintBackground == null || paintBackground, label());
+	}
+
+	/**
+	 * A page layer in a thumbnail (plan 3.8): the last frame of a capture already open for this page (on air, or open
+	 * in the editor), keyed and cropped, else a gray box with the page's host name. Never opens a capture.
+	 * @return whether a page frame was drawn
+	 */
+	boolean drawPageThumbnail(Graphics2D g, double scaled)
+	{
+		WebPageCapture c = WebPageCapture.POOL.peek(webPageSettings());
+		BufferedImage frame = c == null ? null : c.lastRawImage();
+		int bw = w > 0 ? w : num(viewportWidth), bh = h > 0 ? h : num(viewportHeight);
+		int x = getX(scaled), y = getY(scaled), dw = (int)(bw * scaled), dh = (int)(bh * scaled);
+		if(dw <= 0 || dh <= 0)
+		{
+			return false;
+		}
+		if(frame != null)
+		{
+			g.drawImage(cropped(keyOut(frame, awt_keyColor(), num(keyTolerance))), x, y, dw, dh, null);
+			return true;
+		}
+		g.setComposite(AlphaComposite.SrcOver);
+		g.setColor(new Color(110, 110, 110, 210));
+		g.fillRect(x, y, dw, dh);
+		String host;
+		try
+		{
+			host = url == null ? null : java.net.URI.create(url.trim()).getHost();
+		}
+		catch(IllegalArgumentException e)
+		{
+			host = null;
+		}
+		java.awt.Font f = Fonts.font(null, Fonts.PLAIN, (float)Math.max(8, Math.min(dh / 4.0, 28 * scaled)));
+		if(host != null && f != null)
+		{
+			g.setFont(f);
+			g.setColor(Color.WHITE);
+			java.awt.FontMetrics fm = g.getFontMetrics();
+			java.awt.Shape clip = g.getClip();
+			g.clipRect(x, y, dw, dh);
+			g.drawString(host, x + Math.max(2, (dw - fm.stringWidth(host)) / 2), y + (dh + fm.getAscent() - fm.getDescent()) / 2);
+			g.setClip(clip);
+		}
+		return false;
 	}
 
 	/** Object id plus the url without its query string, for logs and status; queries can carry secrets. */
