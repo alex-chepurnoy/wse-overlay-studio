@@ -1,0 +1,44 @@
+#!/bin/sh
+# This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+# This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+# Refuses to install while URL Overlay 1.x is on this machine, before dpkg unpacks anything. 2.0 does not read 1.x's
+# overlays or templates, and the two would add a module to the same applications and draw into the same transcoder
+# slots. The control file's Conflicts line already stops dpkg while the 1.x package is installed; this covers a 1.x
+# installed from its tarball or zip. Runs on a fresh install and on an upgrade of 2.0, since 1.x could have been added
+# in between. The same signals as the installer's LegacyInstallCheck, for every WSE home the installer looks in.
+set -u
+case "${1:-}" in
+	install|upgrade) ;;
+	*) exit 0 ;;
+esac
+
+refuse() {
+	echo "URL Overlay 1.x is installed (found: $1). Uninstall it first (README, Before you install)." >&2
+	echo "Overlay Studio does not read its overlays or templates." >&2
+	exit 1
+}
+
+# Machine-wide: every 1.x install sets up its capture service, wherever its WSE is
+for f in /etc/systemd/system/WowzaURLOverlayCapture.service /opt/wse-url-overlay /etc/wse-url-overlay; do
+	[ -e "$f" ] && refuse "$f"
+done
+
+# Per WSE home: the same candidates as the installer's finder
+for home in "${WMSAPP_HOME:-}" /usr/local/WowzaStreamingEngine /usr/local/WowzaStreamingEngine-*; do
+	[ -n "$home" ] && [ -d "$home" ] || continue
+	for f in "$home"/lib/wse-plugin-url-overlay-*.jar; do
+		[ -e "$f" ] && refuse "$f"
+	done
+	if [ -f "$home/conf/Server.xml" ] && grep -q 'UrlOverlayServer' "$home/conf/Server.xml"; then
+		refuse "$home/conf/Server.xml (UrlOverlayServer)"
+	fi
+	for f in "$home"/conf/*/Application.xml; do
+		[ -f "$f" ] && grep -q 'UrlOverlayModule' "$f" && refuse "$f (UrlOverlayModule)"
+	done
+	for f in "$home/manager/wse-plugins/server/url-overlay" \
+		"$home/manager/temp/webapps/enginemanager/wse-plugins/server/url-overlay" \
+		"$home/manager/temp/com/wowza/wms/webapp/urloverlay"; do
+		[ -e "$f" ] && refuse "$f"
+	done
+done
+exit 0

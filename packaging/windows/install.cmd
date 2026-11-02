@@ -1,11 +1,11 @@
 @echo off
 rem This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
 rem This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
-rem Installs URL Overlay into Wowza Streaming Engine with the Java that WSE ships. Options are passed through;
+rem Installs Overlay Studio into Wowza Streaming Engine with the Java that WSE ships. Options are passed through;
 rem run "install.cmd --help" for them. Windows asks for administrator rights when the install needs them.
 setlocal
 call "%~dp0find-java.cmd" || exit /b 8
-"%UO_JAVA%" -jar "%UO_JAR%" Install %*
+"%OVS_JAVA%" -jar "%OVS_JAR%" Install %*
 set "CODE=%ERRORLEVEL%"
 if "%~1"=="" pause
 exit /b %CODE%

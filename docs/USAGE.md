@@ -1,6 +1,6 @@
-# Using URL Overlay
+# Using Overlay Studio
 
-Open WSE Manager, choose **URL Overlay** in the top bar, and pick an application in the header. The page keeps itself
+Open WSE Manager, choose **Overlay Studio** in the top bar, and pick an application in the header. The page keeps itself
 current: a change made in another browser, through REST or by editing a file shows within a few seconds.
 
 An overlay reaches viewers only through a transcoder template: the overlay is named in a template, a stream runs that
@@ -52,7 +52,7 @@ exist), healthy, and not publishing.
 ![Overlay editor](images/usage-3-overlay.png)
 
 An overlay is a named set of pages placed on the video, saved per application in
-`conf.modules/urloverlay/<application>/<overlay>.json`.
+`conf.modules/overlaystudio/<application>/<overlay>.json`.
 
 - **Pages** are listed under the open overlay in the list column; the top one draws on top, and rows can be dragged
   to reorder. **Add page** is last. Each page's menu moves it up or down, reloads it (**Reload page**), or removes it.
@@ -97,13 +97,13 @@ A master is edited in three parts:
   and before scaling, so every video output shows it, in source pixels.
 - **Encode**: the outputs, with an estimate of the encoding load (it assumes a 1080p, 30 fps source), and **Overlays on
   outputs**: what is drawn after scaling on the outputs picked for it, in each output's pixels.
-- In either Overlays section, **+ URL overlay** adds one of the application's overlays (or opens a new overlay when
+- In either Overlays section, **+ Overlay** adds one of the application's overlays (or opens a new overlay when
   there is none), and **+ Image** adds an image: a file from the virtual host's `content/` folder (up to 8 MB), or one
-  uploaded into `content/urloverlay/` (up to 2 MB), at most 4096 pixels a side, at one of nine positions with an offset, size and
-  opacity. Up to eight images in a template, drawn under the URL overlay. A template carries one URL overlay, which can
-  hold several pages; **Move the URL overlay here** moves it between the input and the outputs. On outputs with every
+  uploaded into `content/overlaystudio/` (up to 2 MB), at most 4096 pixels a side, at one of nine positions with an offset, size and
+  opacity. Up to eight images in a template, drawn under the overlay. A template carries one overlay, which can
+  hold several pages; **Move the overlay here** moves it between the input and the outputs. On outputs with every
   output picked, it is saved on the input, which every output then shows. With one video output there is no
-  difference, so the URL overlay stays in Decode.
+  difference, so the overlay stays in Decode.
 - A new master starts from a ladder: **Original + overlay copy**, **1080p, 720p, 360p**, **720p, 360p**, **Single 720p** or
   **Audio only**. Each output shows what scales and encodes it, and **Edit** opens Picture (size, fit, a region of the
   source), Frame rate, Video (H.264, H.265, VP8, VP9, profile, bitrate, and for H.264 rate control and speed), Audio,
@@ -144,7 +144,7 @@ the encoder.
 Previews play from the streaming port (1935 by default). WSE's HTTP streamer allows this by default; setting
 `cupertinoCORSHeadersEnabled` or `httpCORSHeadersEnabled` to false stops it.
 
-The application picker also lists live applications without URL Overlay. **Add URL Overlay to <application>** adds the
+The application picker also lists live applications without Overlay Studio. **Add Overlay Studio to <application>** adds the
 module to its `Application.xml` (backed up, and taken out again by uninstall) and restarts the application, now or
 later. Streams publishing to it disconnect for a few seconds; the dialog names them first.
 
@@ -179,34 +179,34 @@ Set by the installer when absent; change them there and restart WSE.
 
 | Property | Default | Meaning |
 |---|---|---|
-| `UrlOverlayServer` | `authorized` | REST access: `authorized`, `unauthorized` (every change refused) or `disabled` (no resources) |
-| `UrlOverlayCaptureSocket` | `/run/wse-url-overlay/capture.sock` (Linux), `C:\ProgramData\WowzaURLOverlay\capture.sock` (Windows) | Where WSE reaches the capture service |
-| `UrlOverlayAllowPrivateNetworks` | `false` | Let pages load from private, CGNAT and unique-local ranges. Never opens loopback, link-local, cloud metadata or this server's own addresses |
-| `UrlOverlayAllowHosts` | empty | Comma list of hostnames, addresses or CIDRs always allowed. Beats the private-range block, never `UrlOverlayBlockHosts`. Loopback, link-local and this server's own addresses open only for an exact address entry |
-| `UrlOverlayBlockHosts` | empty | Comma list of hostnames, addresses or CIDRs always blocked |
-| `UrlOverlayAllowPorts` | empty | Ports pages may use besides 80 and 443 |
-| `UrlOverlayBlockChromeServices` | `true` | Refuse the Google hosts Chrome contacts on its own; an `UrlOverlayAllowHosts` entry lets one through |
+| `OverlayStudioServer` | `authorized` | REST access: `authorized`, `unauthorized` (every change refused) or `disabled` (no resources) |
+| `OverlayStudioCaptureSocket` | `/run/wse-overlay-studio/capture.sock` (Linux), `C:\ProgramData\WowzaOverlayStudio\capture.sock` (Windows) | Where WSE reaches the capture service |
+| `OverlayStudioAllowPrivateNetworks` | `false` | Let pages load from private, CGNAT and unique-local ranges. Never opens loopback, link-local, cloud metadata or this server's own addresses |
+| `OverlayStudioAllowHosts` | empty | Comma list of hostnames, addresses or CIDRs always allowed. Beats the private-range block, never `OverlayStudioBlockHosts`. Loopback, link-local and this server's own addresses open only for an exact address entry |
+| `OverlayStudioBlockHosts` | empty | Comma list of hostnames, addresses or CIDRs always blocked |
+| `OverlayStudioAllowPorts` | empty | Ports pages may use besides 80 and 443 |
+| `OverlayStudioBlockChromeServices` | `true` | Refuse the Google hosts Chrome contacts on its own; an `OverlayStudioAllowHosts` entry lets one through |
 
 A scoreboard served from a machine on your LAN (a private address) needs
-`UrlOverlayAllowPrivateNetworks` set to `true` or its address in `UrlOverlayAllowHosts`.
+`OverlayStudioAllowPrivateNetworks` set to `true` or its address in `OverlayStudioAllowHosts`.
 
 ### Application properties (`conf/<application>/Application.xml`, optional)
 
 | Property | Default | Meaning |
 |---|---|---|
-| `UrlOverlayIndex` | `16` | The transcoder overlay slot URL Overlay draws in. Image overlays use 1 to 8 |
-| `UrlOverlayDebugLogs` | `false` | Extra overlay logging |
-| `UrlOverlayMaxDebugOverlayLogs` | `100` | Cap on those lines |
-| `UrlOverlayInitTransparentOverlay` | `false` | On a stream's first frame, put a transparent overlay on every encoding output (a workaround for WSE builds that also drew output overlays on the source) |
+| `OverlayStudioIndex` | `16` | The transcoder overlay slot Overlay Studio draws in. Image overlays use 1 to 8 |
+| `OverlayStudioDebugLogs` | `false` | Extra overlay logging |
+| `OverlayStudioMaxDebugOverlayLogs` | `100` | Cap on those lines |
+| `OverlayStudioInitTransparentOverlay` | `false` | On a stream's first frame, put a transparent overlay on every encoding output (a workaround for WSE builds that also drew output overlays on the source) |
 
 ### `capture.properties`
 
-`/etc/wse-url-overlay/capture.properties` on Linux, `C:\ProgramData\WowzaURLOverlay\capture.properties` on Windows.
-Written by the installer; restart `WowzaURLOverlayCapture` after a change.
+`/etc/wse-overlay-studio/capture.properties` on Linux, `C:\ProgramData\WowzaOverlayStudio\capture.properties` on Windows.
+Written by the installer; restart `WowzaOverlayStudioCapture` after a change.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `socket` | required | The Unix socket the service listens on; must match `UrlOverlayCaptureSocket` |
+| `socket` | required | The Unix socket the service listens on; must match `OverlayStudioCaptureSocket` |
 | `chrome` | set by the installer | The Chrome the service runs: chrome-headless-shell on Linux, Chrome for Testing on Windows. A `chromedriver` line from an earlier version is ignored |
 | `workDir` | required | Chrome profiles and work files |
 | `maxCaptures` | sized from the server | Pages open at once when the service starts; one more is refused. A new install sets it from the server's cores and memory, and `--pages <n\|auto>` sets it on any install. **Settings** in the page changes it while the service runs |
@@ -241,7 +241,7 @@ service's CPU (`CPUQuota`, 2 cores unless the server is sized for more than 12 p
 rather than taking CPU from WSE: those 12 changing every 0.1 s, held to 2 cores, delivered 39% of their frames. Set
 fewer pages, or Standard, for pages that animate all the time.
 
-A number set in **Settings** in the page is kept in `conf.modules/urloverlay/capture-limit.json` and replaces
+A number set in **Settings** in the page is kept in `conf.modules/overlaystudio/capture-limit.json` and replaces
 `maxCaptures` while WSE runs; the installer reports it as the one in force, and `--pages` removes it. On Linux the
 unit's memory cap stays within three quarters of the server's memory, so Settings may top out below the server's
 size; a `--pages` above that is allowed and noted.
@@ -249,21 +249,21 @@ size; a `--pages` above that is allowed and noted.
 ## Troubleshooting
 
 Module lines are in WSE's `logs/wowzastreamingengine_access.log` (warnings also in `wowzastreamingengine_error.log`)
-and all contain `UrlOverlay`. The capture service logs to `/var/log/wse-url-overlay/capture.log` on Linux and
-`C:\ProgramData\WowzaURLOverlay\logs\` on Windows.
+and all contain `OverlayStudio`. The capture service logs to `/var/log/wse-overlay-studio/capture.log` on Linux and
+`C:\ProgramData\WowzaOverlayStudio\logs\` on Windows.
 
 | What you see | Cause and fix |
 |---|---|
-| *The URL Overlay bridge is not loaded in WSE Manager.* | The Manager was not restarted after the install, or the installer skipped the bridge because this Manager is not one it was built for (the install report says *The Manager bridge was not installed: this WSE Manager is not one it was built for (...)*). Run the installer again and restart WSE Manager. A skipped Manager cannot use the page |
+| *The Overlay Studio bridge is not loaded in WSE Manager.* | The Manager was not restarted after the install, or the installer skipped the bridge because this Manager is not one it was built for (the install report says *The Manager bridge was not installed: this WSE Manager is not one it was built for (...)*). Run the installer again and restart WSE Manager. A skipped Manager cannot use the page |
 | *The Manager bridge is version X and this page is Y.* | Run the installer again, then restart WSE Manager |
 | *WSE could not be reached from this browser.* | WSE or WSE Manager is not running |
-| *The capture service is not running.* | The page and status show: *The URL Overlay capture service is not running (nothing answers on <socket>). Start it with "sudo systemctl start WowzaURLOverlayCapture" on Linux or "net start WowzaURLOverlayCapture" as an administrator on Windows.* Streams keep their last picture meanwhile. If it will not start, see its log and `systemctl status WowzaURLOverlayCapture` or `sc query WowzaURLOverlayCapture` |
-| **Read only.** banner | *... is not in the admin group; changes need a WSE administrator.* Sign in as an administrator. Or *WSE REST authentication is off ...*: set `RESTInterface/AuthenticationMethod` to `basic` or `digest`, and `UrlOverlayServer` to `authorized` |
-| *Blocked host: <host> resolves to <address> (<rule>). Allow it with the UrlOverlayAllowHosts server property.* | The page's address is private, loopback, link-local, metadata or this server. See Settings. A block after loading (an image or script the page fetches) shows on the page row as *Blocked: <rule> <address>* |
-| *Blocked port: <port>. Pages are captured from ports ...; add others with the UrlOverlayAllowPorts server property.* | Add the port to `UrlOverlayAllowPorts` |
-| *Chrome did not start in its sandbox (...). Captures stay off until it does; the service never runs Chrome without its sandbox.* | On Ubuntu 23.10 and later the message continues *This system restricts unprivileged user namespaces ...*: the AppArmor profile `/etc/apparmor.d/wse-url-overlay-chrome` is missing or not loaded. Run the installer again, or check `aa-status`. On Windows, check that the service runs as `NT SERVICE\WowzaURLOverlayCapture` and can read the Chrome folder |
+| *The capture service is not running.* | The page and status show: *The Overlay Studio capture service is not running (nothing answers on <socket>). Start it with "sudo systemctl start WowzaOverlayStudioCapture" on Linux or "net start WowzaOverlayStudioCapture" as an administrator on Windows.* Streams keep their last picture meanwhile. If it will not start, see its log and `systemctl status WowzaOverlayStudioCapture` or `sc query WowzaOverlayStudioCapture` |
+| **Read only.** banner | *... is not in the admin group; changes need a WSE administrator.* Sign in as an administrator. Or *WSE REST authentication is off ...*: set `RESTInterface/AuthenticationMethod` to `basic` or `digest`, and `OverlayStudioServer` to `authorized` |
+| *Blocked host: <host> resolves to <address> (<rule>). Allow it with the OverlayStudioAllowHosts server property.* | The page's address is private, loopback, link-local, metadata or this server. See Settings. A block after loading (an image or script the page fetches) shows on the page row as *Blocked: <rule> <address>* |
+| *Blocked port: <port>. Pages are captured from ports ...; add others with the OverlayStudioAllowPorts server property.* | Add the port to `OverlayStudioAllowPorts` |
+| *Chrome did not start in its sandbox (...). Captures stay off until it does; the service never runs Chrome without its sandbox.* | On Ubuntu 23.10 and later the message continues *This system restricts unprivileged user namespaces ...*: the AppArmor profile `/etc/apparmor.d/wse-overlay-studio-chrome` is missing or not loaded. Run the installer again, or check `aa-status`. On Windows, check that the service runs as `NT SERVICE\WowzaOverlayStudioCapture` and can read the Chrome folder |
 | Overlay does not show on a stream | The stream view's sentence under the player says why. Usually the stream's template names no overlay, the transcoder is off, or the stream has not restarted since its outputs changed |
-| A stream runs a VIF template | The overlay is skipped on it. Apply a URL Overlay template from the stream's menu |
+| A stream runs a VIF template | The overlay is skipped on it. Apply a Overlay Studio template from the stream's menu |
 | Linux: the page renders without text | Install `fontconfig` and a font package such as `fonts-liberation` |
 | The installer stops with exit 3 | It cannot write to the WSE folder (run as administrator or with `sudo`), or WSE is running: stop it first |
 

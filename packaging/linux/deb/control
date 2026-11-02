@@ -1,0 +1,16 @@
+Package: {package}
+Version: {version}
+Architecture: all
+Maintainer: {maintainer}
+Installed-Size: {size_kb}
+Section: video
+Priority: optional
+Recommends: {recommends}
+# 1x-compat:begin
+Conflicts: wse-url-overlay
+# 1x-compat:end
+Description: Overlay Studio for Wowza Streaming Engine
+ Captures a web page with headless Chrome and composites it onto live streams in the
+ Wowza Streaming Engine transcoder. Adds the module to /usr/local/WowzaStreamingEngine and
+ sets up the capture service WowzaOverlayStudioCapture (system user wse-overlay-studio, Chrome for
+ Testing downloaded during the install into /opt/wse-overlay-studio).

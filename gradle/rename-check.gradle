@@ -1,0 +1,77 @@
+// This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
+// This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
+//
+// The rename check (docs/12-v2-plan.md, section 7): no URL Overlay 1.x name is left in the shipped tree. Fails on
+// url-overlay, "url overlay", urloverlay, uo- or uo_ at the start of a word, and UO_, in any case, in the text files
+// git lists (so build output is never read); outside a git checkout it is skipped. Allowed: the files below as a whole, which exist to find 1.x, and lines
+// between 1x-compat:begin and 1x-compat:end markers in any file. Runs with `gradlew check` and `gradlew build`.
+
+def renamePattern = ~/(?i)url[- ]?overlay|\buo[-_]|UO_/
+
+def renameScope = ['module', 'capture', 'shared', 'installer', 'bridge', 'ui', 'packaging', 'tests',
+                   'README.md', 'THIRD-PARTY-NOTICES.md', 'docs/USAGE.md', 'docs/DESIGN.md', 'docs/BUILD.md',
+                   'build.gradle', 'settings.gradle', 'gradle.properties']
+
+def renameAllowedFiles = [
+        'installer/src/main/java/com/wowza/wms/plugin/overlaystudio/install/LegacyInstallCheck.java',
+        'installer/src/test/java/com/wowza/wms/plugin/overlaystudio/install/LegacyInstallCheckTest.java',
+        'packaging/linux/deb/preinst',
+] as Set
+
+def renameBinary = ~/(?i)\.(png|jpe?g|gif|ico|bmp|webp|ttf|otf|woff2?|jar|zip|gz|exe|dll|class)$/
+
+// Old names on lines outside a marked block, as "path:line: text"
+def renameFindings = { String path, String text ->
+    def out = []
+    boolean inBlock = false
+    text.readLines().eachWithIndex { line, i ->
+        if (line.contains('1x-compat:begin')) {
+            inBlock = true
+        } else if (line.contains('1x-compat:end')) {
+            inBlock = false
+        } else if (!inBlock && renamePattern.matcher(line).find()) {
+            out << "${path}:${i + 1}: ${line.trim()}"
+        }
+    }
+    out
+}
+
+tasks.register('renameCheck') {
+    group = 'verification'
+    description = 'Fails when a URL Overlay 1.x name is left in the shipped tree.'
+    def root = rootProject.projectDir
+    inputs.files(fileTree(root) { renameScope.each { include it, it + '/**' }; exclude '**/build/**', '**/.gradle/**' })
+    outputs.upToDateWhen { false }
+    doLast {
+        // the matcher itself, on what it must and must not catch
+        def caught = ['wse-url-overlay', 'URL Overlay', 'url overlay', 'com.wowza.wms.plugin.urloverlay', 'UrlOverlayModule',
+                      'ui/js/uo-core.js', '.uo-plugin', 'uo_try', 'UO_JAVA', 'WowzaURLOverlayCapture']
+        def passed = ['wse-overlay-studio', 'OverlayStudioModule', 'ovs-core.js', 'duo-tone', 'overlay', 'URL of the overlay']
+        caught.each { assert !renameFindings('t', it).isEmpty(): "rename check misses: ${it}" }
+        passed.each { assert renameFindings('t', it).isEmpty(): "rename check flags: ${it}" }
+        assert renameFindings('t', '# 1x-compat:begin\nConflicts: wse-url-overlay\n# 1x-compat:end\n').isEmpty()
+        assert renameFindings('t', '<!-- 1x-compat:begin -->\nx\n<!-- 1x-compat:end -->\nurl-overlay').size() == 1
+
+        if (!new File(root, '.git').exists()) {
+            logger.lifecycle('rename check: not a git checkout, skipped')
+            return
+        }
+        // tracked files and new ones not yet added, but nothing .gitignore excludes
+        def ls = ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--'] + renameScope
+        def proc = new ProcessBuilder(ls).directory(root).redirectErrorStream(true).start()
+        def listed = new String(proc.inputStream.readAllBytes(), 'UTF-8')
+        if (proc.waitFor() != 0) {
+            throw new GradleException('rename check: git ls-files failed: ' + listed)
+        }
+        def found = []
+        listed.split('\u0000').findAll { it && !renameAllowedFiles.contains(it) && !(it ==~ renameBinary) }.each { path ->
+            def f = new File(root, path)
+            if (f.isFile()) {
+                found.addAll(renameFindings(path, f.getText('UTF-8')))
+            }
+        }
+        if (!found.isEmpty()) {
+            throw new GradleException("URL Overlay 1.x names are left in the shipped tree (rename check, docs/12-v2-plan.md section 7):\n" + found.join('\n'))
+        }
+    }
+}
