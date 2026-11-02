@@ -361,9 +361,11 @@
     box.querySelectorAll('[data-menu-list] button').forEach(function (i) { i.addEventListener('click', function () { U.closeMenus(); }); });
   };
   // items: [[act, label, danger, disabled], '-', ...]; for: what the actions are on, as "kind:id" (U.rowActions[kind])
-  U.rowMenuHtml = function (target, label, items) {
-    return '<button type="button" class="btn sm icon ghost rowmenu" data-write aria-haspopup="menu" aria-expanded="false" aria-label="' + esc(label) + '" title="' + esc(label) + '" data-menu="rowfloat" data-rowfor="' + esc(target) + '" data-rowitems="' +
-      esc(JSON.stringify(items)) + '">' + U.icon('more') + '</button>';
+  // opts.html: the button's own content instead of the "more" icon, with opts.cls (the Add menus)
+  U.rowMenuHtml = function (target, label, items, opts) {
+    opts = opts || {};
+    return '<button type="button" class="btn sm ' + (opts.html ? '' : 'icon ') + 'ghost rowmenu' + (opts.cls ? ' ' + opts.cls : '') + '" data-write aria-haspopup="menu" aria-expanded="false" aria-label="' + esc(label) + '" title="' + esc(label) + '" data-menu="rowfloat" data-rowfor="' + esc(target) + '" data-rowitems="' +
+      esc(JSON.stringify(items)) + '">' + (opts.html || U.icon('more')) + '</button>';
   };
   U.rowActions = {};
   U.openRowMenu = function (b) {
@@ -472,6 +474,7 @@
     grid: '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
     up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
     down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+    chev: '<path d="M6 9l6 6 6-6"/>',
     trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
     panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',

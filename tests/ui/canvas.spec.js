@@ -100,3 +100,10 @@ test('nothing selected reads as a layer', async ({ page, studio }) => {
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-insp]')).toContainText('No layer selected');
 });
+
+test('the Place tab shows an image layer at its picture size once it arrives', async ({ page, studio }) => {
+  await openMixed(page, studio);
+  await page.locator('[data-layers] .prow').filter({ hasText: 'logo.png' }).click();
+  await expect(page.locator('#ovs-f-w')).toHaveValue('200');
+  await expect(page.locator('#ovs-f-h')).toHaveValue('100');
+});

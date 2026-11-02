@@ -199,8 +199,9 @@
         var open = v.screen === 'overlay' && v.id === o.name;
         if (!open && !matches(o.name + ' ' + sub)) return;
         h.push(item('overlay:' + o.name, o.error ? 'bad' : live.length ? 'on' : '', U.esc(o.name), U.esc(sub), unsavedFor('overlay:' + o.name), open, null,
-          U.rowMenuHtml('overlay:' + o.name, 'Actions for ' + o.name, [['addpage', 'Add page'], ['dup', 'Duplicate...'], '-', ['del', 'Delete overlay...', true]])));
-        // the open overlay's pages sit under it, with Add page last
+          U.rowMenuHtml('overlay:' + o.name, 'Actions for ' + o.name, [['add:page', 'Add web page'], ['add:text', 'Add text'], ['add:datetime', 'Add date and time'], ['add:shape', 'Add shape...'], ['add:image', 'Add image'], '-',
+          ['dup', 'Duplicate...'], '-', ['del', 'Delete overlay...', true]])));
+        // the open overlay's layers sit under it, with the Add menu last
         if (open) h.push('<li class="lsub-host" data-ovpages></li>');
       });
       var nu = unsavedFor('new-overlay:');

@@ -22,7 +22,9 @@
   var mem = {};
   var S = { name: null, saved: null, draft: null, layer: null, preview: null, previewInfo: null, status: null,
     captures: {}, raw: {}, rawAt: {}, busy: {}, thumbAt: {}, seq: 0, shown: {}, capStatus: {}, drafted: {}, saving: false, player: null, timer: null, statusTimer: null,
-    undo: [], redo: [], lastSnap: null, known: null, conflict: false, theirs: null, justSaved: false, soon: {}, guides: false, inspTab: null, adding: false, savedNote: null };
+    undo: [], redo: [], lastSnap: null, known: null, conflict: false, theirs: null, justSaved: false, soon: {}, guides: false, inspTab: null, adding: false, savedNote: null,
+    // the kind being placed on the canvas (plan 4.1), and layer ids renamed since the last save: first id -> current
+    placing: null, renamed: {} };
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function objects() { return (S.draft && S.draft.objects) || []; }
@@ -155,7 +157,7 @@
     el.insp.innerHTML = '<section><div class="skel"></div><div class="skel"></div></section>';
     return U.api.get(ovPath(name)).then(function (o) {
       if (S.name !== name) return;
-      S.saved = normalize(o); S.draft = clone(S.saved);
+      S.saved = normalize(o); S.draft = clone(S.saved); S.renamed = {}; S.placing = null;
       var top = sorted()[0]; S.layer = top ? top.id : null;
       renderAll();
       startCaptures();
@@ -399,6 +401,7 @@
     if (S.player) { S.player.stop(); S.player = null; }
     el.stage.innerHTML = '<div class="frame" data-frame aria-label="Canvas: layers over a background stream"><video muted playsinline></video><div class="waiting" data-wait></div>' +
       '<div class="safe" data-safe' + (S.guides ? '' : ' hidden') + '></div><span class="lbl top" data-airlbl hidden></span></div>';
+    el.stage.querySelector('[data-frame]').addEventListener('pointerdown', onPlaceDown, true);
     var v = el.stage.querySelector('video'), wait = el.stage.querySelector('[data-wait]');
     var url = U.hls(S.previewInfo && S.previewInfo.source && S.previewInfo.source.hls);
     if (S.preview && url && U.current() === 'overlay') {
@@ -434,6 +437,7 @@
     var a = document.activeElement, focused = a && frame.contains(a) && a.getAttribute ? a.getAttribute('data-id') : null;
     var s = src();
     frame.style.aspectRatio = s.w + ' / ' + s.h; frame.style.setProperty('--ar', String(s.w / s.h));
+    frame.classList.toggle('placing', !!S.placing);
     frame.querySelectorAll('.pg').forEach(function (b) { b.remove(); });
     objects().slice().sort(function (x, y) { return (x.zOrder || 0) - (y.zOrder || 0); }).forEach(function (o) {
       var b = document.createElement('div'), web = o.type === 'webPage', draft = web ? isDraftPage(o) : !ro() && !savedById(o.id), sel = o.id === S.layer && !ro();
@@ -465,6 +469,12 @@
   }
 
   function renderCoords() {
+    if (S.placing) {
+      // read out by the canvas area's polite live region
+      el.coords.innerHTML = '<span class="bdg on" data-placehint>Click to place the ' + U.esc(KIND_LABEL[S.placing].toLowerCase()) + ', or drag to draw it. Enter puts it in the center, Escape cancels.</span>';
+      el.outside.hidden = true;
+      return;
+    }
     var s = src(), o = S.layer && byId(S.layer), z = o ? size(o) : null;
     el.coords.innerHTML = '<span class="bdg" title="Source picture">' + s.w + ' x ' + s.h + (s.known ? '' : ', assumed') + '</span>' +
       (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + (o.y || 0) + ' &middot; ' + z.w + ' x ' + z.h + '</span>' : '');
@@ -481,7 +491,7 @@
   }
 
   function startDrag(e, id, grip) {
-    if (e.button !== 0 || ro()) return;
+    if (e.button !== 0 || ro() || S.placing) return;
     e.preventDefault();
     // a press on another page selects it and drags it at once; its corner grips appear on release
     var fresh = S.layer !== id;
@@ -594,11 +604,12 @@
   };
   U.rowActions.overlay = function (name, act) {
     if (act === 'dup') U.newOverlayFrom(name);
-    else if (act === 'addpage') {
-      if (U.current() === 'overlay' && S.name === name && S.draft) { startAdd(); return; }
+    else if (act === 'addpage' || act.indexOf('add:') === 0) {
+      var kind = act === 'addpage' ? 'page' : act.slice(4);
+      if (U.current() === 'overlay' && S.name === name && S.draft) { addOnOpen(kind); return; }
       // the flag is set only once this overlay is the one opening, so a navigation that did not happen leaves none
       U.go('overlay:' + name);
-      if (U.current() === 'overlay' && S.name === name) { if (S.draft) startAdd(); else S.addOnOpen = name; }
+      if (U.current() === 'overlay' && S.name === name) { if (S.draft) addOnOpen(kind); else S.addOnOpen = { name: name, kind: kind }; }
     } else if (act === 'del') deleteOverlay(name);
   };
   // order: page ids, top first
@@ -678,10 +689,12 @@
     if (!o) {
       h = '<div class="pnl-h"><div><h3>No layer selected</h3><span class="small faint">' + U.esc(S.name) + '</span></div></div>' +
         '<section><p class="small muted">Select a layer in the list or on the canvas' + (ro() ? '.' : ', or add the page with the clock and score.') + '</p>' +
-        (ro() ? '' : '<p style="margin-top:12px"><button type="button" class="btn sm" data-addpage>' + U.icon('plus') + 'Add page</button></p>') + '</section>';
+        (ro() ? '' : '<p style="margin-top:12px">' + addMenuHtml('insp', 'btn-add') + '</p>') + '</section>';
     } else {
       var web = o.type === 'webPage', z = size(o), s = src(), past = (o.x || 0) + z.w > s.w * 0.95 || (o.y || 0) + z.h > s.h * 0.95;
-      h = '<div class="pnl-h"><div><h3>' + U.esc(o.id) + '</h3>' + (web ? '<span class="capchip ' + pageDot(o.id) + '" data-capline title="' + U.esc(capLine(o.id).replace(/<[^>]+>/g, '')) + '"><span class="dot ' + pageDot(o.id) + '"></span>' + U.esc(capShort(o.id)) + '</span>' : '') +
+      // the id is editable: live values (plan 3.6) address a layer by it
+      var idHtml = ro() ? '<h3>' + U.esc(o.id) + '</h3>' : '<input class="lid" data-lid value="' + U.esc(o.id) + '" aria-label="Layer id" title="Layer id: what a live value feed writes to" spellcheck="false" autocomplete="off"><div class="err" data-liderr></div>';
+      h = '<div class="pnl-h"><div>' + idHtml + (web ? '<span class="capchip ' + pageDot(o.id) + '" data-capline title="' + U.esc(capLine(o.id).replace(/<[^>]+>/g, '')) + '"><span class="dot ' + pageDot(o.id) + '"></span>' + U.esc(capShort(o.id)) + '</span>' : '') +
         '</div><span class="spacer"></span>' + (web && savedById(o.id) && !ro() ? '<button type="button" class="btn sm ghost" data-reloadpage title="Load ' + U.esc(host(o.url)) + ' again in the browser on the server, for a capture that shows the wrong thing">' + U.icon('refresh') + 'Reload page</button>' : '') +
         '<button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
       var tabs = web ? [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']] : [['place', 'Place']];
@@ -717,8 +730,12 @@
       };
     });
     el.insp.querySelectorAll('[data-f]').forEach(function (i) { i.addEventListener('input', onField); i.addEventListener('change', onField); });
-    var add = el.insp.querySelector('[data-addpage]');
-    if (add) add.onclick = startAdd;
+    var lid = el.insp.querySelector('[data-lid]');
+    if (lid && o) {
+      var commit = function () { if (lid.value.trim() !== o.id) renameLayer(o.id, lid.value.trim(), lid); };
+      lid.addEventListener('change', commit);
+      lid.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape') { lid.value = o.id; lid.blur(); } });
+    }
     var rp = el.insp.querySelector('[data-reloadpage]');
     if (rp) rp.onclick = function () { reloadPage(o.id); };
     var ci = el.insp.querySelector('[data-closeinsp]');
@@ -872,8 +889,7 @@
     function ok() {
       var id = idI.value.trim(), url = urlI.value.trim(), err = el.insp.querySelector('[data-adderr]');
       var vw = parseInt(el.insp.querySelector('#ovs-pw').value, 10), vh = parseInt(el.insp.querySelector('#ovs-ph').value, 10);
-      var why = !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) ? 'Name: letters, digits, dot, dash and underscore.' : used.indexOf(id) >= 0 ? 'A page with this name exists.' :
-        urlProblem(url) || (!(vw >= 16 && vh >= 16) ? 'Enter the page size in pixels.' : null);
+      var why = idProblem(id) || urlProblem(url) || (!(vw >= 16 && vh >= 16) ? 'Enter the page size in pixels.' : null);
       if (why) { err.textContent = why; return; }
       snapshot();
       var top = sorted()[0];
@@ -883,6 +899,159 @@
     el.insp.querySelector('[data-addok]').onclick = ok;
     el.insp.querySelector('[data-addcancel]').onclick = function () { S.adding = false; renderInspector(); };
     el.insp.querySelectorAll('input').forEach(function (i) { i.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } }); });
+  }
+
+  /* ---------- adding layers (plan 4.1): the Add bar and menus, placed on the canvas ---------- */
+  var KIND_LABEL = { page: 'Web page', text: 'Text', datetime: 'Date and time', image: 'Image', rectangle: 'Rectangle', rounded: 'Rounded rectangle', square: 'Square',
+    ellipse: 'Ellipse', circle: 'Circle', line: 'Line', arrow: 'Arrow', triangle: 'Triangle' };
+  var SHAPE_KINDS = ['rectangle', 'rounded', 'square', 'ellipse', 'circle', 'line', 'arrow', 'triangle'];
+  function shapeItems() { return SHAPE_KINDS.map(function (k) { return [k, KIND_LABEL[k]]; }); }
+  // one menu for every kind, under the layer list and in the empty inspector
+  function addMenuHtml(where, cls) {
+    return U.rowMenuHtml('add:' + where, 'Add a layer', [['page', 'Web page'], ['text', 'Text'], ['datetime', 'Date and time'], '-'].concat(shapeItems()).concat(['-', ['image', 'Image']]),
+      { html: U.icon('plus') + 'Add layer', cls: cls });
+  }
+  function addBarHtml() {
+    var b = function (k, icon) { return '<button type="button" class="btn sm ghost" data-write data-addkind="' + k + '">' + U.icon(icon) + KIND_LABEL[k] + '</button>'; };
+    return b('page', 'web') + b('text', 'text') + b('datetime', 'clock') +
+      U.rowMenuHtml('add:bar', 'Add a shape', shapeItems(), { html: U.icon('shape') + 'Shape' + U.icon('chev'), cls: 'shapemenu' }) + b('image', 'image');
+  }
+  U.rowActions.add = function (where, kind) { addKind(kind); };
+  // from the overlay row's menu: Add shape... opens the Shape menu, the rest start at once
+  function addOnOpen(kind) {
+    if (kind !== 'shape') { addKind(kind); return; }
+    var m = el.addbar && el.addbar.querySelector('[data-rowfor="add:bar"]');
+    if (m) U.openRowMenu(m);
+  }
+  function addKind(kind) {
+    if (ro() || !S.draft || !KIND_LABEL[kind]) return;
+    // a web page asks for its address first, and appears at the usual spot once added
+    if (kind === 'page') { stopPlacing(); startAdd(); return; }
+    S.adding = false; S.placing = kind;
+    renderInspector(); placeBoxes();
+    var f = el.stage.querySelector('[data-frame]');
+    if (f) { f.tabIndex = 0; f.focus({ preventScroll: true }); }
+  }
+  function stopPlacing() {
+    if (!S.placing) return;
+    S.placing = null;
+    var f = el.stage.querySelector('[data-frame]');
+    if (f) { f.removeAttribute('tabindex'); var g = f.querySelector('[data-ghost]'); if (g) g.remove(); }
+    placeBoxes();
+  }
+  // a press on the canvas while placing: a click places the layer at its usual size, a drag draws it
+  function onPlaceDown(e) {
+    if (!S.placing || e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    var frame = e.currentTarget, r = frame.getBoundingClientRect(), s = src(), k = s.w / r.width;
+    var at = function (ev) { return { x: Math.max(0, Math.min(s.w, (ev.clientX - r.left) * k)), y: Math.max(0, Math.min(s.h, (ev.clientY - r.top) * k)) }; };
+    var p0 = at(e), p1 = p0, ghost = document.createElement('div');
+    ghost.className = 'ghost'; ghost.setAttribute('data-ghost', ''); frame.appendChild(ghost);
+    frame.setPointerCapture(e.pointerId);
+    function move(ev) {
+      p1 = at(ev);
+      var x = Math.min(p0.x, p1.x), y = Math.min(p0.y, p1.y);
+      ghost.style.left = 100 * x / s.w + '%'; ghost.style.top = 100 * y / s.h + '%';
+      ghost.style.width = 100 * Math.abs(p1.x - p0.x) / s.w + '%'; ghost.style.height = 100 * Math.abs(p1.y - p0.y) / s.h + '%';
+    }
+    function up() {
+      frame.removeEventListener('pointermove', move); frame.removeEventListener('pointerup', up); frame.removeEventListener('pointercancel', up);
+      ghost.remove();
+      if (!S.placing) return;
+      // a few screen pixels of wobble is still a click
+      var drag = Math.abs(p1.x - p0.x) / k > 4 || Math.abs(p1.y - p0.y) / k > 4;
+      place(S.placing, drag ? { x: p0.x, y: p0.y, x2: p1.x, y2: p1.y } : { x: p0.x, y: p0.y });
+    }
+    frame.addEventListener('pointermove', move); frame.addEventListener('pointerup', up); frame.addEventListener('pointercancel', up);
+  }
+  // an id not used yet, text-1, shape-2, ...
+  function freeId(prefix) {
+    var n = 1;
+    while (byId(prefix + '-' + n)) n++;
+    return prefix + '-' + n;
+  }
+  /** Why an id cannot be used for a layer, or null: the module's rule (3.10), unique within the overlay. */
+  function idProblem(id, current) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) || id.indexOf('..') >= 0) return 'An id is 1 to 64 letters, digits, dots, dashes or underscores, starting with a letter or digit, without "..".';
+    if (id !== current && byId(id)) return 'A layer with this id exists.';
+    return null;
+  }
+  // a new layer of this kind; at is the click point {x, y}, a drag {x, y, x2, y2}, or null for the frame's center
+  function layerFor(kind, at, s) {
+    var box = { rectangle: [320, 120], rounded: [320, 120], square: [160, 160], ellipse: [240, 140], circle: [160, 160], line: [300, 0], arrow: [300, 0],
+      triangle: [200, 170], image: [320, 180], text: [360, 64], datetime: [300, 64] }[kind];
+    var x, y, w = box[0], h = box[1], drag = at && at.x2 !== undefined;
+    if (drag) {
+      x = Math.min(at.x, at.x2); y = Math.min(at.y, at.y2); w = Math.abs(at.x2 - at.x); h = Math.abs(at.y2 - at.y);
+      // a square or circle keeps its sides equal
+      if (kind === 'square' || kind === 'circle') w = h = Math.max(w, h);
+    } else if (at) { x = at.x; y = at.y; }
+    else { x = (s.w - w) / 2; y = (s.h - h) / 2; }
+    if (!(kind === 'line' || kind === 'arrow') || !drag) { x = Math.max(0, Math.min(x, s.w - w)); y = Math.max(0, Math.min(y, s.h - h)); }
+    var o = { opacity: 100 };
+    if (kind === 'text' || kind === 'datetime') {
+      o.id = freeId(kind === 'text' ? 'text' : 'clock'); o.type = 'string';
+      o.text = kind === 'text' ? 'Text' : '{time:HH:mm:ss}'; o.font = kind === 'text' ? 'Fira Sans' : 'Fira Mono'; o.fontSize = 48; o.color = 'white';
+      // a drawn text is a box it wraps in; a placed one starts where it was clicked, its first line's baseline a size below
+      if (drag) { o.box = true; o.x = even(x); o.y = even(y); o.w = even(Math.max(w, 40)); o.h = even(Math.max(h, 40)); }
+      else { o.x = even(x); o.y = even(y + 48); }
+      return o;
+    }
+    if (kind === 'image') { o.id = freeId('image'); o.type = 'image'; o.x = even(x); o.y = even(y); o.w = even(Math.max(w, 8)); o.h = even(Math.max(h, 8)); return o; }
+    o.id = freeId('shape'); o.color = 'white'; o.stroke = kind === 'line' || kind === 'arrow' ? 4 : 2;
+    if (kind === 'line' || kind === 'arrow') {
+      o.type = 'line';
+      if (drag) { o.x = even(at.x); o.y = even(at.y); o.x2 = even(at.x2); o.y2 = even(at.y2); }
+      else { o.x = even(x); o.y = even(y); o.x2 = even(Math.min(s.w, x + w)); o.y2 = even(y); }
+      if (kind === 'arrow') o.arrowHead = 'end';
+      return o;
+    }
+    w = Math.max(w, 4); h = Math.max(h, 4);
+    if (kind === 'triangle') {
+      o.type = 'triangle'; o.fillColor = 'rgb(200,0,0)';
+      o.x = even(x); o.y = even(y + h); o.x2 = even(x + w / 2); o.y2 = even(y); o.x3 = even(x + w); o.y3 = even(y + h);
+      return o;
+    }
+    o.type = kind === 'ellipse' || kind === 'circle' ? 'ellipse' : 'rectangle'; o.fillColor = 'rgb(30,90,200)';
+    o.x = even(x); o.y = even(y); o.w = even(w); o.h = even(h);
+    if (kind === 'rounded') { o.arcWidth = 24; o.arcHeight = 24; }
+    return o;
+  }
+  function place(kind, at) {
+    var o = layerFor(kind, at, src()), top = sorted()[0];
+    o.zOrder = top ? (top.zOrder || 0) + 1 : 1;
+    snapshot();
+    S.draft.objects.push(o);
+    S.placing = null;
+    var f = el.stage.querySelector('[data-frame]'); if (f) f.removeAttribute('tabindex');
+    S.layer = o.id; renderEditor();
+    var b = el.stage.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]'); if (b) b.focus({ preventScroll: true });
+    U.toast('Added ' + KIND_LABEL[kind].toLowerCase() + ' ' + o.id + ' to the draft. Viewers see it after Save.');
+  }
+  // a new id for a layer; a saved layer's rename goes with the save, so its live values move with it (plan 3.6)
+  function renameLayer(old, id, input) {
+    var why = idProblem(id, old), err = el.insp.querySelector('[data-liderr]');
+    if (why) { if (err) err.textContent = why; if (input) { input.setAttribute('aria-invalid', 'true'); input.focus(); } return; }
+    var o = byId(old);
+    if (!o) return;
+    snapshot();
+    o.id = id;
+    ['captures', 'raw', 'rawAt', 'busy', 'thumbAt', 'shown', 'capStatus', 'drafted', 'soon'].forEach(function (m) {
+      if (S[m] && Object.prototype.hasOwnProperty.call(S[m], old)) { S[m][id] = S[m][old]; delete S[m][old]; }
+    });
+    var first = Object.keys(S.renamed).filter(function (k) { return S.renamed[k] === old; })[0] || old;
+    S.renamed[first] = id;
+    S.layer = id;
+    renderEditor();
+  }
+  // the renames a save carries: saved ids now gone from the draft whose layer is there under its new id
+  function renames() {
+    var out = {};
+    Object.keys(S.renamed).forEach(function (from) {
+      var to = S.renamed[from];
+      if (from !== to && savedById(from) && !byId(from) && byId(to)) out[from] = to;
+    });
+    return out;
   }
 
   /* ---------- save bar, save, discard ---------- */
@@ -918,15 +1087,18 @@
       var body = {};
       OVERLAY_KEYS.forEach(function (k) { if (S.draft[k] !== undefined) body[k] = S.draft[k]; });
       body.objects = S.draft.objects;
+      var ren = renames();
+      if (Object.keys(ren).length) body.renamed = ren;
       S.saving = true; renderBar();
       var name = S.name;
       return U.api.post(ovPath(name), body).then(function (r) {
         S.saving = false;
         delete mem[name];
         if (S.name !== name) return true;
-        S.saved = normalize(r); S.draft = clone(S.saved); S.conflict = false; S.justSaved = true; S.undo = []; S.redo = [];
+        S.saved = normalize(r); S.draft = clone(S.saved); S.conflict = false; S.justSaved = true; S.undo = []; S.redo = []; S.renamed = {};
         var up = r.updatedStreams || [];
-        S.savedNote = { title: 'Saved at ' + U.hhmm() + ': ' + name + '.', detail: up.length ? 'Updated on ' + up.join(', ') + ' now.' : 'No stream shows it yet.' };
+        S.savedNote = { title: 'Saved at ' + U.hhmm() + ': ' + name + '.', detail: (up.length ? 'Updated on ' + up.join(', ') + ' now.' : 'No stream shows it yet.') +
+          (r.renamed && Object.keys(r.renamed).length ? ' Renamed ' + Object.keys(r.renamed).map(function (k) { return k + ' to ' + r.renamed[k]; }).join(', ') + '; a live value feed writing to the old id now gets "no layer".' : '') };
         U.clearBanner('ov');
         renderEditor();
         U.refreshState(true);
@@ -975,8 +1147,8 @@
 
   function renderAll() {
     renderHead(); renderStage(); renderLayers(); renderInspector(); renderBar(); loadPreviewChoices(); U.changed();
-    // Add page from the list's menu, for an overlay that was not open yet
-    if (S.addOnOpen && S.addOnOpen === S.name && S.draft) { S.addOnOpen = null; startAdd(); }
+    // an Add from the overlay row's menu, for an overlay that was not open yet
+    if (S.addOnOpen && S.addOnOpen.name === S.name && S.draft) { var k = S.addOnOpen.kind; S.addOnOpen = null; addOnOpen(k); }
   }
 
   U.screens.overlay = {
@@ -986,19 +1158,22 @@
         '<span class="spacer"></span><label class="small muted" for="ovs-pv">Background' + U.tip('A publishing stream to place the layers on. It does not put this overlay on that stream.') + '</label><select id="ovs-pv" data-preview></select>' +
         '<label class="check small"><input type="checkbox" data-guides>Safe area</label>' +
         '<button type="button" class="btn sm only-1200" data-togglei>' + U.icon('panel') + 'Inspector</button></div>' +
+        '<div class="addbar" data-addbar data-write role="toolbar" aria-label="Add a layer"></div>' +
         '<div class="canvas"><div data-stage></div><div class="canvas-bar"><span class="coords" data-coords></span><span class="spacer"></span><span class="hrow" data-caption></span></div>' +
         '<p class="small warn-text" data-outside hidden></p></div></div><div data-bar hidden></div>';
       // the page list lives in the list column, under the open overlay; the shell places it there
       var pages = document.createElement('div');
       pages.className = 'lpages';
-      pages.innerHTML = '<div data-layers></div><button type="button" class="lsub-add" data-write data-addpage>' + U.icon('plus') + 'Add page</button>';
+      pages.innerHTML = '<div data-layers></div>' + addMenuHtml('list', 'lsub-add');
       U.overlayPagesNode = pages;
       el = { stage: box.querySelector('[data-stage]'), coords: box.querySelector('[data-coords]'), preview: box.querySelector('[data-preview]'), layers: pages.querySelector('[data-layers]'),
-        pagesAdd: pages.querySelector('[data-addpage]'), caption: box.querySelector('[data-caption]'), outside: box.querySelector('[data-outside]'), title: box.querySelector('[data-title]'), chips: box.querySelector('[data-chips]'),
+        pagesAdd: pages.querySelector('[data-rowfor="add:list"]'), caption: box.querySelector('[data-caption]'), outside: box.querySelector('[data-outside]'), title: box.querySelector('[data-title]'), chips: box.querySelector('[data-chips]'),
         listBtn: box.querySelector('[data-showlist]'), bar: box.querySelector('[data-bar]'), insp: insp, grid: U.root.querySelector('[data-grid]') };
       S.name = null; S.draft = S.saved = null; mem = {};
       el.preview.onchange = function () { setPreview(el.preview.value); };
-      el.pagesAdd.onclick = startAdd;
+      el.addbar = box.querySelector('[data-addbar]');
+      el.addbar.innerHTML = addBarHtml();
+      el.addbar.querySelectorAll('[data-addkind]').forEach(function (b) { b.onclick = function () { addKind(b.getAttribute('data-addkind')); }; });
       box.querySelector('[data-togglei]').onclick = U.toggleInsp;
       el.listBtn.onclick = function () { var on = !el.grid.classList.contains('show-left'); U.showList(on); el.listBtn.setAttribute('aria-expanded', String(on)); };
       box.querySelector('[data-guides]').onchange = function (e) {
@@ -1041,6 +1216,8 @@
       if (mod && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && k.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
       if (mod) return;
+      if (S.placing && k === 'Escape') { e.preventDefault(); stopPlacing(); return; }
+      if (S.placing && k === 'Enter') { e.preventDefault(); place(S.placing, null); return; }
       var a = document.activeElement;
       // keys act on the canvas when a page or nothing has the focus, never while a button or the list has it
       var onCanvas = !a || a === document.body || el.stage.contains(a) || (a.classList && a.classList.contains('prow'));
@@ -1154,5 +1331,10 @@
     unsaved: function () { return N.name || N.url ? [{ label: 'New overlay' + (N.name ? ' ' + N.name : ''), go: 'new-overlay:' }] : []; }
   };
   // an image or a font that has just arrived changes what text, shapes and images look like and how big they are
-  U.draw.onLoad(function () { if (U.current() === 'overlay' && S.draft) { placeBoxes(); renderCoords(); } });
+  U.draw.onLoad(function () {
+    if (U.current() !== 'overlay' || !S.draft) return;
+    placeBoxes(); renderCoords();
+    // the Place tab's size follows a picture that has just arrived, unless someone is typing in the panel
+    if (!el.insp.contains(document.activeElement)) renderInspector();
+  });
 })();
