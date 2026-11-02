@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.restlet.resource.ResourceException;
@@ -578,6 +579,16 @@ public class OverlayConfig extends JsonApplicationConfigBase
 			ex.addError("stream", bad);
 			throw ex;
 		}
+		// an overlay-level canvas past this is refused rather than allocated (plan 3.10)
+		for(Object[] f: new Object[][] { { "w", w }, { "h", h } })
+		{
+			if((int)f[1] > com.wowza.wms.plugin.overlaystudio.templates.OverlayStore.MAX_CANVAS)
+			{
+				ConfigBaseException ex = new ConfigBaseException();
+				ex.addError((String)f[0], f[0] + " must be at most " + com.wowza.wms.plugin.overlaystudio.templates.OverlayStore.MAX_CANVAS);
+				throw ex;
+			}
+		}
 	}
 
 	protected WMSResponse saveObjectToFile()
@@ -683,6 +694,56 @@ public class OverlayConfig extends JsonApplicationConfigBase
 			uuid = UUID.randomUUID();
 		}
 		retire(removed);
+	}
+
+	/**
+	 * Draws the overlay with these live values (plan 3.6): each layer whose value changed is swapped for a copy of
+	 * the saved layer with the value on top, in one swap with the uuid reset, as an edit is. Nothing is written and
+	 * the image stays the same one, so display windows run on.
+	 * @return whether anything changed
+	 */
+	public boolean applyLive(Map<String, Map<String, Object>> values)
+	{
+		// copies are made outside the lock (each takes its own capture hold); a list swapped meanwhile is tried again
+		for(int attempt = 0; attempt < 5; attempt++)
+		{
+			List<ObjectConfig> current = this.objects;
+			Map<ObjectConfig, ObjectConfig> swap = new java.util.IdentityHashMap<>();
+			for(ObjectConfig o: current)
+			{
+				Map<String, Object> v = values.get(o.getId());
+				if(!java.util.Objects.equals(v, o.liveValue()))
+				{
+					swap.put(o, o.withLive(v));
+				}
+			}
+			if(swap.isEmpty())
+			{
+				return false;
+			}
+			boolean done = false;
+			synchronized(editLock())
+			{
+				if(this.objects == current)
+				{
+					List<ObjectConfig> n = new ArrayList<>(current.size());
+					for(ObjectConfig o: current)
+					{
+						n.add(swap.getOrDefault(o, o));
+					}
+					this.objects = n;
+					uuid = UUID.randomUUID();
+					done = true;
+				}
+			}
+			if(done)
+			{
+				retire(new ArrayList<>(swap.keySet()));
+				return true;
+			}
+			swap.values().forEach(ObjectConfig::dispose);
+		}
+		return false;
 	}
 
 	public ObjectConfig getObject(String obectId)

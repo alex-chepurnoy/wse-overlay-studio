@@ -28,6 +28,8 @@ import com.wowza.wms.plugin.overlaystudio.rest.TemplateValidateConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.OverlayAppsConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.OverlaysConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.NamedOverlayConfig;
+import com.wowza.wms.plugin.overlaystudio.rest.NamedOverlayLiveConfig;
+import com.wowza.wms.plugin.overlaystudio.rest.NamedOverlayLiveLayerConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.NamedOverlayPreviewConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.NamedOverlayCaptureConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.TemplateOverlayConfig;
@@ -50,7 +52,7 @@ public class OverlayStudioServer implements IServerNotify2
 	public static final Class<?>[] REST_RESOURCES = { OverlayConfig.class, ObjectConfig.class, ObjectsConfig.class, StatusConfig.class,
 			CaptureConfig.class, PreviewConfig.class, InfoConfig.class, OverlayAppsConfig.class, TemplateStartersConfig.class,
 			TemplateStarterConfig.class, TemplateValidateConfig.class, TemplateAssignConfig.class, OverlaysConfig.class,
-			NamedOverlayConfig.class, NamedOverlayCaptureConfig.class, TemplateOverlayConfig.class, TemplateCopiesConfig.class, AppStreamsConfig.class,
+			NamedOverlayConfig.class, NamedOverlayCaptureConfig.class, NamedOverlayLiveConfig.class, NamedOverlayLiveLayerConfig.class, TemplateOverlayConfig.class, TemplateCopiesConfig.class, AppStreamsConfig.class,
 			AppStateConfig.class, NamedOverlayPreviewConfig.class, AppModuleConfig.class, TemplatesBuildConfig.class, TemplateSpecConfig.class,
 			TemplateUseConfig.class, ImagesConfig.class, StreamRestartConfig.class, TemplateOrderConfig.class, SnapshotConfig.class,
 			CaptureLimitConfig.class, FontsConfig.class, FontsCheckConfig.class, FormatConfig.class };
