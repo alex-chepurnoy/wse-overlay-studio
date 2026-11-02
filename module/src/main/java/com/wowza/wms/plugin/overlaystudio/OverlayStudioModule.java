@@ -181,14 +181,12 @@ public class OverlayStudioModule extends ModuleBase
 
 	public class StreamInfo
 	{
-		// volatile: written on REST/receive threads (setStreamWidth/Height, setQueueDrawing,
-		// addOverlayImageQueue) and read on the transcoder thread (onBeforeScaleFrame). A ConcurrentHashMap
-		// get() only publishes the put that inserted this StreamInfo, not these later field writes, so
-		// without volatile the transcoder can read stale values (e.g. queueDrawings stuck false).
-		private volatile int streamWidth = 0;
-		private volatile int streamHeight = 0;
-		// Actual decoded source video size, only written by the transcoder (never by REST w/h) so the
-		// overlay canvas size can be validated against it.
+		// volatile: written on REST/receive threads (setQueueDrawing, addOverlayImageQueue) and on the transcoder's
+		// notifier, read on the transcoder thread (onBeforeScaleFrame). A ConcurrentHashMap get() only publishes the
+		// put that inserted this StreamInfo, not these later field writes, so without volatile the transcoder can read
+		// stale values (e.g. queueDrawings stuck false).
+		// Actual decoded source video size, only written by the transcoder (never by REST w/h): the canvas of an
+		// overlay with no size of its own, and the denominator of every encode's scale.
 		private volatile int sourceWidth = 0;
 		private volatile int sourceHeight = 0;
 		// Last crop warning emitted, used to avoid logging on every refresh of the same overlay.
@@ -200,6 +198,8 @@ public class OverlayStudioModule extends ModuleBase
 		private final ArrayList<IOverlayListener> overlayListeners = new ArrayList<>();
 		private int lastOverlayIndex = OverlayConfig.DEFAULT_OVERLAY_INDEX;
 		private UUID lastImageUuid = new UUID(0L,0L);
+		// the content each target last got: SOURCE_TARGET, or ENCODE_TARGET + the encode's name; transcoder thread only
+		private final HashMap<String, UUID> sent = new HashMap<>();
 		private final HashMap<String, Boolean> overlayOnEncode = new HashMap<>();
 		private boolean overlayOnSource = false;
 		private boolean overlayOnEncodes =false;		
@@ -598,24 +598,46 @@ public class OverlayStudioModule extends ModuleBase
 		}
 	}
 
-	public int getStreamWidth(String streamName)
+	static final String SOURCE_TARGET = "source";
+	static final String ENCODE_TARGET = "encode:";
+
+	/** The decoded source video's width, 0 until the transcoder has started. */
+	public int getSourceWidth(String streamName)
 	{
-		return getStreamInfo(streamName).streamWidth;
+		return getStreamInfo(streamName).sourceWidth;
 	}
 
-	public void setStreamWidth(String streamName, int w)
+	/** The decoded source video's height, 0 until the transcoder has started. */
+	public int getSourceHeight(String streamName)
 	{
-		getStreamInfo(streamName).streamWidth = w;
+		return getStreamInfo(streamName).sourceHeight;
 	}
 
-	public void setStreamHeight(String streamName, int h)
+	/**
+	 * An encode's scale: its height over the source's, else its width over the source's; 1 when it matches the source
+	 * or a size is unknown. Layer coordinates are in source pixels, so this is the same before and after any save (D14).
+	 */
+	static double encodeScale(int destWidth, int destHeight, boolean matchSource, int sourceWidth, int sourceHeight)
 	{
-		getStreamInfo(streamName).streamHeight = h;
+		if(matchSource)
+		{
+			return 1.0;
+		}
+		if(destHeight > 0 && sourceHeight > 0)
+		{
+			return (double)destHeight / (double)sourceHeight;
+		}
+		if(destWidth > 0 && sourceWidth > 0)
+		{
+			return (double)destWidth / (double)sourceWidth;
+		}
+		return 1.0;
 	}
 
-	public int getStreamHeight(String streamName)
+	/** An overlay's canvas side: its own size when it has one, else the source's. */
+	public static int canvasSize(int own, int source)
 	{
-		return getStreamInfo(streamName).streamHeight;
+		return own > 0 ? own : source;
 	}
 
 	/**
@@ -763,8 +785,6 @@ public class OverlayStudioModule extends ModuleBase
 		{
 			oldImage = streamInfo.streamOverlayImage;
 			streamInfo.streamOverlayImage = overlayImage;
-			streamInfo.streamWidth = overlayImage.getWidth(1.0);
-			streamInfo.streamHeight = overlayImage.getHeight(1.0);
 			overlayImage.setOverlayModule(this);
 			overlayImage.setStreamName(streamName);
 			streamInfo.streamOverlayImage.start();
@@ -806,8 +826,6 @@ public class OverlayStudioModule extends ModuleBase
 				removeImage.dispose();
 			}	
 			streamInfo.overlayImageQueue.add(overlayImage);
-			streamInfo.streamWidth = overlayImage.getWidth(1.0);
-			streamInfo.streamHeight = overlayImage.getHeight(1.0);
 			overlayImage.setOverlayModule(this);
 			overlayImage.setStreamName(streamName);
 			overlayImage.start();
@@ -1119,8 +1137,6 @@ public class OverlayStudioModule extends ModuleBase
 
 			this.streamName = streamName;
 			StreamInfo streamInfo = getStreamInfo(streamName);
-			streamInfo.streamWidth = srcWidth;
-			streamInfo.streamHeight = srcHeight;
 			streamInfo.sourceWidth = srcWidth;
 			streamInfo.sourceHeight = srcHeight;
 			if(streamInfo.streamOverlayImage != null)
@@ -1247,144 +1263,150 @@ public class OverlayStudioModule extends ModuleBase
 						overlayIndex = overlayImage.getOverlayIndex() > 0 ? overlayImage.getOverlayIndex() : appOverlayIndex;
 						currentImageUuid = overlayImage.getCurrentImageUuid();
 					}
-					UUID lastImageUuid = streamInfo.lastImageUuid;
-					if(!lastImageUuid.equals(currentImageUuid))
+					if(currentImageUuid.equals(new UUID(0L,0L)))
 					{
-						debugLog(logPrefix + "Updating Image: " + lastImageUuid + "->" + currentImageUuid);
-						if(currentImageUuid.equals(new UUID(0L,0L)))
+						if(!streamInfo.lastImageUuid.equals(currentImageUuid))
 						{
-							if(streamInfo.overlayOnSource)
+							debugLog(logPrefix + "Updating Image: " + streamInfo.lastImageUuid + "->" + currentImageUuid);
+						}
+						if(streamInfo.overlayOnSource)
+						{
+							debugLog(logPrefix + "Clearing Source Overlay (" + overlayIndex + ")");
+							sourceVideo.clearOverlay(overlayIndex);
+						}
+						streamInfo.overlayOnSource = false;
+						if(streamInfo.overlayOnEncodes)
+						{
+							for (EncoderInfo encoderInfo : encoderInfoList)
 							{
-								debugLog(logPrefix + "Clearing Source Overlay (" + overlayIndex + ")");
-								sourceVideo.clearOverlay(overlayIndex);
+								debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
+								encoderInfo.destinationVideo.clearOverlay(overlayIndex);
+								streamInfo.overlayOnEncode.put(encoderInfo.encodeName,false);
 							}
-							streamInfo.overlayOnSource = false;
-							if(streamInfo.overlayOnEncodes)
+						}
+						streamInfo.overlayOnEncodes = false;
+						streamInfo.sent.clear();
+						streamInfo.lastImageUuid = currentImageUuid;
+					}
+					else if(overlayImage != null)
+					{
+						if(!streamInfo.lastImageUuid.equals(currentImageUuid))
+						{
+							debugLog(logPrefix + "Updating Image: " + streamInfo.lastImageUuid + "->" + currentImageUuid);
+							streamInfo.lastImageUuid = currentImageUuid;
+						}
+						// Where the overlay goes on this frame, and at which scale, is decided before any content check, so the
+						// image knows its active scales even while every target is up to date. Each target (the source, or each
+						// encode) then gets the current content once, on its own: an encode whose draw finished late still gets it.
+						java.util.Set<Double> active = new java.util.HashSet<>();
+						if (overlayImage.getOverlaySource())
+						{
+							if (streamInfo.overlayOnEncodes)
 							{
 								for (EncoderInfo encoderInfo : encoderInfoList)
 								{
 									debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
 									encoderInfo.destinationVideo.clearOverlay(overlayIndex);
-									streamInfo.overlayOnEncode.put(encoderInfo.encodeName,false);
+									streamInfo.overlayOnEncode.put(encoderInfo.encodeName, false);
+									streamInfo.sent.remove(ENCODE_TARGET + encoderInfo.encodeName);
+								}
+								streamInfo.overlayOnEncodes = false;
+							}
+							active.add(scalingFactor);
+							overlayImage.setActiveScales(active);
+							if (!currentImageUuid.equals(streamInfo.sent.get(SOURCE_TARGET)))
+							{
+								long startTime = System.currentTimeMillis();
+								// one record: the buffer with the size and place it was drawn for
+								OverlayImage.Published drawn = overlayImage.current(scalingFactor);
+								long endTime = System.currentTimeMillis();
+								warnIfSlow(overlayImage, endTime - startTime, streamName);
+								if (drawn != null)
+								{
+									TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName, "Source",
+											srcWidth, srcHeight,
+											drawn.width(),
+											drawn.height(),
+											drawn.x(),
+											drawn.y(),
+											drawn.buffer());
+									if (overlayFrame != null)
+									{
+										debugLog(logPrefix + "Adding Source Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight());
+										sourceVideo.addOverlay(overlayIndex, overlayFrame);
+										streamInfo.overlayOnSource = true;
+									}
+									streamInfo.sent.put(SOURCE_TARGET, drawn.uuid());
 								}
 							}
-							streamInfo.overlayOnEncodes = false;
-							streamInfo.lastImageUuid = currentImageUuid;
 						}
 						else
 						{
-							if(overlayImage != null)
+							//put overlay on each encode
+							if (streamInfo.overlayOnSource)
 							{
-								if (overlayImage.getOverlaySource())
+								debugLog(logPrefix + "Clearing Source Overlay ("+overlayIndex+")");
+								sourceVideo.clearOverlay(overlayIndex);
+								streamInfo.overlayOnSource = false;
+							}
+							streamInfo.sent.remove(SOURCE_TARGET);
+							List<EncoderInfo> targets = new ArrayList<>();
+							List<Double> scales = new ArrayList<>();
+							for (EncoderInfo encoderInfo : encoderInfoList)
+							{
+								if (!encoderInfo.destinationVideo.isPassThrough() && overlayImage.overlayEncode(encoderInfo.encodeName, encoderInfo.streamName))
 								{
-									if (streamInfo.overlayOnEncodes)
-									{
-										for (EncoderInfo encoderInfo : encoderInfoList)
-										{
-											debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
-											encoderInfo.destinationVideo.clearOverlay(overlayIndex);
-											streamInfo.overlayOnEncode.put(encoderInfo.encodeName, false);
-										}
-										streamInfo.overlayOnEncodes = false;
-									}
-									long startTime = System.currentTimeMillis();
-									//put overlay on source
-									// one record: the buffer with the size and place it was drawn for
-									OverlayImage.Published drawn = overlayImage.current(scalingFactor);
-									long endTime = System.currentTimeMillis();
-									streamInfo.lastImageUuid = drawn != null ? drawn.uuid() : overlayImage.getDrawnUuid(scalingFactor);
-									warnIfSlow(overlayImage, endTime - startTime, streamName);
-
-									if (drawn != null)
-									{
-										TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName, "Source",
-												srcWidth, srcHeight,
-												drawn.width(),
-												drawn.height(),
-												drawn.x(),
-												drawn.y(),
-												drawn.buffer());
-										if (overlayFrame != null)
-										{
-											debugLog(logPrefix + "Adding Source Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight());
-											sourceVideo.addOverlay(overlayIndex, overlayFrame);
-											streamInfo.overlayOnSource = true;
-										}
-									}
+									// always the encode's size over the source's: a save never changes the denominator (D14)
+									double f = encodeScale(encoderInfo.destWidth, encoderInfo.destHeight,
+											encoderInfo.destinationVideo.getFrameSizeFitMode() == TranscoderStream.FRAMESIZE_FITMODE_MATCHSOURCE, srcWidth, srcHeight);
+									targets.add(encoderInfo);
+									scales.add(f);
+									active.add(f);
 								}
 								else
 								{
-									//put overlay on each encode
-									if (streamInfo.overlayOnSource)
+									if (streamInfo.overlayOnEncode.getOrDefault(encoderInfo.encodeName, false))
 									{
-										debugLog(logPrefix + "Clearing Source Overlay ("+overlayIndex+")");
-										sourceVideo.clearOverlay(overlayIndex);
-										streamInfo.overlayOnSource = false;
+										debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
+										encoderInfo.destinationVideo.clearOverlay(overlayIndex);
+										streamInfo.overlayOnEncode.put(encoderInfo.encodeName, false);
 									}
-
-									for (EncoderInfo encoderInfo : encoderInfoList)
+									streamInfo.sent.remove(ENCODE_TARGET + encoderInfo.encodeName);
+								}
+							}
+							overlayImage.setActiveScales(active);
+							for (int t = 0; t < targets.size(); t++)
+							{
+								EncoderInfo encoderInfo = targets.get(t);
+								double f = scales.get(t);
+								streamInfo.overlayOnEncodes = true; //at least on has an encode
+								if (currentImageUuid.equals(streamInfo.sent.get(ENCODE_TARGET + encoderInfo.encodeName)))
+								{
+									continue;
+								}
+								long startTime = System.currentTimeMillis();
+								OverlayImage.Published drawn = overlayImage.current(f);
+								long endTime = System.currentTimeMillis();
+								warnIfSlow(overlayImage, endTime - startTime, encoderInfo.streamName);
+								if (drawn != null)
+								{
+									int frameWidth = encoderInfo.getFrameWidth();
+									int frameHeight = encoderInfo.getFrameHeight();
+									TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName,
+											"Encode <" + encoderInfo.encodeName + ">",
+											frameWidth, frameHeight,
+											drawn.width(),
+											drawn.height(),
+											drawn.x(),
+											drawn.y(),
+											drawn.buffer());
+									if (overlayFrame != null)
 									{
-										if (!encoderInfo.destinationVideo.isPassThrough())
-										{
-
-											if (overlayImage.overlayEncode(encoderInfo.encodeName, encoderInfo.streamName))
-											{
-												int destinationHeight = encoderInfo.destHeight;
-												int destinationWidth = encoderInfo.destWidth;
-												if (encoderInfo.destinationVideo.getFrameSizeFitMode() == TranscoderStream.FRAMESIZE_FITMODE_MATCHSOURCE)
-												{
-													destinationHeight = getStreamHeight(streamName);
-													destinationWidth = getStreamWidth(streamName);
-												}
-												if (destinationHeight > 0)
-												{
-													scalingFactor = (double)destinationHeight / (double)getStreamHeight(
-															streamName);
-												}
-												else if (destinationWidth > 0)
-												{
-													scalingFactor = (double)destinationWidth / (double)getStreamWidth(streamName);
-												}
-												long startTime = System.currentTimeMillis();
-												OverlayImage.Published drawn = overlayImage.current(scalingFactor);
-												long endTime = System.currentTimeMillis();
-												streamInfo.lastImageUuid = drawn != null ? drawn.uuid() : overlayImage.getDrawnUuid(scalingFactor);
-												warnIfSlow(overlayImage, endTime - startTime, encoderInfo.streamName);
-												if (drawn != null)
-												{
-													int frameWidth = encoderInfo.getFrameWidth();
-													int frameHeight = encoderInfo.getFrameHeight();
-													TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName,
-															"Encode <" + encoderInfo.encodeName + ">",
-															frameWidth, frameHeight,
-															drawn.width(),
-															drawn.height(),
-															drawn.x(),
-															drawn.y(),
-															drawn.buffer());
-													if (overlayFrame != null)
-													{
-														debugLog(logPrefix + "Adding Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight() + " ScalingFactor:" + scalingFactor);
-														encoderInfo.destinationVideo.addOverlay(overlayIndex, overlayFrame);
-														streamInfo.overlayOnEncode.put(encoderInfo.encodeName, true);
-													}
-												}
-												else
-												{
-												}
-												streamInfo.overlayOnEncodes = true; //at least on has an encode
-											}
-											else
-											{
-												if (streamInfo.overlayOnEncode.getOrDefault(encoderInfo.encodeName, false))
-												{
-													debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
-													encoderInfo.destinationVideo.clearOverlay(overlayIndex);
-													streamInfo.overlayOnEncode.put(encoderInfo.encodeName, false);
-												}
-											}
-										}
+										debugLog(logPrefix + "Adding Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight() + " ScalingFactor:" + f);
+										encoderInfo.destinationVideo.addOverlay(overlayIndex, overlayFrame);
+										streamInfo.overlayOnEncode.put(encoderInfo.encodeName, true);
 									}
+									streamInfo.sent.put(ENCODE_TARGET + encoderInfo.encodeName, drawn.uuid());
 								}
 							}
 						}
