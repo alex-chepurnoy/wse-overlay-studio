@@ -59,9 +59,11 @@ class LiveValuesTest
 	}
 
 	@AfterEach
-	void restore()
+	void restore() throws Exception
 	{
+		// a flush planned later writes nothing once its entry is forgotten; one running now is waited for
 		LiveValues.forgetForTest();
+		LiveValues.drainForTest();
 		LiveValues.clock = System::currentTimeMillis;
 		ImageFiles.clearForTest();
 	}

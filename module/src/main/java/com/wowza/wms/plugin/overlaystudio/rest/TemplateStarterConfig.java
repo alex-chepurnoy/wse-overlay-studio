@@ -30,7 +30,12 @@ public class TemplateStarterConfig extends VHostResourceBase
 		Path dir = vhostDir(path.get("vhostName")).resolve("transcoder").resolve("templates");
 		Path written = TemplateFiles.writeStarter(dir, starter, name == null ? starter : name, overwrite);
 		String overlay = str(body, "overlay");
-		if(overlay != null && !overlay.isBlank())
+		if(body.containsKey("overlays"))
+		{
+			String file = written.getFileName().toString();
+			TemplateFiles.setOverlays(dir, file.substring(0, file.length() - 4), TemplateFiles.slotsFrom(body.get("overlays")));
+		}
+		else if(overlay != null && !overlay.isBlank())
 		{
 			List<String> encodes = new ArrayList<>();
 			if(body.get("encodes") instanceof List)
