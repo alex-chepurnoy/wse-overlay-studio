@@ -30,7 +30,7 @@ def resolveWseLib = {
     if (installs.size() > 1) {
         throw new GradleException("Several WSE installs found, pass -PwseLibDir=<install>/lib or set WSE_HOME:\n  " + installs.join('\n  '))
     }
-    throw new GradleException('The URL Overlay module compiles against a Wowza Streaming Engine install, and none was found. '
+    throw new GradleException('The Overlay Studio module compiles against a Wowza Streaming Engine install, and none was found. '
             + 'Pass -PwseLibDir=<WSE install>/lib or set WSE_HOME=<WSE install>.')
 }
 def wseLibDir = providers.provider {
@@ -62,12 +62,12 @@ tasks.register('generateReleaseInfo') {
     outputs.dir generatedDir
     inputs.property('version', ver)
     doLast {
-        def dir = generatedDir.get().dir('com/wowza/wms/plugin/urloverlay').asFile
+        def dir = generatedDir.get().dir('com/wowza/wms/plugin/overlaystudio').asFile
         dir.mkdirs()
         new File(dir, 'ReleaseInfo.java').text =
-                """|package com.wowza.wms.plugin.urloverlay;
+                """|package com.wowza.wms.plugin.overlaystudio;
                    |public class ReleaseInfo {
-                   |    public static String getProject() { return "wse-plugin-url-overlay"; }
+                   |    public static String getProject() { return "wse-plugin-overlay-studio"; }
                    |    public static String getVersion() { return "${ver}"; }
                    |}
                    |""".stripMargin()
@@ -78,10 +78,10 @@ sourceSets.main.java.srcDir generatedDir
 compileJava.dependsOn generateReleaseInfo
 
 tasks.named('jar') {
-    archiveBaseName = 'wse-plugin-url-overlay'
+    archiveBaseName = 'wse-plugin-overlay-studio'
     manifest {
         attributes(
-                'Name': 'wse-plugin-url-overlay',
+                'Name': 'wse-plugin-overlay-studio',
                 'Build-Version': project.version,
                 'Created-By': "${System.properties['java.version']} (${System.properties['java.vendor']})",
                 'Gradle-Version': "Gradle ${gradle.gradleVersion}"
@@ -96,7 +96,7 @@ test {
     useJUnitPlatform()
     // The coexistence test inspects the built jar.
     dependsOn jar
-    systemProperty 'urloverlay.jar', jar.archiveFile.get().asFile.absolutePath
+    systemProperty 'overlaystudio.jar', jar.archiveFile.get().asFile.absolutePath
     testLogging {
         events 'passed', 'failed', 'skipped'
         exceptionFormat 'full'

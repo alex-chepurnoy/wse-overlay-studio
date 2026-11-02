@@ -1,5 +1,5 @@
 allprojects {
-    group = 'com.wowza.wms.plugin.urloverlay'
+    group = 'com.wowza.wms.plugin.overlaystudio'
     version = rootProject.version
 }
 

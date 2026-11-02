@@ -25,10 +25,10 @@ tasks.register('generateCaptureVersion') {
     outputs.dir generatedDir
     inputs.property('version', ver)
     doLast {
-        def dir = generatedDir.get().dir('com/wowza/wms/plugin/urloverlay/capture').asFile
+        def dir = generatedDir.get().dir('com/wowza/wms/plugin/overlaystudio/capture').asFile
         dir.mkdirs()
         new File(dir, 'CaptureVersion.java').text =
-                """|package com.wowza.wms.plugin.urloverlay.capture;
+                """|package com.wowza.wms.plugin.overlaystudio.capture;
                    |public final class CaptureVersion {
                    |    public static final String VERSION = "${ver}";
                    |    private CaptureVersion() {}
@@ -43,11 +43,11 @@ compileJava.dependsOn generateCaptureVersion
 def runtimeJars = configurations.runtimeClasspath
 
 tasks.named('jar') {
-    archiveBaseName = 'wse-url-overlay-capture'
+    archiveBaseName = 'wse-overlay-studio-capture'
     inputs.files(runtimeJars)
     manifest {
         attributes(
-                'Main-Class': 'com.wowza.wms.plugin.urloverlay.capture.CaptureServiceMain',
+                'Main-Class': 'com.wowza.wms.plugin.overlaystudio.capture.CaptureServiceMain',
                 'Build-Version': project.version
         )
     }

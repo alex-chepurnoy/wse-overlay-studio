@@ -1,6 +1,6 @@
 # This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
 # This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
-"""Builds dist/wse-url-overlay-<version>/: the Windows setup program, the Windows zip, the Linux .deb and tarball,
+"""Builds dist/wse-overlay-studio-<version>/: the Windows setup program, the Windows zip, the Linux .deb and tarball,
 the docs, and SHA256SUMS over all of them.
 
     python packaging/build_dist.py [--skip-tests] [--skip-exe] [--maintainer NAME]
@@ -24,18 +24,18 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, 'packaging')
 FIXED_TIME = 1767225600  # 2026-01-01 00:00 UTC
-APP_NAME = 'Wowza URL Overlay'
+APP_NAME = 'Wowza Overlay Studio'
 # java.net.http fetches Chrome for Testing over TLS, whose handshakes need jdk.crypto.ec on Java 21; without it
 # every download fails with handshake_failure. jdeps cannot see that, so it is named here with the rest of what the
 # setup window needs; every other module the installer uses comes from jdeps on its jar. 1.15.0's first
-# build missed java.management this way, and the setup window and urloverlay-cli failed at start.
+# build missed java.management this way, and the setup window and overlaystudio-cli failed at start.
 RUNTIME_MODULES = 'java.base,java.desktop,java.net.http,jdk.crypto.ec'
 # The same runtime is copied next to the capture service on Windows, so it also carries every module the service and
 # any libraries it has need, as jdeps lists them from the payload the installer jar was built with.
 CAPTURE_PAYLOAD = os.path.join(ROOT, 'installer', 'build', 'payload', 'payload', 'capture')
 UPGRADE_UUID = '6f0b6b8e-3c1e-4c55-9f0e-2a7d6b1f4e21'  # stays the same across versions, so a new setup program upgrades
-DEB_NAME = 'wse-url-overlay'
-DEB_PREFIX = 'opt/wse-url-overlay'
+DEB_NAME = 'wse-overlay-studio'
+DEB_PREFIX = 'opt/wse-overlay-studio'
 # Maintainer field of the .deb (--maintainer). The package is assembled here, not by dpkg-deb, so nothing requires an
 # address in it; Debian policy and lintian expect "Name <address>".
 DEB_MAINTAINER = 'Wowza Media Systems'
@@ -168,11 +168,11 @@ def build_deb(path, ver, jar_name, jar, maintainer):
     size_kb = sum(len(d) for _n, d, _m in data_entries) // 1024 + 1
     md5 = ''.join('%s  %s\n' % (hashlib.md5(d).hexdigest(), n[2:]) for n, d, _m in data_entries).encode('utf-8')
     control = ('Package: %s\nVersion: %s\nArchitecture: all\nMaintainer: %s\nInstalled-Size: %d\nSection: video\n'
-               'Priority: optional\nRecommends: %s\nDescription: URL Overlay for Wowza Streaming Engine\n'
+               'Priority: optional\nRecommends: %s\nDescription: Overlay Studio for Wowza Streaming Engine\n'
                ' Captures a web page with headless Chrome and composites it onto live streams in the\n'
                ' Wowza Streaming Engine transcoder. Adds the module to /usr/local/WowzaStreamingEngine and\n'
-               ' sets up the capture service WowzaURLOverlayCapture (system user wse-url-overlay, Chrome for\n'
-               ' Testing downloaded during the install into /opt/wse-url-overlay).\n'
+               ' sets up the capture service WowzaOverlayStudioCapture (system user wse-overlay-studio, Chrome for\n'
+               ' Testing downloaded during the install into /opt/wse-overlay-studio).\n'
                % (DEB_NAME, ver, maintainer, size_kb, DEB_RECOMMENDS)).encode('utf-8')
     deb = os.path.join(PKG, 'linux', 'deb')
     ctrl = tar_bytes([('./control', control, 0o644), ('./md5sums', md5, 0o644),
@@ -231,8 +231,8 @@ def build_exe(out_dir, ver, jar_path):
     shutil.copy2(os.path.join(PKG, 'licenses', 'apache-2.0.txt'), os.path.join(stage, 'input', 'licenses'))
     # three launchers: the setup window (the Start menu entry, and what the setup program opens when it finishes), the
     # removal window, and a console one for scripts and for the setup program's own removal step (main.wxs)
-    launchers = {'Uninstall URL Overlay': 'arguments=Uninstall --gui\nwin-console=false\nwin-menu=true\n',
-                 'urloverlay-cli': 'win-console=true\nwin-menu=false\n'}
+    launchers = {'Uninstall Overlay Studio': 'arguments=Uninstall --gui\nwin-console=false\nwin-menu=true\n',
+                 'overlaystudio-cli': 'win-console=true\nwin-menu=false\n'}
     extra = []
     for name, text in launchers.items():
         props = os.path.join(stage, name.replace(' ', '-') + '.properties')
@@ -244,9 +244,9 @@ def build_exe(out_dir, ver, jar_path):
         raise SystemExit('WiX 3.14.1 is missing from ' + wix + ' (wix314-binaries.zip from the wix3141rtm release)')
     env = dict(os.environ, PATH=wix + os.pathsep + os.environ.get('PATH', ''))
     run(['jpackage', '--type', 'exe', '--name', APP_NAME, '--app-version', ver,
-         '--vendor', 'Wowza Media Systems, LLC', '--description', 'URL Overlay for Wowza Streaming Engine',
+         '--vendor', 'Wowza Media Systems, LLC', '--description', 'Overlay Studio for Wowza Streaming Engine',
          '--input', os.path.join(stage, 'input'), '--main-jar', os.path.basename(jar_path),
-         '--main-class', 'com.wowza.wms.plugin.urloverlay.install.Main',
+         '--main-class', 'com.wowza.wms.plugin.overlaystudio.install.Main',
          '--add-modules', modules, '--jlink-options', '--strip-debug --no-man-pages --no-header-files',
          '--arguments', '--gui', '--win-menu', '--win-menu-group', APP_NAME] + extra + ['--win-upgrade-uuid', UPGRADE_UUID,
          '--resource-dir', os.path.join(PKG, 'windows', 'resources'),
@@ -267,11 +267,11 @@ def main():
     ver = version()
     gradlew = os.path.join(ROOT, 'gradlew.bat' if os.name == 'nt' else 'gradlew')
     run([gradlew, '--no-daemon', '-q', ':installer:jar'] + ([] if a.skip_tests else [':module:test', ':installer:test', ':capture:test', ':bridge:test']))
-    jar_name = 'wse-plugin-url-overlay-installer-%s.jar' % ver
+    jar_name = 'wse-plugin-overlay-studio-installer-%s.jar' % ver
     jar_path = os.path.join(ROOT, 'installer', 'build', 'libs', jar_name)
     jar = read(jar_path)
 
-    out = os.path.join(ROOT, 'dist', 'wse-url-overlay-' + ver)
+    out = os.path.join(ROOT, 'dist', 'wse-overlay-studio-' + ver)
     remove(out)
     os.makedirs(out)
     made = []
@@ -282,12 +282,12 @@ def main():
     win_entries = [(jar_name, jar, 0o644)] + \
                   [(n, crlf(read(os.path.join(win, n))), 0o644) for n in ('install.cmd', 'uninstall.cmd', 'update-chrome.cmd', 'find-java.cmd')] + \
                   [(n, d, 0o644) for n, d in docs()]
-    top = 'wse-url-overlay-%s/' % ver
-    name = 'wse-url-overlay-%s-windows.zip' % ver
+    top = 'wse-overlay-studio-%s/' % ver
+    name = 'wse-overlay-studio-%s-windows.zip' % ver
     write_zip(os.path.join(out, name), [(top + n, d, m) for n, d, m in win_entries])
     made.append(name)
 
-    name = 'wse-url-overlay-%s-linux.tar.gz' % ver
+    name = 'wse-overlay-studio-%s-linux.tar.gz' % ver
     files = [(top + n, d, m) for n, d, m in linux_files(jar_name, jar)]
     with open(os.path.join(out, name), 'wb') as f:
         f.write(tar_bytes(files, [top] + sorted({top + 'licenses/', top + 'docs/', top + 'docs/images/'})))

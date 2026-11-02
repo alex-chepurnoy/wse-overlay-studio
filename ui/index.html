@@ -2,14 +2,14 @@
   This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
   This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
 -->
-<link rel="stylesheet" href="wse-plugins/server/url-overlay/css/url-overlay.css?v=1.3.0">
-<div class="uo-plugin" id="uo-root" data-theme="light">
+<link rel="stylesheet" href="wse-plugins/server/overlay-studio/css/overlay-studio.css?v=1.3.0">
+<div class="ovs-plugin" id="ovs-root" data-theme="light">
 
-  <header class="uo-head" data-head>
-    <div class="uo-logo" aria-hidden="true" data-icon="overlay"></div>
-    <h1>URL Overlay</h1>
-    <label class="appl" for="uo-app">Application</label>
-    <select id="uo-app" data-app aria-label="Application"></select>
+  <header class="ovs-head" data-head>
+    <div class="ovs-logo" aria-hidden="true" data-icon="overlay"></div>
+    <h1>Overlay Studio</h1>
+    <label class="appl" for="ovs-app">Application</label>
+    <select id="ovs-app" data-app aria-label="Application"></select>
     <div class="strip" role="group" aria-label="Status, opens details" data-strip></div>
     <button class="btn sm strip-mini" type="button" data-status-open="capture">Status</button>
     <span class="spacer"></span>
@@ -21,8 +21,8 @@
 
   <div class="banners" aria-live="polite"></div>
 
-  <div class="uo-grid" data-grid>
-    <nav class="pnl uo-left" data-left aria-label="URL Overlay objects">
+  <div class="ovs-grid" data-grid>
+    <nav class="pnl ovs-left" data-left aria-label="Overlay Studio objects">
       <div class="ltabs" role="tablist" aria-label="Lists">
         <button type="button" role="tab" data-tab="onair" aria-selected="true" tabindex="0">On air</button>
         <button type="button" role="tab" data-tab="overlays" aria-selected="false" tabindex="-1">Overlays</button>
@@ -35,7 +35,7 @@
       <div data-list></div>
     </nav>
 
-    <section class="uo-center" data-center aria-live="polite">
+    <section class="ovs-center" data-center aria-live="polite">
       <div data-screen="home" hidden></div>
       <div data-screen="stream" hidden></div>
       <div data-screen="overlay" hidden></div>
@@ -46,22 +46,22 @@
       <div data-screen="task" hidden></div>
     </section>
 
-    <aside class="pnl uo-insp" data-insp aria-label="Inspector" hidden></aside>
+    <aside class="pnl ovs-insp" data-insp aria-label="Inspector" hidden></aside>
   </div>
 
   <div data-drawer-root></div>
   <div class="toasts" aria-live="polite" data-toasts></div>
 </div>
-<script src="wse-plugins/server/url-overlay/vendor/hls.min.js?v=1.6.16"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-core.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-fields.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-store.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-server.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-home.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-stream.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-overlay.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-template.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-order.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-task.js?v=1.3.0"></script>
-<script src="wse-plugins/server/url-overlay/js/uo-shell.js?v=1.3.0"></script>
-<script>window.UrlOverlay.init(document.getElementById('uo-root'));</script>
+<script src="wse-plugins/server/overlay-studio/vendor/hls.min.js?v=1.6.16"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-core.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-fields.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-store.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-server.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-home.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-stream.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-overlay.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-template.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-order.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-task.js?v=1.3.0"></script>
+<script src="wse-plugins/server/overlay-studio/js/ovs-shell.js?v=1.3.0"></script>
+<script>window.OverlayStudio.init(document.getElementById('ovs-root'));</script>

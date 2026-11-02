@@ -6,14 +6,14 @@
 # WSE is stopped; any other failure is reported and the removal goes on.
 set -u
 if [ "${1:-}" = "remove" ]; then
-	/opt/wse-url-overlay/uninstall.sh --yes
+	/opt/wse-overlay-studio/uninstall.sh --yes
 	code=$?
 	if [ "$code" -eq 3 ]; then
 		echo "Stop Wowza Streaming Engine (sudo systemctl stop WowzaStreamingEngine), then remove the package again."
 		exit 1
 	fi
 	if [ "$code" -ne 0 ]; then
-		echo "URL Overlay could not be taken out of WSE; finish with the tarball's uninstall.sh of the same version (README, Uninstall)."
+		echo "Overlay Studio could not be taken out of WSE; finish with the tarball's uninstall.sh of the same version (README, Uninstall)."
 	fi
 fi
 exit 0

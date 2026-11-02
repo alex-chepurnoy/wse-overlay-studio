@@ -2,16 +2,16 @@
 # This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
 # This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
 # Adds the module to Wowza Streaming Engine. No application is changed: the module is added to applications with
-# /opt/wse-url-overlay/install.sh --appName <name>, or from the plugin page's application list. A failure here
+# /opt/wse-overlay-studio/install.sh --appName <name>, or from the plugin page's application list. A failure here
 # leaves the package installed and says how to finish, so dpkg is never left half-configured.
 set -u
 if [ "${1:-}" = "configure" ]; then
-	if /opt/wse-url-overlay/install.sh --yes; then
-		echo "URL Overlay is installed. Restart Wowza Streaming Engine and the Manager."
-		echo "Add it to an application with: sudo /opt/wse-url-overlay/install.sh --appName <application>"
+	if /opt/wse-overlay-studio/install.sh --yes; then
+		echo "Overlay Studio is installed. Restart Wowza Streaming Engine and the Manager."
+		echo "Add it to an application with: sudo /opt/wse-overlay-studio/install.sh --appName <application>"
 	else
-		echo "URL Overlay could not finish the install (see the message above)."
-		echo "Fix that and run: sudo /opt/wse-url-overlay/install.sh"
+		echo "Overlay Studio could not finish the install (see the message above)."
+		echo "Fix that and run: sudo /opt/wse-overlay-studio/install.sh"
 	fi
 fi
 exit 0

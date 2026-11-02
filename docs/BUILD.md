@@ -1,4 +1,4 @@
-# Building URL Overlay
+# Building Overlay Studio
 
 ## Prerequisites
 
@@ -26,15 +26,15 @@ python packaging/build_dist.py [--skip-tests] [--skip-exe] [--maintainer NAME]
 | `--skip-exe` | No Windows setup program, so no `jpackage` or WiX needed (the way to build on Linux) |
 | `--maintainer NAME` | The `Maintainer` field of the `.deb` (default `Wowza Media Systems`) |
 
-The version comes from `version` in `gradle.properties`. Output goes to `dist/wse-url-overlay-<version>/`, which is
+The version comes from `version` in `gradle.properties`. Output goes to `dist/wse-overlay-studio-<version>/`, which is
 deleted and rebuilt on every run:
 
 | File | What it is |
 |---|---|
-| `Wowza-URL-Overlay-<version>.exe` | Windows setup program: the installer with its own Java 21 runtime, Start menu entries **Wowza URL Overlay** and **Uninstall URL Overlay**, and the console launcher `urloverlay-cli.exe`. No spaces in the name, so GitHub keeps it as it is |
-| `wse-url-overlay-<version>-windows.zip` | Installer jar, `install.cmd`, `uninstall.cmd`, `update-chrome.cmd`, `find-java.cmd`, docs |
-| `wse-url-overlay-<version>-linux.tar.gz` | Installer jar, `install.sh`, `uninstall.sh`, `update-chrome.sh`, `find-java.sh`, docs |
-| `wse-url-overlay_<version>_all.deb` | Installs to `/opt/wse-url-overlay/`; `postinst` runs `install.sh --yes`, `prerm` runs `uninstall.sh --yes` on removal |
+| `Wowza-Overlay-Studio-<version>.exe` | Windows setup program: the installer with its own Java 21 runtime, Start menu entries **Wowza Overlay Studio** and **Uninstall Overlay Studio**, and the console launcher `overlaystudio-cli.exe`. No spaces in the name, so GitHub keeps it as it is |
+| `wse-overlay-studio-<version>-windows.zip` | Installer jar, `install.cmd`, `uninstall.cmd`, `update-chrome.cmd`, `find-java.cmd`, docs |
+| `wse-overlay-studio-<version>-linux.tar.gz` | Installer jar, `install.sh`, `uninstall.sh`, `update-chrome.sh`, `find-java.sh`, docs |
+| `wse-overlay-studio_<version>_all.deb` | Installs to `/opt/wse-overlay-studio/`; `postinst` runs `install.sh --yes`, `prerm` runs `uninstall.sh --yes` on removal |
 | `README.md`, `THIRD-PARTY-NOTICES.md` | Copies of the repository files |
 | `SHA256SUMS` | SHA-256 of the four packages above, the files a release carries |
 
@@ -44,7 +44,7 @@ in the plugin page. The zip,
 tarball and `.deb` use fixed entry times, so the same installer jar gives byte-identical archives; the setup program
 does not. The `.deb` is assembled by the script (ar and tar), so `dpkg-deb` is not needed.
 
-The installer jar, `installer/build/libs/wse-plugin-url-overlay-installer-<version>.jar`, carries everything it
+The installer jar, `installer/build/libs/wse-plugin-overlay-studio-installer-<version>.jar`, carries everything it
 installs: the module jar, the plugin page, the starter templates, the bridge's class files and the capture service, with
 no libraries. The setup program's runtime is linked with the modules `jdeps` finds in the installer jar and in the
 capture service, plus `java.base`, `java.desktop`, `java.net.http` and `jdk.crypto.ec`, which `jdeps` cannot see; the
@@ -92,8 +92,8 @@ what they do not, is in [DESIGN.md](DESIGN.md#testing).
 
 ## Installing on Windows
 
-The setup program installs itself to `%ProgramFiles%\Wowza URL Overlay`; the capture service and its Chrome go to
-`%ProgramFiles%\Wowza URL Overlay Service` (`capture\`, `chrome-for-testing\<version>\`). When it finishes, the setup program opens the setup window,
+The setup program installs itself to `%ProgramFiles%\Wowza Overlay Studio`; the capture service and its Chrome go to
+`%ProgramFiles%\Wowza Overlay Studio Service` (`capture\`, `chrome-for-testing\<version>\`). When it finishes, the setup program opens the setup window,
 which asks Windows for administrator rights itself. Stop the Wowza Streaming Engine service first.
 
 **1. Choose the WSE install.** Every install found is listed; **Browse** finds one that is not.
@@ -101,7 +101,7 @@ which asks Windows for administrator rights itself. Stop the Wowza Streaming Eng
 ![Choose your Wowza Streaming Engine](images/setup-1-install-folder.png)
 
 **2. Choose the applications.** Live applications can be ticked; VOD applications are listed but cannot show an
-overlay. None is required: URL Overlay can be added to an application later from the plugin page.
+overlay. None is required: Overlay Studio can be added to an application later from the plugin page.
 
 ![Applications](images/setup-2-applications.png)
 
@@ -123,8 +123,8 @@ signed in to the Manager are signed out.
 
 ![Done](images/setup-6-done.png)
 
-**Removing.** **Uninstall URL Overlay** in the Start menu lists every file it puts back or deletes, with options to
-keep the starter templates or also delete the saved overlays. Windows Settings, Apps, **Wowza URL Overlay**,
+**Removing.** **Uninstall Overlay Studio** in the Start menu lists every file it puts back or deletes, with options to
+keep the starter templates or also delete the saved overlays. Windows Settings, Apps, **Wowza Overlay Studio**,
 Uninstall removes the setup program and runs the same removal without prompts. Stop WSE before removing.
 
-![Remove URL Overlay](images/setup-remove.png)
+![Remove Overlay Studio](images/setup-remove.png)

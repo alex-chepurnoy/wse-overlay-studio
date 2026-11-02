@@ -5,7 +5,7 @@
 // Java 17 bytecode and the repositories come from the root build.
 
 base {
-    archivesName = 'wse-plugin-url-overlay-installer'
+    archivesName = 'wse-plugin-overlay-studio-installer'
 }
 
 dependencies {
@@ -18,7 +18,7 @@ def payloadDir = layout.buildDirectory.dir('payload')
 
 evaluationDependsOn(':capture')
 def captureProject = project(':capture')
-def captureJarName = "wse-url-overlay-capture-${project.version}.jar"
+def captureJarName = "wse-overlay-studio-capture-${project.version}.jar"
 
 // Fills build/payload/payload/** and writes payload/index.txt, one path per line, because a jar's resources cannot be
 // listed reliably at run time.
@@ -42,9 +42,9 @@ tasks.register('payload') {
         project.copy { from rootProject.file('ui'); into new File(root, 'ui') }
         // the page loads its own css and js with ?v=<version>, so a browser never runs a cached script from an older install
         def index = new File(root, 'ui/index.html')
-        index.text = index.text.replaceAll(/(wse-plugins\/server\/url-overlay\/(?:css|js)\/[^"?]+)\?v=[^"]*/, '$1?v=' + project.version)
+        index.text = index.text.replaceAll(/(wse-plugins\/server\/overlay-studio\/(?:css|js)\/[^"?]+)\?v=[^"]*/, '$1?v=' + project.version)
         project.copy { from rootProject.file('module/src/main/resources/starters'); include '*.xml'; into new File(root, 'templates') }
-        project.copy { from bridgeOut; include 'com/wowza/wms/webapp/urloverlay/*.class'; into new File(root, 'bridge') }
+        project.copy { from bridgeOut; include 'com/wowza/wms/webapp/overlaystudio/*.class'; into new File(root, 'bridge') }
         def capture = new File(root, 'capture')
         project.copy { from captureProject.layout.buildDirectory.file("libs/${captureJarName}"); into capture }
         project.copy { from captureProject.layout.buildDirectory.dir('payload/lib'); include '*.jar'; into new File(capture, 'lib') }
@@ -63,8 +63,8 @@ tasks.named('processResources') { dependsOn 'payload' }
 
 jar {
     manifest {
-        attributes('Main-Class': 'com.wowza.wms.plugin.urloverlay.install.Main',
-                'Implementation-Title': 'wse-plugin-url-overlay-installer',
+        attributes('Main-Class': 'com.wowza.wms.plugin.overlaystudio.install.Main',
+                'Implementation-Title': 'wse-plugin-overlay-studio-installer',
                 'Implementation-Version': project.version)
     }
 }
@@ -72,7 +72,7 @@ jar {
 test {
     useJUnitPlatform()
     // copied WSE conf trees used by the installer tests
-    systemProperty 'urloverlay.fixtures', rootProject.file('tests/fixtures/installer').absolutePath
+    systemProperty 'overlaystudio.fixtures', rootProject.file('tests/fixtures/installer').absolutePath
 }
 
 sourceSets.main.java.srcDir(rootProject.file('shared/src/main/java'))
@@ -83,7 +83,7 @@ tasks.register('setupScreenshots', JavaExec) {
     group = 'documentation'
     dependsOn 'testClasses'
     classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'com.wowza.wms.plugin.urloverlay.install.SetupScreenshots'
+    mainClass = 'com.wowza.wms.plugin.overlaystudio.install.SetupScreenshots'
     args rootProject.file('docs/images').absolutePath
-    systemProperty 'urloverlay.fixtures', rootProject.file('tests/fixtures/installer').absolutePath
+    systemProperty 'overlaystudio.fixtures', rootProject.file('tests/fixtures/installer').absolutePath
 }

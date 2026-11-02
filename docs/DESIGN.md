@@ -1,18 +1,18 @@
-# URL Overlay design
+# Overlay Studio design
 
-How URL Overlay is built: its parts, how a frame travels, the REST surface, the Manager bridge, the capture service,
+How Overlay Studio is built: its parts, how a frame travels, the REST surface, the Manager bridge, the capture service,
 the network rules for captured pages, how templates are written, and what the installer and updater do.
 
 ## Components
 
 | Component | Runs in | Does |
 |---|---|---|
-| `UrlOverlayServer` | WSE, server listener | Registers the REST resources per `UrlOverlayServer`; reads the egress rules and the capture socket from `Server.xml` |
-| `UrlOverlayModule` | WSE, application module | Transcoder listeners, per-stream state, draws overlay frames into each transcoder session, records outputs and status |
+| `OverlayStudioServer` | WSE, server listener | Registers the REST resources per `OverlayStudioServer`; reads the egress rules and the capture socket from `Server.xml` |
+| `OverlayStudioModule` | WSE, application module | Transcoder listeners, per-stream state, draws overlay frames into each transcoder session, records outputs and status |
 | `CaptureClient`, `WebPageCapture` (module side) | WSE | A handle on one capture in the service: fetches frames, keeps the last good one, reopens after a service restart |
 | Capture service | Own JVM (Java 21), own account | Chrome over DevTools (chrome-headless-shell on Linux), shared by up to `pagesPerBrowser` pages, sandbox always on, launch limits, memory cap, profiles, the egress proxy; frames by screencast or screenshots over a Unix socket |
 | `EgressGuard` | Capture service, one per capture | Local HTTP and CONNECT proxy Chrome must use; allows or blocks each connection by the resolved address |
-| `UrlOverlayBridge` | WSE Manager | Forwards the page's calls to WSE REST server side, with the signed-in user's credentials |
+| `OverlayStudioBridge` | WSE Manager | Forwards the page's calls to WSE REST server side, with the signed-in user's credentials |
 | Plugin page | Browser, inside WSE Manager | All UI; plays HLS previews with its own copy of hls.js |
 | Installer | Standalone JVM, JDK only | Install, uninstall, verify, Chrome update; setup window and command line |
 
@@ -39,7 +39,7 @@ If the service is down, streams keep their last good frame and the module retrie
 
 ## REST surface
 
-Base `/v1/{server}/plugin/urloverlay`, registered as authorized REST resources by default. Every response uses WSE's
+Base `/v1/{server}/plugin/overlaystudio`, registered as authorized REST resources by default. Every response uses WSE's
 JSON envelope (`success`, `code`, `message`, `data`). `400` validation (including a blocked host, a URL with
 credentials or a non-http scheme), `404` unknown application, stream or object, `409` conflicts (an unmanaged file in
 the way, a template in use), `422` template not usable.
@@ -47,7 +47,7 @@ the way, a template in use), `422` template not usable.
 | Path (under base) | Verbs | Purpose |
 |---|---|---|
 | `/info` | GET | Versions, OS, CPU count, capture service and Chrome state, egress rules and recent blocks, Chrome update state, write access |
-| `/capture/limit` | GET, POST | Pages captured at once: what the service runs at, its ceiling, and a new number with no restart (**Settings** in the page); kept in `conf.modules/urloverlay/capture-limit.json` and used over `maxCaptures` |
+| `/capture/limit` | GET, POST | Pages captured at once: what the service runs at, its ceiling, and a new number with no restart (**Settings** in the page); kept in `conf.modules/overlaystudio/capture-limit.json` and used over `maxCaptures` |
 | `/vhosts/{vh}/applications` | GET | Applications with the module, read from disk |
 | `/vhosts/{vh}/applications/{app}/state` | GET | Everything one application's page shows, with a revision; `?rev=` answers `unchanged` |
 | `/vhosts/{vh}/applications/{app}/streams` | GET | Streams, the template each loads, restart needed |
@@ -79,13 +79,13 @@ Outside the module the page calls one WSE resource: `DELETE /v2/servers/_default
 
 **Write access.** Every POST, PUT and DELETE needs a user WSE REST authenticated who is in the `admin` group of
 `conf/admin.password`. Reads need any authenticated user. With REST authentication off (`AuthenticationMethod none`,
-or `UrlOverlayServer=unauthorized`) there is no user, so every change is refused and reads stay open. The draft
+or `OverlayStudioServer=unauthorized`) there is no user, so every change is refused and reads stay open. The draft
 preview counts as a change, since it opens a browser on any URL. `/info` reports `write.allowed` and the reason, and the
 page goes read only.
 
 **Names and paths.** Template and stream names used as file names match `[A-Za-z0-9][A-Za-z0-9._-]*`, at most 100
 characters, without `..`. Every path variable is one segment after decoding; every write is checked to land in its
-directory (`transcoder/templates/` or `conf.modules/urloverlay/`). Template XML with a `DOCTYPE` is refused.
+directory (`transcoder/templates/` or `conf.modules/overlaystudio/`). Template XML with a `DOCTYPE` is refused.
 
 ## The Manager bridge
 
@@ -93,14 +93,14 @@ WSE REST stays on 127.0.0.1 behind its `IPWhiteList`, and the page runs on the M
 Spring controller the installer places in the Manager:
 
 ```
-browser --(Manager session cookie + security token)--> 8088 /enginemanager/urloverlay-api/**
+browser --(Manager session cookie + security token)--> 8088 /enginemanager/overlaystudio-api/**
 bridge in the Manager --(signed-in user's credentials, server side)--> WSE REST on the session's server URL
 browser --(HLS)--> 1935, unchanged
 ```
 
 **How it loads.** The Manager's start scripts pass `--tempDirectory=<manager>/temp`, which the Manager's launcher
 mounts as the web application's `WEB-INF/classes`, and Spring scans `com.wowza.wms.webapp` for controllers. So class
-files under `manager/temp/com/wowza/wms/webapp/urloverlay/` load at Manager start without changing any Manager file.
+files under `manager/temp/com/wowza/wms/webapp/overlaystudio/` load at Manager start without changing any Manager file.
 The installer places them only when `WMSManager.war` carries `spring-webmvc-6.*`, the Manager's Tomcat is 10.1, and a
 start script passes the temp directory; otherwise it skips the bridge and says why. The bridge uses only Spring and
 Jakarta types, no Wowza classes.
@@ -109,11 +109,11 @@ Jakarta types, no Wowza classes.
 
 | Route | Does |
 |---|---|
-| `GET /urloverlay-api/status` | `{"bridge":"urloverlay","version":...,"signedIn":...}`; the page compares the version with its own |
-| `GET /urloverlay-api/token` | The session's security token, which the Manager requires on every POST |
-| `GET, POST /urloverlay-api/rest/**` | Forwards to WSE REST. GET as GET; PUT and DELETE travel as POST with `?method=` |
+| `GET /overlaystudio-api/status` | `{"bridge":"overlaystudio","version":...,"signedIn":...}`; the page compares the version with its own |
+| `GET /overlaystudio-api/token` | The session's security token, which the Manager requires on every POST |
+| `GET, POST /overlaystudio-api/rest/**` | Forwards to WSE REST. GET as GET; PUT and DELETE travel as POST with `?method=` |
 
-**Rules.** Only module paths (`/v1/server/plugin/urloverlay/...`) and template DELETE are forwarded; anything else is
+**Rules.** Only module paths (`/v1/server/plugin/overlaystudio/...`) and template DELETE are forwarded; anything else is
 `403`. Paths with dot segments, doubled or back slashes, or encoded dots, slashes, backslashes, `%` or NUL are refused.
 The target is the session's server URL, never one from the request. Bodies are capped at 2 MB; JSON, text and image
 types only. The Manager's own interceptor requires the token and the admin group on every POST, and the module checks
@@ -125,21 +125,21 @@ the streaming port; WSE's HTTP streamer sends `Access-Control-Allow-Origin: *` b
 
 **Limits.** It runs in the Manager's JVM in Wowza's package namespace and relies on two undocumented behaviors (the
 temp mount and the scan package), so it is an unsupported Manager customization: uninstall it before a Manager support
-case. The WSE update tool leaves `manager/temp` alone; a WSE installed fresh needs URL Overlay installed again. It
+case. The WSE update tool leaves `manager/temp` alone; a WSE installed fresh needs Overlay Studio installed again. It
 does not stop the Manager from writing the REST password into plugin pages.
 
 ## The capture service
 
 | | Linux | Windows |
 |---|---|---|
-| Service | systemd `WowzaURLOverlayCapture.service` | `WowzaURLOverlayCapture`, run by a copy of WSE's `nssm` |
-| Account | system user and group `wse-url-overlay`, no login shell | virtual account `NT SERVICE\WowzaURLOverlayCapture` |
+| Service | systemd `WowzaOverlayStudioCapture.service` | `WowzaOverlayStudioCapture`, run by a copy of WSE's `nssm` |
+| Account | system user and group `wse-overlay-studio`, no login shell | virtual account `NT SERVICE\WowzaOverlayStudioCapture` |
 | Java | WSE's `java/bin/java` | A Java runtime copied next to the program |
-| Program | `/opt/wse-url-overlay/capture/`, root's, read only to the service | `C:\Program Files\Wowza URL Overlay Service\capture\` |
-| Chrome | `/opt/wse-url-overlay/chrome-for-testing/<version>/` | `C:\Program Files\Wowza URL Overlay Service\chrome-for-testing\<version>\` |
-| Settings | `/etc/wse-url-overlay/capture.properties` (root:wse-url-overlay 0640) | `C:\ProgramData\WowzaURLOverlay\capture.properties` |
-| Work and logs | `/var/lib/wse-url-overlay/`, `/var/log/wse-url-overlay/` | `C:\ProgramData\WowzaURLOverlay\work\` (service account only), `logs\` |
-| Socket | `/run/wse-url-overlay/capture.sock` | `C:\ProgramData\WowzaURLOverlay\capture.sock` |
+| Program | `/opt/wse-overlay-studio/capture/`, root's, read only to the service | `C:\Program Files\Wowza Overlay Studio Service\capture\` |
+| Chrome | `/opt/wse-overlay-studio/chrome-for-testing/<version>/` | `C:\Program Files\Wowza Overlay Studio Service\chrome-for-testing\<version>\` |
+| Settings | `/etc/wse-overlay-studio/capture.properties` (root:wse-overlay-studio 0640) | `C:\ProgramData\WowzaOverlayStudio\capture.properties` |
+| Work and logs | `/var/lib/wse-overlay-studio/`, `/var/log/wse-overlay-studio/` | `C:\ProgramData\WowzaOverlayStudio\work\` (service account only), `logs\` |
+| Socket | `/run/wse-overlay-studio/capture.sock` | `C:\ProgramData\WowzaOverlayStudio\capture.sock` |
 | Limits | `MemoryMax` (`maxBrowserMemoryMB` for each page the server is sized for, at least `maxCaptures`, within three quarters of its memory, plus 768 MB), `CPUQuota` (the larger of 200% and 16% of a core for each such page, in whole cores), `TasksMax=1024` | Per-page memory restart in the service only |
 | Hardening | `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `NoNewPrivileges`, `UMask=0007` | ACLs: data folder for SYSTEM, Administrators and the service; `work\` for the service only |
 | Supervision | `Restart=on-failure` | nssm restarts on exit |
@@ -148,11 +148,11 @@ does not stop the Manager from writing the REST password into plugin pages.
 Chrome that cannot start sandboxed fails its captures with the reason. The systemd unit leaves out the settings that
 would break Chrome's sandbox (`RestrictNamespaces`, `PrivateUsers`, `MemoryDenyWriteExecute`, `SystemCallFilter`).
 Where AppArmor 4 restricts unprivileged user namespaces (Ubuntu 23.10 and later), the installer adds
-`/etc/apparmor.d/wse-url-overlay-chrome`, granting `userns` to `chrome-for-testing/*/chrome-headless-shell-linux64/chrome-headless-shell`
+`/etc/apparmor.d/wse-overlay-studio-chrome`, granting `userns` to `chrome-for-testing/*/chrome-headless-shell-linux64/chrome-headless-shell`
 and, for installs from before the headless shell, `chrome-for-testing/*/chrome-linux64/chrome`, and nothing else.
 
 **Access.** WSE's user reaches the socket by file permissions alone. On Linux the socket's folder is group
-`wse-url-overlay`, mode 0770; WSE running as root connects already, and a WSE running as another user (the owner of
+`wse-overlay-studio`, mode 0770; WSE running as root connects already, and a WSE running as another user (the owner of
 `conf/Server.xml`) is added to the group by the installer.
 
 **Browsers.** Captures are pooled by page (URL, browser size, key color, background): every layer showing the same
@@ -192,19 +192,19 @@ address, and connects to the checked address, so a DNS answer cannot change betw
 
 Rules, in order:
 
-1. Port other than 80 or 443, unless listed in `UrlOverlayAllowPorts`: block (checked before any lookup).
+1. Port other than 80 or 443, unless listed in `OverlayStudioAllowPorts`: block (checked before any lookup).
 2. A host that does not resolve: block.
-3. `UrlOverlayBlockHosts` match, by name or by address: block.
+3. `OverlayStudioBlockHosts` match, by name or by address: block.
 4. A Chrome service host (`clients2.google.com`, `accounts.google.com`, `www.google.com`, `update.googleapis.com`,
-   `edgedl.me.gvt1.com`, `optimizationguide-pa.googleapis.com`) with `UrlOverlayBlockChromeServices` on: block unless
-   the host is in `UrlOverlayAllowHosts`. Counted in `/info`, not logged one by one.
+   `edgedl.me.gvt1.com`, `optimizationguide-pa.googleapis.com`) with `OverlayStudioBlockChromeServices` on: block unless
+   the host is in `OverlayStudioAllowHosts`. Counted in `/info`, not logged one by one.
 5. Cloud metadata (`169.254.169.254`, `fd00:ec2::254`): block unless an address or range entry allows it (a hostname
-   entry or `UrlOverlayAllowPrivateNetworks` never does).
+   entry or `OverlayStudioAllowPrivateNetworks` never does).
 6. Loopback, link-local, unspecified, and this server's own interface addresses (read again every minute): block
    unless an exact address entry allows it.
-7. `UrlOverlayAllowHosts` match, by name or by address: allow.
+7. `OverlayStudioAllowHosts` match, by name or by address: allow.
 8. Private, CGNAT (`100.64.0.0/10`), reserved, unique-local (`fc00::/7`), site-local and multicast: block unless
-   `UrlOverlayAllowPrivateNetworks`.
+   `OverlayStudioAllowPrivateNetworks`.
 9. Otherwise allow.
 
 Every address a name resolves to is checked; one blocked address blocks the host.
@@ -216,11 +216,11 @@ still reaches the resolver, so a page can signal through the names it asks for.
 
 ## Transcoder templates
 
-Templates are ordinary WSE files in the virtual host's `transcoder/templates/`. A template carries a URL overlay
-through two template properties, `urlOverlay` (the overlay's name) and `urlOverlayEncodes` (the outputs that show it;
-empty means every output), and needs `Decode/Video/EnableDynamicOverlays` true. Encode names in `urlOverlayEncodes` are
+Templates are ordinary WSE files in the virtual host's `transcoder/templates/`. A template carries an overlay
+through two template properties, `overlayStudio1` (the overlay's name) and `overlayStudioEncodes1` (the outputs that show it;
+empty means every output), and needs `Decode/Video/EnableDynamicOverlays` true. Encode names in `overlayStudioEncodes1` are
 matched as whole-string regular expressions against the encode name and its output stream name. Templates the module
-writes carry `Managed by URL Overlay` in their description; a file without it is never overwritten.
+writes carry `Managed by Overlay Studio` in their description; a file without it is never overwritten.
 
 **Builder.** `TemplateBuilder` writes a template from the page's spec: outputs (video, passthrough or audio), size and
 fit mode (`fit-height`, `fit-width`, `letterbox`, `crop`, `stretch`, or the source's size), source region
@@ -231,17 +231,17 @@ keyframes, HDR to SDR (`Convert8bit`), audio codec with channels and sample rate
 overlays (`Decode/Video/Overlays` for every output, `Encode/Video/Overlays` per output, indexes 1 to 8), and adaptive
 groups (`StreamNameGroups`, with `WowzaAudioOnly` or `WowzaVideoOnly` renditions). Hardware sets decoder, scaler and
 encoder names together: CPU (`default`), NVIDIA (`NVCUVID_EVA`, `CUDA_EVA`, `NVENC_EVA`), Intel (`IQSV`) or NETINT.
-Default sizes and bitrates come from WSE's own `transcode.xml`; 1080p and 540p are URL Overlay's choice. The URL
-overlay draws in slot 16 (`UrlOverlayIndex`), clear of image overlays and of the slot VIF uses.
+Default sizes and bitrates come from WSE's own `transcode.xml`; 1080p and 540p are Overlay Studio's choice. The URL
+overlay draws in slot 16 (`OverlayStudioIndex`), clear of image overlays and of the slot VIF uses.
 
 **Validator.** A template is usable when it parses, has `EnableDynamicOverlays` true, and has at least one enabled
 output whose video codec is not `PassThru` or `Disable`. Warnings: an enabled `PassThru` output, an implementation name
 not found in WSE. A VIF template (one with a `videoIntelligence` encode) is marked unusable: a stream runs either VIF or
-URL Overlay, and at run time the module draws nothing on a VIF session and logs one warning.
+Overlay Studio, and at run time the module draws nothing on a VIF session and logs one warning.
 
 **Existing templates.** `use` with `copy` writes a new file with dynamic overlays on and the overlay properties set;
 the original is untouched. `inplace` changes the file itself, only for a customer's own template (never the five WSE
-ships, never VIF's); it is backed up as `<template>.xml.urloverlay-<time>.bak` and recorded in the install manifest.
+ships, never VIF's); it is backed up as `<template>.xml.overlaystudio-<time>.bak` and recorded in the install manifest.
 
 **Assigning.** WSE loads, for each stream, the first template in the application's `Transcoder/Templates` list that
 exists. Stream scope writes `transcoder/templates/<stream>.xml`, a managed copy, and puts `${SourceStreamName}.xml`
@@ -257,7 +257,7 @@ loaded file and reported as `restartNeeded`, because WSE builds a stream's trans
 
 ## Installer
 
-`java -jar wse-plugin-url-overlay-installer-<version>.jar Install | Uninstall | Verify | UpdateChrome [options]`. The
+`java -jar wse-plugin-overlay-studio-installer-<version>.jar Install | Uninstall | Verify | UpdateChrome [options]`. The
 setup program, `install.cmd` and `install.sh` all run this jar.
 
 **Install steps.**
@@ -270,25 +270,25 @@ setup program, `install.cmd` and `install.sh` all run this jar.
    (`--yes`) changes no application unless `--appName` or `--all-live-apps` names them.
 4. Download Chrome (below), unless a path is given or `--no-download`.
 5. Set up the capture service: program, settings, account, unit or Windows service, AppArmor profile.
-6. Back up each file before its first edit (`<file>.urloverlay-<yyyyMMdd-HHmmss>.bak`), recording its SHA-256.
-7. `Server.xml`: the server listener and `UrlOverlayServer`, `UrlOverlayAllowPrivateNetworks`,
-   `UrlOverlayBlockChromeServices` and `UrlOverlayCaptureSocket`, each only when absent. `RESTInterface` is never
+6. Back up each file before its first edit (`<file>.overlaystudio-<yyyyMMdd-HHmmss>.bak`), recording its SHA-256.
+7. `Server.xml`: the server listener and `OverlayStudioServer`, `OverlayStudioAllowPrivateNetworks`,
+   `OverlayStudioBlockChromeServices` and `OverlayStudioCaptureSocket`, each only when absent. `RESTInterface` is never
    touched.
 8. Each chosen `Application.xml`: the module entry.
 9. `lib/`: the module jar only, replacing an older one.
-10. `transcoder/templates/`: the three starters (`urloverlay-cpu.xml`, `urloverlay-gpu-eva.xml`,
-    `urloverlay-passthrough.xml`), only if absent.
-11. The plugin page into `manager/wse-plugins/server/url-overlay/`, and the bridge into `manager/temp/` when the
+10. `transcoder/templates/`: the three starters (`overlaystudio-cpu.xml`, `overlaystudio-gpu-eva.xml`,
+    `overlaystudio-passthrough.xml`), only if absent.
+11. The plugin page into `manager/wse-plugins/server/overlay-studio/`, and the bridge into `manager/temp/` when the
     Manager passes the check.
 12. Write the manifest, start the capture service and report whether it runs.
 
 Edits are text insertions, not a DOM rewrite: a small tag scanner finds the element and the new lines go before its
 closing tag with the file's own indentation, line endings and byte order mark. Every other byte stays as it was.
 
-**Manifest.** `conf.modules/urloverlay/install-manifest.json` records every file added, every element inserted, the
+**Manifest.** `conf.modules/overlaystudio/install-manifest.json` records every file added, every element inserted, the
 backup and post-install SHA-256 of every edited file, and the capture service's record (accounts it created, group
 memberships it added, folders, units, scheduled task). Saved overlays live beside it in
-`conf.modules/urloverlay/<application>/`.
+`conf.modules/overlaystudio/<application>/`.
 
 **Rollback.** Changes are applied in order and remembered; a failure undoes what the run wrote, the capture service
 included, and exits 5 (6 if something could not be put back). Running the installer again changes only what is
@@ -298,13 +298,13 @@ missing; an unchanged install writes nothing and makes no backup.
 is restored byte for byte from its backup; a file changed since keeps those changes and loses only the recorded
 insertions. Added files, the plugin page, the bridge, the module jar and unedited starter templates are removed
 (`--keep-templates` keeps the starters), then the capture service with everything its record names, including a
-`wse-url-overlay` user only if the install created it. Saved overlays are kept unless `--purge`. Backups are kept and
+`wse-overlay-studio` user only if the install created it. Saved overlays are kept unless `--purge`. Backups are kept and
 listed. `--remove-app` takes the module out of chosen applications by the same hash rule. On Windows, uninstall uses
 `takeown` on the service's work folder; on a non-English Windows its prompt answer was not checked.
 
 **Packages.** The setup program is built with `jpackage` and WiX 3.14.1 and carries its own runtime; its last step
 opens the setup window, which elevates itself. Removing it runs `Uninstall --yes` first. The `.deb` installs to
-`/opt/wse-url-overlay/`, runs `install.sh --yes` on configure (always exiting 0 and saying how to finish on failure)
+`/opt/wse-overlay-studio/`, runs `install.sh --yes` on configure (always exiting 0 and saying how to finish on failure)
 and `uninstall.sh --yes` on removal. Packages are not code signed.
 
 ## Chrome download and updates
@@ -318,8 +318,8 @@ incomplete folder is removed and unpacked again. Zip entries that would land out
 Chrome already on disk is reused, so a reinstall downloads nothing. The installer stops the capture service, and waits
 for its Chrome processes to end, before it changes any Chrome folder.
 
-`UpdateChrome` runs daily: a systemd timer `WowzaURLOverlayChromeUpdate.timer` (`OnCalendar=daily`,
-`RandomizedDelaySec=4h`, `Persistent=true`) on Linux, a scheduled task `WowzaURLOverlayChromeUpdate` as SYSTEM with a
+`UpdateChrome` runs daily: a systemd timer `WowzaOverlayStudioChromeUpdate.timer` (`OnCalendar=daily`,
+`RandomizedDelaySec=4h`, `Persistent=true`) on Linux, a scheduled task `WowzaOverlayStudioChromeUpdate` as SYSTEM with a
 4-hour random delay on Windows. Each run:
 
 1. Stops if `capture.properties` says `autoUpdate=false` or names a Chrome outside the Chrome folder.
@@ -334,15 +334,15 @@ for its Chrome processes to end, before it changes any Chrome folder.
 6. On success keeps the new and the previous version and deletes older ones.
 
 Each run writes `chrome-update.json` next to `capture.properties`; `/info` and the Server view show it. By hand:
-`sudo /opt/wse-url-overlay/update-chrome.sh`, or as administrator `update-chrome.cmd` or `urloverlay-cli.exe UpdateChrome`.
+`sudo /opt/wse-overlay-studio/update-chrome.sh`, or as administrator `update-chrome.cmd` or `overlaystudio-cli.exe UpdateChrome`.
 
 ## Logging
 
 Module lines go through WSE's logger to `logs/wowzastreamingengine_access.log` (INFO) and
-`wowzastreamingengine_error.log` (WARN), and all contain `UrlOverlay`. Logged: module start and access mode, overlay
+`wowzastreamingengine_error.log` (WARN), and all contain `OverlayStudio`. Logged: module start and access mode, overlay
 and template changes with the REST user, template assignments with the list before and after, refused requests,
 egress blocks, and streams skipped for running a VIF template. The capture service logs browser opens, reloads,
-retries and closes to its own log. Diagnostic: `-Durloverlay.egress.trace=true` on the capture service's JVM logs every
+retries and closes to its own log. Diagnostic: `-Doverlaystudio.egress.trace=true` on the capture service's JVM logs every
 request line a proxy receives.
 
 ## Testing

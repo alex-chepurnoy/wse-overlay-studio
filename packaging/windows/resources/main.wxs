@@ -106,21 +106,21 @@
 
     <UIRef Id="JpUI"/>
 
-    <!-- URL Overlay: the setup program only places the installer on disk. Its last step starts the main launcher with
+    <!-- Overlay Studio: the setup program only places the installer on disk. Its last step starts the main launcher with
          no arguments, so its default argument opens the setup window, which asks for administrator rights, lets the
          user choose the install and its applications, and edits WSE. -->
-    <CustomAction Id="UoRunInstaller" Directory="INSTALLDIR" Execute="immediate" Impersonate="yes" Return="asyncNoWait"
-      ExeCommand="&quot;[INSTALLDIR]Wowza URL Overlay.exe&quot;" />
+    <CustomAction Id="OsRunInstaller" Directory="INSTALLDIR" Execute="immediate" Impersonate="yes" Return="asyncNoWait"
+      ExeCommand="&quot;[INSTALLDIR]Wowza Overlay Studio.exe&quot;" />
     <!-- Removing the program first takes the module out of the WSE install the setup window recorded (wse-home.txt),
          and stops and removes the capture service with its program, Chrome and ProgramData folder, through the console
          launcher, as LocalSystem. Only a running WSE fails this step (exit 3), which stops the
          removal so the user can stop the service and try again; any other problem is logged and the removal goes on. -->
-    <CustomAction Id="UoRunUninstaller" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="check"
-      ExeCommand="&quot;[INSTALLDIR]urloverlay-cli.exe&quot; --setup-uninstall" />
+    <CustomAction Id="OsRunUninstaller" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="check"
+      ExeCommand="&quot;[INSTALLDIR]overlaystudio-cli.exe&quot; --setup-uninstall" />
 
     <InstallExecuteSequence>
-      <Custom Action="UoRunInstaller" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt;= 4</Custom>
-      <Custom Action="UoRunUninstaller" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="OsRunInstaller" After="InstallFinalize">NOT Installed AND NOT REMOVE AND UILevel &gt;= 4</Custom>
+      <Custom Action="OsRunUninstaller" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
       <Custom Action="JpSetARPINSTALLLOCATION" After="CostFinalize">Not Installed</Custom>
       <Custom Action="JpSetARPCOMMENTS" After="CostFinalize">Not Installed</Custom>
       <Custom Action="JpSetARPCONTACT" After="CostFinalize">Not Installed</Custom>

@@ -1,4 +1,4 @@
-rootProject.name = 'wse-url-overlay'
+rootProject.name = 'wse-overlay-studio'
 include 'module'
 include 'installer'
 include 'bridge'

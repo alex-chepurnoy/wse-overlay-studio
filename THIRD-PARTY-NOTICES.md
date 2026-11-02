@@ -1,12 +1,12 @@
 # Third-party notices
 
-URL Overlay for Wowza Streaming Engine ships the components below. Each is used unmodified.
+Overlay Studio for Wowza Streaming Engine ships the components below. Each is used unmodified.
 
 ## Shipped in every package
 
 | Component | Version | License | Where it goes |
 |---|---|---|---|
-| hls.js | 1.6.16 | Apache License 2.0 | `manager/wse-plugins/server/url-overlay/vendor/` |
+| hls.js | 1.6.16 | Apache License 2.0 | `manager/wse-plugins/server/overlay-studio/vendor/` |
 
 The full Apache License 2.0 text is in `licenses/apache-2.0.txt`, and beside hls.js, with its NOTICE, in
 `vendor/hls.js-LICENSE.txt`.
