@@ -39,6 +39,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import com.wowza.util.Base64;
 import com.wowza.wms.plugin.overlaystudio.Fonts;
+import com.wowza.wms.plugin.overlaystudio.ImageFiles;
 import com.wowza.wms.plugin.overlaystudio.TextTokens;
 import com.wowza.wms.plugin.overlaystudio.OverlayImage;
 import com.wowza.wms.plugin.overlaystudio.OverlayStudioLog;
@@ -168,8 +169,25 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@JsonProperty("gradientColor")
 	protected String gradientColor = null;
 
-	@JsonProperty("base64Image")
-	protected String base64Image = null;
+	// Image layers (plan 3.5): a file in the virtual host's content folder, drawn into w, h. lockAspect (on when not
+	// set for an image) fits it inside w, h, centered; off stretches it. A w or h of 0 or less takes the file's own
+	// size, the other side from its aspect.
+	@JsonProperty("imageFile")
+	protected String imageFile = null;
+
+	@JsonProperty("lockAspect")
+	protected Boolean lockAspect = null;
+
+	// Shapes (plan 3.4): rotation in degrees, either sign, about the layer's center (a free text's start); dash on
+	// every outline: solid, dashed or dotted; arrowHead on a line: none, end or both.
+	@JsonProperty("rotation")
+	protected Double rotation = null;
+
+	@JsonProperty("dash")
+	protected String dash = null;
+
+	@JsonProperty("arrowHead")
+	protected String arrowHead = null;
 
 	@JsonProperty("shadowColor")
 	protected String shadowColor = null;
@@ -464,8 +482,15 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	private BasicStroke getBasicStroke(int size)
 	{
-		String key= size + ":";
-		return basicStrokeCache.computeIfAbsent(key, k -> new BasicStroke(size));
+		String d = dash == null ? "solid" : dash;
+		String key = size + ":" + d;
+		return basicStrokeCache.computeIfAbsent(key, k -> switch(d)
+		{
+			case "dashed" -> new BasicStroke(size, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[] { 3f * size, 2f * size }, 0f);
+			// round caps on near-zero dashes draw dots
+			case "dotted" -> new BasicStroke(size, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[] { 0.01f, 2f * size }, 0f);
+			default -> new BasicStroke(size);
+		});
 	}
 
 	public String getInstanceName()
@@ -549,9 +574,23 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		checkTiming();
 	}
 
-	/** Refuses malformed text fields (textProblem) as a client error naming the field. */
+	/** Refuses malformed text fields (textProblem) and shape and image fields (shapeProblem) as a client error naming the field. */
 	void checkText() throws ConfigBaseException
 	{
+		Map<String, Object> shape = new java.util.LinkedHashMap<>();
+		shape.put("rotation", rotation);
+		shape.put("dash", dash);
+		shape.put("arrowHead", arrowHead);
+		shape.put("lockAspect", lockAspect);
+		shape.put("imageFile", imageFile);
+		shape.values().removeIf(java.util.Objects::isNull);
+		String[] bad = shapeProblem(shape);
+		if(bad != null)
+		{
+			ConfigBaseException ex = new ConfigBaseException();
+			ex.addError(bad[0], bad[1]);
+			throw ex;
+		}
 		if(!"string".equals(type))
 		{
 			return;
@@ -768,6 +807,11 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
 		AffineTransform saved = g.getTransform();
+		if(rotation != null && rotation != 0)
+		{
+			double[] pivot = pivot(scaled);
+			g.rotate(Math.toRadians(rotation), pivot[0], pivot[1]);
+		}
 
 		// opacity not set (-1) is fully opaque
 		g.setComposite(AlphaComposite.SrcOver.derive((float)((this.opacity < 0 ? 100 : Math.min(100, this.opacity)) / 100.0 * Math.min(1.0, timing))));
@@ -856,7 +900,17 @@ public class ObjectConfig extends JsonApplicationConfigBase
                     {
                         g.setColor(this.awt_color());
                     }
-                    g.drawLine(this.getX(scaled), this.getY(scaled), this.getX2(scaled), this.getY2(scaled));
+                    // with arrow heads the line stops at each head's base, so no line shows past a tip
+                    double[] ends = lineEnds(scaled);
+                    g.draw(new java.awt.geom.Line2D.Double(ends[0], ends[1], ends[2], ends[3]));
+                    if("end".equals(arrowHead) || "both".equals(arrowHead))
+                    {
+                        g.fill(arrow(this.getX(scaled), this.getY(scaled), this.getX2(scaled), this.getY2(scaled), arrowSize(scaled)));
+                    }
+                    if("both".equals(arrowHead))
+                    {
+                        g.fill(arrow(this.getX2(scaled), this.getY2(scaled), this.getX(scaled), this.getY(scaled), arrowSize(scaled)));
+                    }
 				}
                 case "string" -> TextDraw.draw(this, g, scaled, now, streamStart);
                 case "ellipse" -> {
@@ -940,11 +994,11 @@ public class ObjectConfig extends JsonApplicationConfigBase
                     g.drawPolygon(xInts,yInts,3);
 				}
                 case "image" -> {
-                    BufferedImage image = decodedImage();
+                    BufferedImage image = image();
                     if(image != null)
                     {
-                        int[] size = imageDrawSize(image.getWidth(), image.getHeight(), scaled);
-                        drawImageAt(g, image, this.getX(scaled), this.getY(scaled), size[0], size[1]);
+                        int[] r = imageRect(image.getWidth(), image.getHeight(), scaled);
+                        drawImageAt(g, image, r[0], r[1], r[2], r[3]);
                     }
 				}
                 case "webPage" -> {
@@ -986,47 +1040,231 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	}
 
-	// base64Image decoded once per value instead of on every draw
-	private transient String decodedFrom = null;
-	private transient BufferedImage decoded = null;
+	// The picture this layer holds in the shared cache (ImageFiles), the file version it came from, why it cannot be
+	// drawn, and when the file was last looked at; guarded by webPageLock
+	private transient ImageFiles.Key heldKey = null;
+	private transient BufferedImage held = null;
+	private transient volatile String imageProblem = null;
 
-	/** The image object's picture, or null when it has none or it is not an image ImageIO can read within the size limit. */
-	BufferedImage decodedImage()
+	/** The virtual host this layer belongs to: its own, else its overlay's. */
+	private String vhost()
 	{
-		String b64 = this.base64Image;
-		if(b64 == null)
+		if(vhostName != null)
+		{
+			return vhostName;
+		}
+		OverlayImage img = oImage;
+		return img != null && img.getOverlayConfig() != null ? img.getOverlayConfig().getVhostName() : null;
+	}
+
+	/** The image file's path, or null (no file, a name the library refuses, no content folder) with the reason recorded. */
+	private java.nio.file.Path imagePath()
+	{
+		if(imageFile == null || imageFile.isBlank())
 		{
 			return null;
 		}
+		try
+		{
+			String f = com.wowza.wms.plugin.overlaystudio.templates.ImageLibrary.safeFile(imageFile);
+			java.nio.file.Path dir = ImageFiles.contentDirOf.apply(vhost());
+			if(dir == null)
+			{
+				imageProblem = "no content folder for this virtual host";
+				return null;
+			}
+			return dir.resolve(f);
+		}
+		catch(com.wowza.wms.plugin.overlaystudio.templates.TemplateFiles.Refused | RuntimeException e)
+		{
+			imageProblem = e.getMessage();
+			return null;
+		}
+	}
+
+	/**
+	 * The picture to draw, from the shared cache, or null (no file: nothing to draw, as the Corner bug preset; a missing
+	 * or unusable file: recorded in imageProblem for /status). A new version of the file is taken on the next call
+	 * after imageFileChanged said so.
+	 */
+	BufferedImage image()
+	{
+		java.nio.file.Path path = imagePath();
+		if(path == null)
+		{
+			releaseImage();
+			return null;
+		}
+		ImageFiles.Key key = ImageFiles.keyOf(path);
 		synchronized(webPageLock)
 		{
-			if(!b64.equals(decodedFrom))
+			if(disposed)
 			{
-				decodedFrom = b64;
-				decoded = null;
-				try
-				{
-					byte[] bytes = Base64.decode(b64);
-					// the size from the header first, so a small upload cannot declare a frame too large to decode
-					int[] size = com.wowza.wms.plugin.overlaystudio.templates.ImageLibrary.dimensions(bytes);
-					if(size != null && size[0] <= com.wowza.wms.plugin.overlaystudio.templates.ImageLibrary.MAX_SIDE
-							&& size[1] <= com.wowza.wms.plugin.overlaystudio.templates.ImageLibrary.MAX_SIDE)
-					{
-						decoded = ImageIO.read(new ByteArrayInputStream(bytes));
-					}
-					else
-					{
-						log.warn("OverlayStudio: image object " + id + " is not a readable image of at most "
-								+ com.wowza.wms.plugin.overlaystudio.templates.ImageLibrary.MAX_SIDE + " pixels a side; not drawn");
-					}
-				}
-				catch(IOException | RuntimeException e)
-				{
-					log.warn("OverlayStudio: image object " + id + " could not be read: " + e);
-				}
+				return null;
 			}
-			return decoded;
+			if(key != null && key.equals(heldKey))
+			{
+				return held;
+			}
 		}
+		if(key == null)
+		{
+			releaseImage();
+			imageProblem = imageFile + " is not in the content folder";
+			return null;
+		}
+		BufferedImage img;
+		try
+		{
+			img = ImageFiles.acquire(key);
+		}
+		catch(java.io.IOException e)
+		{
+			releaseImage();
+			imageProblem = e.getMessage();
+			return null;
+		}
+		ImageFiles.Key old;
+		synchronized(webPageLock)
+		{
+			if(disposed)
+			{
+				ImageFiles.release(key);
+				return null;
+			}
+			old = heldKey;
+			heldKey = key;
+			held = img;
+		}
+		ImageFiles.release(old);
+		imageProblem = null;
+		return img;
+	}
+
+	private void releaseImage()
+	{
+		ImageFiles.Key old;
+		synchronized(webPageLock)
+		{
+			old = heldKey;
+			heldKey = null;
+			held = null;
+		}
+		ImageFiles.release(old);
+	}
+
+	/** Whether the image file changed since this layer took its picture (replaced, removed or appeared). Decodes nothing. */
+	public boolean imageFileChanged()
+	{
+		if(!"image".equals(type) || imageFile == null)
+		{
+			return false;
+		}
+		java.nio.file.Path path = imagePath();
+		ImageFiles.Key now = path == null ? null : ImageFiles.keyOf(path);
+		synchronized(webPageLock)
+		{
+			return !java.util.Objects.equals(now, heldKey);
+		}
+	}
+
+	/** Why this image layer draws nothing, or null. */
+	public String imageProblem()
+	{
+		return "image".equals(type) && imageFile != null ? imageProblem : null;
+	}
+
+	/**
+	 * Where an image of iw x ih pixels is drawn at this scale, {x, y, w, h}: into w, h, fitted inside and centered
+	 * with lockAspect (on when not set), stretched without; with one side not set, that side from the image's aspect;
+	 * with neither, the image's own size.
+	 */
+	int[] imageRect(int iw, int ih, double scaled)
+	{
+		double x = getX(scaled), y = getY(scaled);
+		double bw = w > 0 ? w * scaled : 0, bh = h > 0 ? h * scaled : 0;
+		double dw, dh;
+		if(bw > 0 && bh > 0)
+		{
+			if(lockAspect == null || lockAspect)
+			{
+				double k = Math.min(bw / iw, bh / ih);
+				dw = iw * k;
+				dh = ih * k;
+				x += (bw - dw) / 2;
+				y += (bh - dh) / 2;
+			}
+			else
+			{
+				dw = bw;
+				dh = bh;
+			}
+		}
+		else if(bw > 0)
+		{
+			dw = bw;
+			dh = bw * ih / iw;
+		}
+		else if(bh > 0)
+		{
+			dh = bh;
+			dw = bh * iw / ih;
+		}
+		else
+		{
+			dw = iw * scaled;
+			dh = ih * scaled;
+		}
+		return new int[] { (int)Math.round(x), (int)Math.round(y), (int)Math.round(dw), (int)Math.round(dh) };
+	}
+
+	/** The arrow head's length at this scale: four strokes, at least 10 px at source size. */
+	private double arrowSize(double scaled)
+	{
+		return Math.max(10 * scaled, getStroke(scaled) * 4.0);
+	}
+
+	/** The line's drawn ends at this scale, {x1, y1, x2, y2}, pulled back to the base of any arrow head. */
+	double[] lineEnds(double scaled)
+	{
+		double x1 = getX(scaled), y1 = getY(scaled), x2 = getX2(scaled), y2 = getY2(scaled);
+		double len = Math.hypot(x2 - x1, y2 - y1), back = arrowSize(scaled) * Math.cos(Math.toRadians(ARROW_SPREAD)) * 0.9;
+		if(len <= 0)
+		{
+			return new double[] { x1, y1, x2, y2 };
+		}
+		double ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+		boolean end = "end".equals(arrowHead) || "both".equals(arrowHead), start = "both".equals(arrowHead);
+		return new double[] { start ? x1 + ux * back : x1, start ? y1 + uy * back : y1, end ? x2 - ux * back : x2, end ? y2 - uy * back : y2 };
+	}
+
+	static final double ARROW_SPREAD = 28;
+
+	/** A filled arrow head at (x2, y2), pointing away from (x1, y1). */
+	static java.awt.Shape arrow(double x1, double y1, double x2, double y2, double size)
+	{
+		double a = Math.atan2(y2 - y1, x2 - x1), spread = Math.toRadians(ARROW_SPREAD);
+		java.awt.geom.Path2D.Double p = new java.awt.geom.Path2D.Double();
+		p.moveTo(x2, y2);
+		p.lineTo(x2 - size * Math.cos(a - spread), y2 - size * Math.sin(a - spread));
+		p.lineTo(x2 - size * Math.cos(a + spread), y2 - size * Math.sin(a + spread));
+		p.closePath();
+		return p;
+	}
+
+	/** What rotation turns around at this scale: the center of the layer's own area; a free text's start. */
+	double[] pivot(double scaled)
+	{
+		if("string".equals(type) && !TextDraw.isBox(this))
+		{
+			return new double[] { getX(scaled), getY(scaled) };
+		}
+		java.awt.Rectangle r = unrotatedBounds(scaled);
+		if(r == null || r.isEmpty())
+		{
+			return new double[] { getX(scaled), getY(scaled) };
+		}
+		return new double[] { r.getCenterX(), r.getCenterY() };
 	}
 
 	// The capture for the current url and window size, or null once disposed.
@@ -1098,6 +1336,22 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	 */
 	public java.awt.Rectangle drawBounds(double scaled)
 	{
+		java.awt.Rectangle r = unrotatedBounds(scaled);
+		if(r == null || rotation == null || rotation == 0 || r.isEmpty())
+		{
+			return r;
+		}
+		if("string".equals(type) && !TextDraw.isBox(this))
+		{
+			return null;
+		}
+		double[] c = pivot(scaled);
+		return AffineTransform.getRotateInstance(Math.toRadians(rotation), c[0], c[1]).createTransformedShape(r).getBounds();
+	}
+
+	/** drawBounds before rotation. */
+	java.awt.Rectangle unrotatedBounds(double scaled)
+	{
 		if(type == null)
 		{
 			return null;
@@ -1116,13 +1370,13 @@ public class ObjectConfig extends JsonApplicationConfigBase
 				}
 			}
 			case "image" -> {
-				BufferedImage image = decodedImage();
+				BufferedImage image = image();
 				if(image == null)
 				{
 					return new java.awt.Rectangle();
 				}
-				int[] size = imageDrawSize(image.getWidth(), image.getHeight(), scaled);
-				r = new java.awt.Rectangle(getX(scaled), getY(scaled), size[0], size[1]);
+				int[] d = imageRect(image.getWidth(), image.getHeight(), scaled);
+				r = new java.awt.Rectangle(d[0], d[1], d[2], d[3]);
 			}
 			case "webPage" -> {
 				if(w <= 0 || h <= 0)
@@ -1136,7 +1390,8 @@ public class ObjectConfig extends JsonApplicationConfigBase
 				return null;
 			}
 		}
-		int pad = getStroke(scaled) + 2 + (shadowColor != null ? Math.abs(getShadowOffset(scaled)) : 0);
+		int pad = getStroke(scaled) + 2 + (shadowColor != null ? Math.abs(getShadowOffset(scaled)) : 0)
+				+ ("line".equals(type) && arrowHead != null && !"none".equals(arrowHead) ? (int)Math.ceil(arrowSize(scaled)) : 0);
 		r.grow(pad, pad);
 		return r;
 	}
@@ -1311,7 +1566,45 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	/** Fields 1.x had and 2.0 refuses, with what replaces each. */
 	public static final Map<String, String> REMOVED = Map.of("displayStart", "showFrom", "displayStop", "hideAt", "flashRate", "blinkSeconds", "rotate", "rotation",
-			"useDate", "a {time:...} token in the text");
+			"useDate", "a {time:...} token in the text", "base64Image", "imageFile, a file uploaded to the image library");
+
+	static final java.util.List<String> DASHES = java.util.List.of("solid", "dashed", "dotted");
+	static final java.util.List<String> ARROWS = java.util.List.of("none", "end", "both");
+
+	/** Why a layer's shape and image fields are refused, as {field, message}, or null (plan 3.4, 3.5). */
+	public static String[] shapeProblem(Map<String, Object> m)
+	{
+		Object rot = m.get("rotation");
+		if(rot != null && !(rot instanceof Number n && Double.isFinite(n.doubleValue()) && Math.abs(n.doubleValue()) <= 360))
+		{
+			return new String[] { "rotation", "rotation must be degrees from -360 to 360" };
+		}
+		if(m.get("dash") != null && !DASHES.contains(m.get("dash").toString()))
+		{
+			return new String[] { "dash", "dash must be one of " + DASHES };
+		}
+		if(m.get("arrowHead") != null && !ARROWS.contains(m.get("arrowHead").toString()))
+		{
+			return new String[] { "arrowHead", "arrowHead must be one of " + ARROWS };
+		}
+		if(m.get("lockAspect") != null && !(m.get("lockAspect") instanceof Boolean))
+		{
+			return new String[] { "lockAspect", "lockAspect must be true or false" };
+		}
+		Object f = m.get("imageFile");
+		if(f != null)
+		{
+			try
+			{
+				com.wowza.wms.plugin.overlaystudio.templates.ImageLibrary.safeFile(f.toString());
+			}
+			catch(com.wowza.wms.plugin.overlaystudio.templates.TemplateFiles.Refused e)
+			{
+				return new String[] { "imageFile", e.getMessage() };
+			}
+		}
+		return null;
+	}
 
 	/** What this layer's tokens draw from at now: its zone, locale, target and end text, and the stream's start. */
 	TextTokens.Context tokenContext(long now, long streamStart)
@@ -1497,6 +1790,26 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	/** Takes its own reference on the page capture old holds, when it would show the same page. */
 	void shareCaptureOf(ObjectConfig old)
 	{
+		// the same file, the same version: a hold of its own on the picture the old layer has
+		if("image".equals(type) && java.util.Objects.equals(imageFile, old.imageFile))
+		{
+			ImageFiles.Key k;
+			BufferedImage img;
+			synchronized(old.webPageLock)
+			{
+				k = old.heldKey;
+				img = old.held;
+			}
+			if(k != null)
+			{
+				ImageFiles.hold(k);
+				synchronized(webPageLock)
+				{
+					heldKey = k;
+					held = img;
+				}
+			}
+		}
 		WebPageCapture c;
 		synchronized(old.webPageLock)
 		{
@@ -1776,6 +2089,9 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			{
 				releaseCapture();
 			}
+			ImageFiles.release(heldKey);
+			heldKey = null;
+			held = null;
 		}
 	}
 
@@ -1788,12 +2104,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		int baseW = w > 0 ? w : imageWidth;
 		int baseH = h > 0 ? h : imageHeight;
 		return new int[] { (int)(baseW * scaled), (int)(baseH * scaled) };
-	}
-
-	/** Size to draw an image object: its own pixel size, scaled to the target frame. */
-	static int[] imageDrawSize(int imageWidth, int imageHeight, double scaled)
-	{
-		return new int[] { (int)(imageWidth * scaled), (int)(imageHeight * scaled) };
 	}
 
 	/**
@@ -1966,10 +2276,11 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		{
 			this.gradientColor = obj.gradientColor;
 		}
-		if(this.base64Image == null)
-		{
-			this.base64Image = obj.base64Image;
-		}
+		if(this.imageFile == null) { this.imageFile = obj.imageFile; }
+		if(this.lockAspect == null) { this.lockAspect = obj.lockAspect; }
+		if(this.rotation == null) { this.rotation = obj.rotation; }
+		if(this.dash == null) { this.dash = obj.dash; }
+		if(this.arrowHead == null) { this.arrowHead = obj.arrowHead; }
 		if (this.shadowOffset == -1)
 		{
 			this.shadowOffset = obj.shadowOffset;

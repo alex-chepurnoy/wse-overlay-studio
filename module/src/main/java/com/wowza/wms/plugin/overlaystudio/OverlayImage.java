@@ -67,6 +67,8 @@ public class OverlayImage
 	// has not published it
 	private volatile java.util.Set<Double> activeScales = java.util.Set.of();
 
+	/** How often an overlay with image layers looks for a replaced file. */
+	static final long IMAGE_CHECK_MS = 10_000;
 	/** Redraws are at most this often per overlay, whatever its layers ask for. */
 	static final long MIN_REDRAW_MS = 100;
 	/** The clock the scheduler reads; tests replace it. */
@@ -156,6 +158,28 @@ public class OverlayImage
 		this.overlaySource = overlayConfig.getOverlaySource();
 		this.overlayEncodes = overlayConfig.getOverlayEncodes();
 		overlayConfig.setImage(this);
+	}
+
+	/** Image layers that draw nothing, with why: [{id, file, problem}], for /status. */
+	public List<java.util.Map<String, Object>> imageProblems()
+	{
+		List<java.util.Map<String, Object>> out = new ArrayList<>();
+		OverlayConfig c = mainOverlayConfig;
+		if(c != null)
+		{
+			for(ObjectConfig o: c.getObjects())
+			{
+				String p = o.imageProblem();
+				if(p != null)
+				{
+					java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+					m.put("id", o.getId());
+					m.put("problem", p);
+					out.add(m);
+				}
+			}
+		}
+		return out;
 	}
 
 	/** The image lock (see imageLock). */
@@ -285,14 +309,20 @@ public class OverlayImage
 			return Long.MAX_VALUE;
 		}
 		long due = Long.MAX_VALUE;
-		boolean pages = false;
+		boolean pages = false, images = false;
 		for(ObjectConfig o: c.getObjects())
 		{
 			due = Math.min(due, o.nextChangeAt(now, streamStart));
 			pages |= "webPage".equals(o.getType());
+			images |= "image".equals(o.getType());
 		}
 		changeDueAt = due;
 		long next = due;
+		if(images)
+		{
+			// an image file replaced on disk is looked for every 10 s (plan 3.5)
+			next = Math.min(next, now + IMAGE_CHECK_MS);
+		}
 		if(pages && c.getRefreshRate() > 0)
 		{
 			next = Math.min(next, now + Math.max(1, (long)(c.getRefreshRate() * 1000.0)));
@@ -304,7 +334,7 @@ public class OverlayImage
 	void wakeUp(long now)
 	{
 		OverlayConfig c = mainOverlayConfig;
-		if(c != null && (now >= changeDueAt || c.hasNewFrame()))
+		if(c != null && (now >= changeDueAt || c.hasNewFrame() || c.imagesChanged()))
 		{
 			c.resetUuid();
 			lastChangeAt = now;

@@ -370,6 +370,19 @@ public class OverlayConfig extends JsonApplicationConfigBase
 		}
 	}
 
+	/** Whether any image layer's file changed since it was drawn. */
+	public boolean imagesChanged()
+	{
+		for(ObjectConfig o: objects)
+		{
+			if(o.imageFileChanged())
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Whether any web page on this overlay has a frame that has not been drawn yet. */
 	public boolean hasNewFrame()
 	{

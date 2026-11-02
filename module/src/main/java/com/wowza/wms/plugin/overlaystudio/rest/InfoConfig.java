@@ -173,6 +173,8 @@ public class InfoConfig extends ConfigBase
 		text.put("available", com.wowza.wms.plugin.overlaystudio.Fonts.unavailable() == null);
 		text.put("problem", com.wowza.wms.plugin.overlaystudio.Fonts.unavailable());
 		body.put("text", text);
+		// decoded pictures held for image layers, JVM-wide (ImageFiles)
+		body.put("images", com.wowza.wms.plugin.overlaystudio.ImageFiles.stats());
 		body.put("sandbox", "on");
 		body.put("sandboxProblem", running ? svc.get("sandboxProblem") : null);
 		return true;
