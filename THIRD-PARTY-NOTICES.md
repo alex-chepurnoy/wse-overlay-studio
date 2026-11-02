@@ -7,6 +7,11 @@ Overlay Studio for Wowza Streaming Engine ships the components below. Each is us
 | Component | Version | License | Where it goes |
 |---|---|---|---|
 | hls.js | 1.6.16 | Apache License 2.0 | `manager/wse-plugins/server/overlay-studio/vendor/` |
+| Fira Sans (Regular, Bold, Italic), Fira Sans Condensed (Regular, Bold, Italic), Fira Mono (Regular, Bold) | From `github.com/google/fonts`, `ofl/`, taken 2026-10-31 | SIL Open Font License 1.1. Copyright (c) 2012-2015, The Mozilla Foundation and Telefonica S.A. (Fira Mono: 2012-2013, The Mozilla Corporation and Telefonica S.A.) | Inside the module jar, `fonts/`, with each license |
+| PT Serif (Regular, Bold) | From `github.com/google/fonts`, `ofl/`, taken 2026-10-31 | SIL Open Font License 1.1. Copyright (c) 2010, ParaType Ltd. | Inside the module jar, `fonts/`, with its license |
+
+The fonts are used unmodified and are not sold on their own; each license's full text is in the jar beside the font
+files (`fonts/firasans-OFL.txt`, `fonts/firasanscondensed-OFL.txt`, `fonts/firamono-OFL.txt`, `fonts/ptserif-OFL.txt`).
 
 The full Apache License 2.0 text is in `licenses/apache-2.0.txt`, and beside hls.js, with its NOTICE, in
 `vendor/hls.js-LICENSE.txt`.

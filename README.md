@@ -53,7 +53,7 @@ Source: `ui/` (the page), `bridge/`, `module/`, `capture/`, and `installer/` wit
 | OS | Windows x64 (Windows 10 or Server 2019 and later, for Unix domain sockets) or Linux x86_64. Chrome for Testing is downloaded for `win64` and `linux64` only; the `.deb` installs on any architecture, but elsewhere Chrome must be given with `--chrome` ([Chrome](#chrome)) |
 | Rights | Administrator (Windows) or root (Linux): the install creates a service and its account |
 | Network at install | `googlechromelabs.github.io` and `storage.googleapis.com` for Chrome (chrome-headless-shell on Linux, Chrome for Testing on Windows), unless you pass your own Chrome with `--chrome`. A reinstall reuses a complete Chrome already on disk; on Linux, an install from before 1.15.0 downloads the headless shell once |
-| Linux fonts | `fontconfig` and a font package; the `.deb` recommends them with Chrome's libraries |
+| Linux fonts | `fontconfig` and one font package (`fonts-dejavu-core` on Debian and Ubuntu). Without them no text can be drawn, on video or in captured pages. The `.deb` depends on both; the zip and tarball installers say how to install them when they are missing |
 
 ## Install
 

@@ -473,7 +473,8 @@ public final class Main
 		Boolean fonts = Preflight.fonts();
 		if(Boolean.FALSE.equals(fonts))
 		{
-			out.println("Fonts:        none found (fc-list); pages render without text. Install fontconfig and a font package.");
+			out.println("Fonts:        none found (fc-list); text layers and captured pages draw no text until fontconfig and one font package are installed:");
+			out.println("              apt install fontconfig fonts-dejavu-core   (Debian, Ubuntu)   or   dnf install fontconfig dejavu-sans-fonts");
 		}
 		if(!s.bridgeGate.ok())
 		{

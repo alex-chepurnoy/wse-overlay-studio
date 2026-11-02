@@ -168,6 +168,11 @@ public class InfoConfig extends ConfigBase
 		egress.put("recentBlocks", running ? svc.get("recentBlocks") : java.util.List.of());
 		body.put("egress", egress);
 		// the service never runs Chrome without its sandbox; sandboxProblem says why one did not start
+		// whether text layers can be drawn on this server (Fonts.unavailable), shown on every screen when not
+		java.util.Map<String, Object> text = new LinkedHashMap<>();
+		text.put("available", com.wowza.wms.plugin.overlaystudio.Fonts.unavailable() == null);
+		text.put("problem", com.wowza.wms.plugin.overlaystudio.Fonts.unavailable());
+		body.put("text", text);
 		body.put("sandbox", "on");
 		body.put("sandboxProblem", running ? svc.get("sandboxProblem") : null);
 		return true;
