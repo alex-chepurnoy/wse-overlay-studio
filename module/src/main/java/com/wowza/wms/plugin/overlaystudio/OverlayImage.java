@@ -77,6 +77,18 @@ public class OverlayImage
 	private boolean running = false;
 	private volatile long changeDueAt = Long.MAX_VALUE;
 	private volatile long lastChangeAt = Long.MIN_VALUE / 2;
+	// when the stream's transcoder started, epoch ms, for showFrom and hideAt given as stream+N; 0 until known
+	private volatile long streamStart = 0;
+
+	/** When the stream's transcoder started (stream+N times count from it); replans the wake-up. */
+	public void setStreamStart(long epochMs)
+	{
+		if(streamStart != epochMs)
+		{
+			streamStart = epochMs;
+			reschedule();
+		}
+	}
 
 	/**
 	 * Background draws for every stream, on a few threads rather than one new thread per draw: each overlay has at most
@@ -276,7 +288,7 @@ public class OverlayImage
 		boolean pages = false;
 		for(ObjectConfig o: c.getObjects())
 		{
-			due = Math.min(due, o.nextChangeAt(now));
+			due = Math.min(due, o.nextChangeAt(now, streamStart));
 			pages |= "webPage".equals(o.getType());
 		}
 		changeDueAt = due;
@@ -588,18 +600,23 @@ public class OverlayImage
 	private byte[] drawImage(OverlayConfig overlayConfig, double scaled, UUID drawing, List<ObjectConfig> objects, long drawStart)
 	{
 		ObjectConfig.CAPTURE_WAIT_NS.set(0L);
-		BufferedImage bImage = getBufferedImage(scaled);
+		// Only the part of the canvas the layers can paint is allocated, cleared, drawn and converted (spike S2: a full
+		// canvas redraw is almost all clearing and converting). The same layers give the same box, so a ticking clock
+		// reuses its buffers.
+		java.awt.Rectangle box = drawBox(objects, scaled);
+		BufferedImage bImage = getBufferedImage(scaled, box.width, box.height);
 		Graphics2D g = bImage.createGraphics();
 		if(mainOverlayConfig.getBackgroundImage(scaled) == null)
 		{
 			//clear the old image out
 			g.setComposite(AlphaComposite.Clear);
-			g.fillRect(0, 0, getWidth(scaled), getHeight(scaled));
+			g.fillRect(0, 0, box.width, box.height);
 		}
-		else
+		g.translate(-box.x, -box.y);
+		if(mainOverlayConfig.getBackgroundImage(scaled) != null)
 		{
-			//put the background one the image
-			g.setComposite(AlphaComposite.SrcOver);
+			//put the background one the image (the box is then the whole canvas)
+			g.setComposite(AlphaComposite.Src);
 			g.drawImage(mainOverlayConfig.getBackgroundImage(scaled), 0, 0, null);
 		}
 		g.setComposite(AlphaComposite.SrcOver);
@@ -614,9 +631,11 @@ public class OverlayImage
 			// the list this draw took; an edit swaps in a new one and never changes this one
 			if (objects != null)
 			{
+				// one clock for the whole draw, so fades and blinks match across layers
+				long now = clock.getAsLong();
 				for (ObjectConfig obj : objects)
 				{
-					obj.draw(g, scaled, evenCoords);
+					obj.draw(g, scaled, evenCoords, obj.timingAlpha(now, streamStart));
 				}
 			}
 		}
@@ -627,13 +646,13 @@ public class OverlayImage
 		synchronized(imageLock)
 		{
 			retVal = spareByteImageMap.remove(scaled);
-			if(retVal == null)
+			if(retVal == null || retVal.length != box.width * box.height * 4)
 			{
-				retVal = new byte[getWidth(scaled) * getHeight(scaled) * 4];
+				retVal = new byte[box.width * box.height * 4];
 			}
 		}
 		transferImage(bImage, retVal, overlayConfig.getOpacity());
-		Published next = new Published(retVal, getWidth(scaled), getHeight(scaled), getxPos(scaled), getyPos(scaled), drawing);
+		Published next = new Published(retVal, box.width, box.height, getxPos(scaled) + box.x, getyPos(scaled) + box.y, drawing);
 		synchronized(imageLock)
 		{
 			Published old = published.put(scaled, next);
@@ -711,16 +730,60 @@ public class OverlayImage
 
 	public BufferedImage getBufferedImage(double scaled)
 	{
-		BufferedImage retVal;
-		synchronized (bufferedImageMap) {	
-			if (!bufferedImageMap.containsKey(scaled))
+		return getBufferedImage(scaled, getWidth(scaled), getHeight(scaled));
+	}
+
+	/** This scale's drawing surface at this size, kept while the size stays the same. */
+	BufferedImage getBufferedImage(double scaled, int w, int h)
+	{
+		synchronized (bufferedImageMap) {
+			BufferedImage retVal = bufferedImageMap.get(scaled);
+			if (retVal == null || retVal.getWidth() != w || retVal.getHeight() != h)
 			{
-				bufferedImageMap.put(scaled,
-						new BufferedImage(getWidth(scaled), getHeight(scaled), BufferedImage.TYPE_4BYTE_ABGR));
+				retVal = new BufferedImage(w, h, BufferedImage.TYPE_4BYTE_ABGR);
+				bufferedImageMap.put(scaled, retVal);
 			}
-			retVal = bufferedImageMap.get(scaled);
+			return retVal;
 		}
-		return retVal;
+	}
+
+	/**
+	 * The part of the canvas this draw covers: the union of the layers' areas (ObjectConfig.drawBounds), clipped to
+	 * the canvas, with an even origin and even size where the canvas allows; the whole canvas when a layer may paint
+	 * anywhere or the overlay has a background image; 2 x 2 at the origin when nothing paints.
+	 */
+	java.awt.Rectangle drawBox(List<ObjectConfig> objects, double scaled)
+	{
+		java.awt.Rectangle canvas = new java.awt.Rectangle(0, 0, getWidth(scaled), getHeight(scaled));
+		if(mainOverlayConfig.getBackgroundImage(scaled) != null)
+		{
+			return canvas;
+		}
+		java.awt.Rectangle u = null;
+		if(objects != null)
+		{
+			for(ObjectConfig o: objects)
+			{
+				java.awt.Rectangle b = o.drawBounds(scaled);
+				if(b == null)
+				{
+					return canvas;
+				}
+				if(!b.isEmpty())
+				{
+					u = u == null ? b : u.union(b);
+				}
+			}
+		}
+		java.awt.Rectangle r = u == null ? new java.awt.Rectangle() : u.intersection(canvas);
+		if(r.isEmpty())
+		{
+			return new java.awt.Rectangle(0, 0, Math.min(2, canvas.width), Math.min(2, canvas.height));
+		}
+		int x0 = r.x & ~1, y0 = r.y & ~1;
+		int x1 = Math.min(canvas.width, r.x + r.width + ((r.x + r.width - x0) & 1));
+		int y1 = Math.min(canvas.height, r.y + r.height + ((r.y + r.height - y0) & 1));
+		return new java.awt.Rectangle(x0, y0, x1 - x0, y1 - y0);
 	}
 
 

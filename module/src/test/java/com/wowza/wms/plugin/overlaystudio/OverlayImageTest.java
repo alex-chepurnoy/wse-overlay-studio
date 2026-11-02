@@ -46,7 +46,8 @@ class OverlayImageTest
 		awaitIdle(img);
 		byte[] first = img.getCurrentImageBuffer(1.0);
 		assertNotNull(first, "drawn for the current content");
-		assertEquals(16 * 8 * 4, first.length);
+		// an empty overlay draws its smallest box, 2 x 2
+		assertEquals(2 * 2 * 4, first.length);
 		config.resetUuid();
 		img.getCurrentImageBuffer(1.0);
 		awaitIdle(img);

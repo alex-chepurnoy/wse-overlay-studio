@@ -64,8 +64,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	public OverlayImage oImage = null;
 	public DateTime created_at;
 	public DateTime updated_at;
-	public long draw_count=0;
-	public boolean ok_to_draw=true;
 
 	// Shared by every draw thread, so synchronized, and bounded so dragging and scaling cannot grow them (D11). There
 	// is no gradient cache: a GradientPaint holds its own start and end points, and one is cheap to build per draw.
@@ -103,14 +101,23 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@JsonProperty("zOrder")
 	protected int zOrder = -1;
 
-	@JsonProperty("displayStart")
-	protected String displayStart = null;
+	// When the layer shows (3.3a): showFrom and hideAt are an ISO date-time with its offset, or stream+N, N seconds
+	// after the stream's transcoder started; absent means always. blinkSeconds: on for N s, off for N s, by the wall
+	// clock, so every output blinks together. fadeIn and fadeOut: 0 to 2 s at the start and end of the show window.
+	@JsonProperty("showFrom")
+	protected String showFrom = null;
 
-	@JsonProperty("displayStop")
-	protected  String displayStop = null;
+	@JsonProperty("hideAt")
+	protected String hideAt = null;
 
-	@JsonProperty("flashRate")
-	protected int flashRate = -1;
+	@JsonProperty("blinkSeconds")
+	protected Double blinkSeconds = null;
+
+	@JsonProperty("fadeIn")
+	protected Double fadeIn = null;
+
+	@JsonProperty("fadeOut")
+	protected Double fadeOut = null;
 
 	@JsonProperty("x")
 	protected int x = -1;
@@ -144,9 +151,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	@JsonProperty("arcHeight")
 	protected int arcHeight = -1;
-
-	@JsonProperty("rotate")
-	protected int rotate = -1;
 
 	@JsonProperty("stroke")
 	protected int stroke = -1;
@@ -251,14 +255,20 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	public int getzOrder() { return zOrder; };
 	public void setzOrder(int zOrder) { this.zOrder = zOrder; }
 
-	public String getDisplayStart() { return displayStart; };
-	public void setDisplayStart(String displayStart) { this.displayStart = displayStart; };
+	public String getShowFrom() { return showFrom; }
+	public void setShowFrom(String showFrom) { this.showFrom = showFrom; }
 
-	public String getDisplayStop() { return displayStop; };
-	public void setDisplayStop(String displayStop) { this.displayStop = displayStop; };
+	public String getHideAt() { return hideAt; }
+	public void setHideAt(String hideAt) { this.hideAt = hideAt; }
 
-	public int getFlashRate() { return flashRate; };
-	public void setFlashRate(int flashRate) { this.flashRate =flashRate;};
+	public Double getBlinkSeconds() { return blinkSeconds; }
+	public void setBlinkSeconds(Double blinkSeconds) { this.blinkSeconds = blinkSeconds; }
+
+	public Double getFadeIn() { return fadeIn; }
+	public void setFadeIn(Double fadeIn) { this.fadeIn = fadeIn; }
+
+	public Double getFadeOut() { return fadeOut; }
+	public void setFadeOut(Double fadeOut) { this.fadeOut = fadeOut; }
 
 	public int getX() { return x; };
 	public int getX(double scaled) { return (int)(ev(x)*scaled); };
@@ -303,8 +313,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	public int getArcHeight(double scaled) { return (int)(arcHeight*scaled); };
 	public void setArcHeight(int arcHeight) { this.arcHeight = arcHeight; };
 
-	public int getRotate() { return rotate; };
-	public void setRotate(int rotate) { this.rotate = rotate; };
 
 	public int getStroke() { return stroke; };
 	public int getStroke(double scaled) { return Math.max((int)(stroke*scaled),1); };
@@ -491,6 +499,19 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			ex.addError("type", type == null ? "An object needs a type: one of " + new java.util.TreeSet<>(TYPES) : "Unknown type '" + type + "': use one of " + new java.util.TreeSet<>(TYPES));
 			throw ex;
 		}
+		checkTiming();
+	}
+
+	/** Refuses malformed timing fields as a client error naming the field. */
+	void checkTiming() throws ConfigBaseException
+	{
+		String[] problem = timingProblem(showFrom, hideAt, blinkSeconds, fadeIn, fadeOut);
+		if(problem != null)
+		{
+			ConfigBaseException ex = new ConfigBaseException();
+			ex.addError(problem[0], problem[1]);
+			throw ex;
+		}
 	}
 
 	//this is the POST
@@ -554,6 +575,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			throw ex;
 		}
 		this.mergeOjbect(oldObj);
+		checkTiming();
 		checkWebPageUrl();
 		// A new object in place of the live one, which a draw may be walking (D12). It takes its own reference on the
 		// page capture the old one holds, so releasing the old one later only lowers the count and no draw opens a new one.
@@ -667,73 +689,16 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@SuppressWarnings("UseSpecificCatch")
 	public void draw(Graphics2D g, double scaled, boolean evenCoords )
 	{
+		draw(g, scaled, evenCoords, 1.0);
+	}
+
+	/** Draws at this scale with the layer's opacity times timing, 0 to 1 (a fade; see timingAlpha). */
+	@SuppressWarnings("UseSpecificCatch")
+	public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing)
+	{
 		// rounded up to even as the scaled getters read them; the stored fields stay as given
 		even = evenCoords;
-		draw_count = draw_count + 1;
-		DateTime now = DateTime.now();
-		DateTimeFormatter df1 = ISODateTimeFormat.dateTimeNoMillis();
-		boolean display_ok = true;
-		if(displayStart != null)
-		{
-			try
-			{
-				DateTime dt;
-				if(displayStart.startsWith("+"))
-				{
-					dt = updated_at.plusSeconds(Integer.parseInt(displayStart.substring(1)));
-				}
-				else if (displayStart.startsWith("-"))
-				{
-					dt = updated_at.minusSeconds(Integer.parseInt(displayStart.substring(1)));
-				}
-				else
-				{
-					dt = df1.parseDateTime(displayStart);
-				}
-				if (dt.compareTo(now) > 0)
-				{
-					display_ok = false;
-				}
-			}
-			catch(NumberFormatException e)
-			{
-				log.error("Cant parse date:"+ displayStart + " " + e);
-			}
-		}
-		if(display_ok && displayStop != null)
-		{
-			try
-			{
-				DateTime dt;
-				if(displayStop.startsWith("+"))
-				{
-					dt = updated_at.plusSeconds(Integer.parseInt(displayStop.substring(1)));
-				}
-				else if (displayStop.startsWith("-"))
-				{
-					dt = updated_at.minusSeconds(Integer.parseInt(displayStop.substring(1)));
-				}
-				else
-				{
-					dt = df1.parseDateTime(displayStop);
-				}
-				if (dt.compareTo(now) < 0)
-				{
-					display_ok = false;
-				}
-			}
-			catch(NumberFormatException e)
-			{
-				log.error("Cant parse date:"+ displayStop + " " + e,e);
-			}
-
-		}
-		if(flashRate > 0 && (draw_count % flashRate) == 0 )
-		{
-			ok_to_draw = !ok_to_draw;
-		}
-
-		if(!display_ok || !ok_to_draw)
+		if(timing <= 0)
 		{
 			return;
 		}
@@ -747,13 +712,8 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
 		AffineTransform saved = g.getTransform();
-		if(rotate > 0)
-		{
-			AffineTransform aTrans = AffineTransform.getRotateInstance(Math.toRadians(rotate), this.getX(scaled), this.getY(scaled));
-			g.transform(aTrans);
-		}
 
-		g.setComposite(AlphaComposite.SrcOver.derive(  (((float)(this.opacity))/100f) ));
+		g.setComposite(AlphaComposite.SrcOver.derive((float)(this.opacity / 100.0 * Math.min(1.0, timing))));
 
             switch (type) {
                 case "rectangle"-> {
@@ -1107,6 +1067,73 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		return false;
 	}
 
+	/** Text may be wider on the next draw (a clock's digits), so it counts as this wide; the canvas clips it. */
+	static final int ANY_WIDTH = 1 << 20;
+
+	/**
+	 * The part of the canvas this layer can paint at this scale, in canvas pixels, padded for stroke, shadow and
+	 * antialiasing; null when it may paint anywhere (a rotated layer, a page or image whose size is not set). Text
+	 * spans the whole width over its line height, so a value that grows between draws is never clipped. The overlay
+	 * draws only the union of its layers' areas.
+	 */
+	public java.awt.Rectangle drawBounds(double scaled)
+	{
+		if(type == null)
+		{
+			return null;
+		}
+		java.awt.Rectangle r;
+		switch(type)
+		{
+			case "rectangle", "ellipse" -> r = new java.awt.Rectangle(getX(scaled), getY(scaled), Math.max(0, getW(scaled)), Math.max(0, getH(scaled)));
+			case "line" -> r = span(new int[] { getX(scaled), getX2(scaled) }, new int[] { getY(scaled), getY2(scaled) });
+			case "triangle" -> r = span(new int[] { getX(scaled), getX2(scaled), getX3(scaled) }, new int[] { getY(scaled), getY2(scaled), getY3(scaled) });
+			case "string" -> {
+				Font f = awt_font().deriveFont((float)(awt_font().getSize() * scaled));
+				java.awt.font.LineMetrics lm = f.getLineMetrics("Hgjy", new java.awt.font.FontRenderContext(null, true, true));
+				int top = (int)Math.floor(getY(scaled) - lm.getAscent() - lm.getLeading());
+				int bottom = (int)Math.ceil(getY(scaled) + lm.getDescent());
+				r = new java.awt.Rectangle(0, top, ANY_WIDTH, bottom - top);
+			}
+			case "image" -> {
+				BufferedImage image = decodedImage();
+				if(image == null)
+				{
+					return new java.awt.Rectangle();
+				}
+				int[] size = imageDrawSize(image.getWidth(), image.getHeight(), scaled);
+				r = new java.awt.Rectangle(getX(scaled), getY(scaled), size[0], size[1]);
+			}
+			case "webPage" -> {
+				if(w <= 0 || h <= 0)
+				{
+					return null;
+				}
+				int[] size = webPageDrawSize(w, h, w, h, scaled);
+				r = new java.awt.Rectangle(getX(scaled), getY(scaled), size[0], size[1]);
+			}
+			default -> {
+				return null;
+			}
+		}
+		int pad = getStroke(scaled) + 2 + (shadowColor != null ? Math.abs(getShadowOffset(scaled)) : 0);
+		r.grow(pad, pad);
+		return r;
+	}
+
+	private static java.awt.Rectangle span(int[] xs, int[] ys)
+	{
+		int x0 = Integer.MAX_VALUE, y0 = Integer.MAX_VALUE, x1 = Integer.MIN_VALUE, y1 = Integer.MIN_VALUE;
+		for(int i = 0; i < xs.length; i++)
+		{
+			x0 = Math.min(x0, xs[i]);
+			x1 = Math.max(x1, xs[i]);
+			y0 = Math.min(y0, ys[i]);
+			y1 = Math.max(y1, ys[i]);
+		}
+		return new java.awt.Rectangle(x0, y0, x1 - x0, y1 - y0);
+	}
+
 	/** The frame this layer's draw at this scale used now counts as drawn: that draw was published. */
 	public void commitDrawn(double scaled)
 	{
@@ -1119,26 +1146,151 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	/**
 	 * When this layer next looks different without an edit, in epoch milliseconds after now, or Long.MAX_VALUE: date
-	 * text at the next boundary of the smallest unit its pattern shows, a display window at its start or stop. A web
-	 * page changes when its page does, which the frame check finds.
+	 * text at the next boundary of the smallest unit its pattern shows; showFrom, hideAt and the start of a fade out;
+	 * every 100 ms while fading; a blink's next toggle while it shows. A web page changes when its page does, which the
+	 * frame check finds. streamStart is when the stream's transcoder started, 0 when not known.
 	 */
-	public long nextChangeAt(long now)
+	public long nextChangeAt(long now, long streamStart)
 	{
 		long next = Long.MAX_VALUE;
+		long show = timeOf(showFrom, streamStart, Long.MIN_VALUE), hide = timeOf(hideAt, streamStart, Long.MAX_VALUE);
+		if(now >= hide)
+		{
+			return next;
+		}
+		if(now < show)
+		{
+			return show;
+		}
 		if("string".equals(type) && useDate != null && useDate && text != null)
 		{
 			next = Math.min(next, nextDateBoundary(text, now));
 		}
-		for(String spec: new String[] { displayStart, displayStop })
+		if(hide != Long.MAX_VALUE)
 		{
-			DateTime at = displayTime(spec);
-			if(at != null && at.getMillis() > now)
-			{
-				next = Math.min(next, at.getMillis());
-			}
+			next = Math.min(next, hide);
+		}
+		long in = fadeMs(fadeIn), out = fadeMs(fadeOut);
+		boolean fading = (in > 0 && show != Long.MIN_VALUE && now < show + in) || (out > 0 && hide != Long.MAX_VALUE && now >= hide - out);
+		if(fading)
+		{
+			next = Math.min(next, now + 100);
+		}
+		else if(out > 0 && hide != Long.MAX_VALUE)
+		{
+			next = Math.min(next, hide - out);
+		}
+		if(blinkSeconds != null && blinkSeconds > 0)
+		{
+			long period = Math.round(blinkSeconds * 1000);
+			next = Math.min(next, (Math.floorDiv(now, period) + 1) * period);
 		}
 		return next;
 	}
+
+	public long nextChangeAt(long now)
+	{
+		return nextChangeAt(now, 0);
+	}
+
+	/**
+	 * How much of the layer shows at now, 0 to 1: 0 outside showFrom to hideAt and in a blink's off half, a ramp over
+	 * fadeIn after showFrom and fadeOut before hideAt, else 1. streamStart as in nextChangeAt.
+	 */
+	public double timingAlpha(long now, long streamStart)
+	{
+		long show = timeOf(showFrom, streamStart, Long.MIN_VALUE), hide = timeOf(hideAt, streamStart, Long.MAX_VALUE);
+		if(now < show || now >= hide)
+		{
+			return 0;
+		}
+		if(blinkSeconds != null && blinkSeconds > 0 && Math.floorMod(Math.floorDiv(now, Math.round(blinkSeconds * 1000)), 2) == 1)
+		{
+			return 0;
+		}
+		double a = 1;
+		long in = fadeMs(fadeIn), out = fadeMs(fadeOut);
+		if(in > 0 && show != Long.MIN_VALUE)
+		{
+			a = Math.min(a, (now - show) / (double)in);
+		}
+		if(out > 0 && hide != Long.MAX_VALUE)
+		{
+			a = Math.min(a, (hide - now) / (double)out);
+		}
+		return Math.max(0, Math.min(1, a));
+	}
+
+	private static long fadeMs(Double seconds)
+	{
+		return seconds == null || seconds <= 0 ? 0 : Math.round(seconds * 1000);
+	}
+
+	static final java.util.regex.Pattern STREAM_TIME = java.util.regex.Pattern.compile("stream\\+(\\d{1,9}(\\.\\d{1,3})?)");
+
+	/**
+	 * showFrom or hideAt in epoch milliseconds: an ISO date-time with its offset, or stream+N from streamStart.
+	 * absent when the field is not set; a stream time whose start is not known yet counts as not reached.
+	 */
+	static long timeOf(String spec, long streamStart, long absent)
+	{
+		if(spec == null || spec.isBlank())
+		{
+			return absent;
+		}
+		java.util.regex.Matcher m = STREAM_TIME.matcher(spec.trim());
+		if(m.matches())
+		{
+			return streamStart > 0 ? streamStart + Math.round(Double.parseDouble(m.group(1)) * 1000) : Long.MAX_VALUE;
+		}
+		try
+		{
+			return java.time.OffsetDateTime.parse(spec.trim()).toInstant().toEpochMilli();
+		}
+		catch(java.time.format.DateTimeParseException e)
+		{
+			return Long.MAX_VALUE;
+		}
+	}
+
+	/** Why the timing fields are refused, as {field, message}, or null when they are fine (3.10). */
+	public static String[] timingProblem(Object showFrom, Object hideAt, Object blinkSeconds, Object fadeIn, Object fadeOut)
+	{
+		for(Object[] f: new Object[][] { { "showFrom", showFrom }, { "hideAt", hideAt } })
+		{
+			if(f[1] == null)
+			{
+				continue;
+			}
+			String v = f[1].toString().trim();
+			if(!STREAM_TIME.matcher(v).matches())
+			{
+				try
+				{
+					java.time.OffsetDateTime.parse(v);
+				}
+				catch(java.time.format.DateTimeParseException e)
+				{
+					return new String[] { (String)f[0], f[0] + " must be a date and time with its offset (2027-01-01T18:00:00-05:00) or stream+N seconds" };
+				}
+			}
+		}
+		if(blinkSeconds != null && !(blinkSeconds instanceof Number n && n.doubleValue() >= 0.1 && n.doubleValue() <= 3600))
+		{
+			return new String[] { "blinkSeconds", "blinkSeconds must be a number from 0.1 to 3600" };
+		}
+		for(Object[] f: new Object[][] { { "fadeIn", fadeIn }, { "fadeOut", fadeOut } })
+		{
+			if(f[1] != null && !(f[1] instanceof Number n && n.doubleValue() >= 0 && n.doubleValue() <= 2))
+			{
+				return new String[] { (String)f[0], f[0] + " must be a number of seconds from 0 to 2" };
+			}
+		}
+		return null;
+	}
+
+	/** Fields 1.x had and 2.0 refuses, with what replaces each. */
+	public static final Map<String, String> REMOVED = Map.of("displayStart", "showFrom", "displayStop", "hideAt", "flashRate", "blinkSeconds", "rotate", "rotation");
 
 	/** The next boundary of the smallest unit a SimpleDateFormat pattern shows, after now; quoted text is ignored. */
 	static long nextDateBoundary(String pattern, long now)
@@ -1154,32 +1306,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 				: letters.indexOf('m') >= 0 ? java.time.temporal.ChronoUnit.MINUTES
 				: letters.matches(".*[HhKka].*") ? java.time.temporal.ChronoUnit.HOURS : java.time.temporal.ChronoUnit.DAYS;
 		return t.truncatedTo(unit).plus(1, unit).toInstant().toEpochMilli();
-	}
-
-	/** A displayStart or displayStop: an ISO date-time, or +N / -N seconds from the last update; null when absent or bad. */
-	private DateTime displayTime(String spec)
-	{
-		if(spec == null)
-		{
-			return null;
-		}
-		try
-		{
-			if(spec.startsWith("+") || spec.startsWith("-"))
-			{
-				if(updated_at == null)
-				{
-					return null;
-				}
-				int n = Integer.parseInt(spec.substring(1));
-				return spec.startsWith("+") ? updated_at.plusSeconds(n) : updated_at.minusSeconds(n);
-			}
-			return ISODateTimeFormat.dateTimeNoMillis().parseDateTime(spec);
-		}
-		catch(IllegalArgumentException e)
-		{
-			return null;
-		}
 	}
 
 	private WebPageCapture getWebPageCapture()
@@ -1622,17 +1748,25 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		{
 			this.created_at = obj.created_at;
 		}
-		if(this.displayStart == null)
+		if(this.showFrom == null)
 		{
-			this.displayStart = obj.displayStart;
+			this.showFrom = obj.showFrom;
 		}
-		if(this.displayStop == null)
+		if(this.hideAt == null)
 		{
-			this.displayStop = obj.displayStop;
+			this.hideAt = obj.hideAt;
 		}
-		if(this.flashRate == -1)
+		if(this.blinkSeconds == null)
 		{
-			this.flashRate = obj.flashRate;
+			this.blinkSeconds = obj.blinkSeconds;
+		}
+		if(this.fadeIn == null)
+		{
+			this.fadeIn = obj.fadeIn;
+		}
+		if(this.fadeOut == null)
+		{
+			this.fadeOut = obj.fadeOut;
 		}
 		if(this.opacity == -1)
 		{
@@ -1645,10 +1779,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		if(this.arcWidth == -1)
 		{
 			this.arcWidth = obj.arcWidth;
-		}
-		if(this.rotate == -1)
-		{
-			this.rotate = obj.rotate;
 		}
 		if(this.zOrder == -1)
 		{
