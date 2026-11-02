@@ -22,7 +22,6 @@ import java.lang.reflect.Modifier;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -183,12 +182,13 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@JsonProperty("reloadRate")
 	protected double reloadRate = -1;
 
-	// browser viewport for a webPage; 0 means the object's w and h
+	// browser viewport for a webPage; 0 means the object's w and h. The int fields below that a partial PUT can leave
+	// out are boxed: null is "not given" and reads as 0 (num), so the merge can tell it from an explicit 0
 	@JsonProperty("viewportWidth")
-	protected int viewportWidth = 0;
+	protected Integer viewportWidth = null;
 
 	@JsonProperty("viewportHeight")
-	protected int viewportHeight = 0;
+	protected Integer viewportHeight = null;
 
 	// color made transparent in a webPage capture; null means rgb(1,2,3)
 	@JsonProperty("keyColor")
@@ -196,7 +196,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	// largest per-channel difference from keyColor that is still keyed out; 0 is an exact match
 	@JsonProperty("keyTolerance")
-	protected int keyTolerance = 0;
+	protected Integer keyTolerance = null;
 
 	// paint the page body with keyColor after load; null means true
 	@JsonProperty("paintBackground")
@@ -204,16 +204,16 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	// the part of a webPage capture that is drawn, in page pixels from its top left; cropW or cropH 0 draws all of it
 	@JsonProperty("cropX")
-	protected int cropX = 0;
+	protected Integer cropX = null;
 
 	@JsonProperty("cropY")
-	protected int cropY = 0;
+	protected Integer cropY = null;
 
 	@JsonProperty("cropW")
-	protected int cropW = 0;
+	protected Integer cropW = null;
 
 	@JsonProperty("cropH")
-	protected int cropH = 0;
+	protected Integer cropH = null;
 
 	private transient volatile long lastKeyMs = -1;
 	// the page frame this layer drew last, so a refresh with no new frame does not redraw
@@ -243,35 +243,35 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	public void setFlashRate(int flashRate) { this.flashRate =flashRate;};
 
 	public int getX() { return x; };
-	public int getX(double scaled) { return (int)(x*scaled); };
+	public int getX(double scaled) { return (int)(ev(x)*scaled); };
 	public void setX(int x) { this.x = x; };
 
 	public int getY() { return y; };
-	public int getY(double scaled) { return (int)(y*scaled); };
+	public int getY(double scaled) { return (int)(ev(y)*scaled); };
 	public void setY(int y) { this.y = y; };
 
 	public int getX2() { return x2; };
-	public int getX2(double scaled) { return (int)(x2*scaled); };
+	public int getX2(double scaled) { return (int)(ev(x2)*scaled); };
 	public void setX2(int x2) { this.x2 = x2; };
 
 	public int getY2() { return y2; };
-	public int getY2(double scaled) { return (int)(y2*scaled); };
+	public int getY2(double scaled) { return (int)(ev(y2)*scaled); };
 	public void setY2(int y2) { this.y2 = y2; };
 
 	public int getX3() { return x3; };
-	public int getX3(double scaled) { return (int)(x3*scaled); };
+	public int getX3(double scaled) { return (int)(ev(x3)*scaled); };
 	public void setX3(int x3) { this.x3 = x3; };
 
 	public int getY3() { return y3; };
-	public int getY3(double scaled) { return (int)(y3*scaled); };
+	public int getY3(double scaled) { return (int)(ev(y3)*scaled); };
 	public void setY3(int y3) { this.y3 = y3; };
 
 	public int getW() { return w; };
-	public int getW(double scaled) { return (int)(w*scaled); };
+	public int getW(double scaled) { return (int)(ev(w)*scaled); };
 	public void setW(int w) { this.w = w; };
 
 	public int getH() { return h; };
-	public int getH(double scaled) { return (int)(h*scaled); };
+	public int getH(double scaled) { return (int)(ev(h)*scaled); };
 	public void setH(int h) { this.h = h; };
 
 	public int getOpacity() { return opacity; }
@@ -473,10 +473,25 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		return retVal;
 	}
 
+	/** The object types draw() knows. */
+	static final java.util.Set<String> TYPES = java.util.Set.of("rectangle", "line", "string", "ellipse", "triangle", "image", "webPage");
+
+	/** Refuses a missing or unknown type as a client error naming the field. */
+	void checkType() throws ConfigBaseException
+	{
+		if(type == null || !TYPES.contains(type))
+		{
+			ConfigBaseException ex = new ConfigBaseException();
+			ex.addError("type", type == null ? "An object needs a type: one of " + new java.util.TreeSet<>(TYPES) : "Unknown type '" + type + "': use one of " + new java.util.TreeSet<>(TYPES));
+			throw ex;
+		}
+	}
+
 	//this is the POST
 	@Override
 	public WMSResponse saveNewObject() throws ConfigBaseException
 	{
+		checkType();
 		WMSResponse2 retVal = new WMSResponse2();
 		OverlayStudioModule overlayModule = (OverlayStudioModule)OverlayConfig.getModule(vhostName, appName, instanceName, streamName, retVal);
 		if(overlayModule == null)
@@ -586,55 +601,18 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		return retVal;
 	}
 
+	// Identity, on purpose. 1.x compared some fields and not others (D7); WSE's ConfigBase.equals compares every field
+	// by reflection, runtime ones such as the page capture and timestamps included. Nothing compares objects by value.
 	@Override
 	public boolean equals(Object o)
 	{
-		if (o == this) {
-			return true;
-		}
-		if (!(o instanceof ObjectConfig)) {
-			return false;
-		}
-		ObjectConfig obj = (ObjectConfig)o;
-		return ( compareString(id, obj.id) &&
-				compareString(type, obj.type) &&
-				zOrder == obj.zOrder &&
-				x == obj.x &&
-				y == obj.y &&
-				w == obj.w &&
-				h == obj.h &&
-				opacity == obj.opacity &&
-				compareString(displayStart, obj.displayStart) &&
-				compareString(displayStop, obj.displayStop) &&
-				flashRate == obj.flashRate &&
-				arcHeight == obj.arcHeight &&
-				arcWidth == obj.arcWidth &&
-				rotate == obj.rotate &&
-				stroke == obj.stroke &&
-				compareString(color, obj.color) &&
-				compareString(fillColor, obj.fillColor) &&
-				compareString(shadowColor, obj.shadowColor) &&
-				shadowOffset == obj.shadowOffset &&
-				compareString(font, obj.font) &&
-				compareString(fontStyle, obj.fontStyle) &&
-				compareString(text, obj.text) &&
-				(Objects.equals(useDate, obj.useDate)) &&
-				compareString(url, obj.url) &&
-				(pageDelay == obj.pageDelay) &&
-				(reloadRate == obj.reloadRate) &&
-				viewportWidth == obj.viewportWidth &&
-				viewportHeight == obj.viewportHeight &&
-				compareString(keyColor, obj.keyColor) &&
-				keyTolerance == obj.keyTolerance &&
-				Objects.equals(paintBackground, obj.paintBackground)
-		);
+		return o == this;
 	}
 
-	private boolean compareString(String a, String b)
+	@Override
+	public int hashCode()
 	{
-		if(a == null) //can;t call equals on null, if both are null above takes care
-			return false;
-		return a.equals(b);
+		return System.identityHashCode(this);
 	}
 
 	public int aws_fontStyle(String font)
@@ -682,17 +660,8 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	@SuppressWarnings("UseSpecificCatch")
 	public void draw(Graphics2D g, double scaled, boolean evenCoords )
 	{
-		if(evenCoords)
-		{
-			x = x + (x % 2);
-			y = y + (y % 2);
-			w = w + (w % 2);
-			h = h + (h % 2);
-			x2 = x2 + (x2 % 2);
-			y2 = y2 + (y2 % 2);
-			x3 = x3 + (x3 % 2);
-			y3 = y3 + (y3 % 2);
-		}
+		// rounded up to even as the scaled getters read them; the stored fields stay as given
+		even = evenCoords;
 		draw_count = draw_count + 1;
 		DateTime now = DateTime.now();
 		DateTimeFormatter df1 = ISODateTimeFormat.dateTimeNoMillis();
@@ -1076,7 +1045,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	// what keying and cropping depend on: frames keyed alike are shared between layers and streams
 	private String keySignature()
 	{
-		return awt_keyColor() + "/" + keyTolerance + "/" + cropX + "," + cropY + "," + cropW + "," + cropH;
+		return awt_keyColor() + "/" + num(keyTolerance) + "/" + num(cropX) + "," + num(cropY) + "," + num(cropW) + "," + num(cropH);
 	}
 
 	/** frame (number seq) of capture, keyed and cropped as this layer shows it, made once for every layer and stream that keys alike. */
@@ -1084,7 +1053,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	{
 		return capture.derived(frame, seq, keySignature(), () -> {
 			long k0 = System.nanoTime();
-			BufferedImage k = cropped(keyOut(frame, awt_keyColor(), keyTolerance));
+			BufferedImage k = cropped(keyOut(frame, awt_keyColor(), num(keyTolerance)));
 			lastKeyMs = (System.nanoTime() - k0) / 1_000_000;
 			return k;
 		});
@@ -1170,8 +1139,8 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	WebPageCapture.Settings webPageSettings()
 	{
-		int vw = viewportWidth > 0 ? viewportWidth : w;
-		int vh = viewportHeight > 0 ? viewportHeight : h;
+		int vw = num(viewportWidth) > 0 ? num(viewportWidth) : w;
+		int vh = num(viewportHeight) > 0 ? num(viewportHeight) : h;
 		return new WebPageCapture.Settings(url, vw, vh, awt_keyColor(), paintBackground == null || paintBackground, label());
 	}
 
@@ -1435,7 +1404,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	/** This object's crop of a capture (cropX, cropY, cropW, cropH). */
 	BufferedImage cropped(BufferedImage image)
 	{
-		return crop(image, cropX, cropY, cropW, cropH);
+		return crop(image, num(cropX), num(cropY), num(cropW), num(cropH));
 	}
 
 	static void drawImageAt(Graphics2D g, BufferedImage image, int x, int y, int width, int height)
@@ -1635,7 +1604,57 @@ public class ObjectConfig extends JsonApplicationConfigBase
 			{
 				this.reloadRate = obj.reloadRate;
 			}
+			if (this.viewportWidth == null)
+			{
+				this.viewportWidth = obj.viewportWidth;
+			}
+			if (this.viewportHeight == null)
+			{
+				this.viewportHeight = obj.viewportHeight;
+			}
+			if (this.keyColor == null)
+			{
+				this.keyColor = obj.keyColor;
+			}
+			if (this.keyTolerance == null)
+			{
+				this.keyTolerance = obj.keyTolerance;
+			}
+			if (this.paintBackground == null)
+			{
+				this.paintBackground = obj.paintBackground;
+			}
+			if (this.cropX == null)
+			{
+				this.cropX = obj.cropX;
+			}
+			if (this.cropY == null)
+			{
+				this.cropY = obj.cropY;
+			}
+			if (this.cropW == null)
+			{
+				this.cropW = obj.cropW;
+			}
+			if (this.cropH == null)
+			{
+				this.cropH = obj.cropH;
+			}
 		}
+	}
+
+	// whether this draw uses even coordinates; set at the start of draw(), the same for every draw of one overlay
+	private transient volatile boolean even;
+
+	private int ev(int v)
+	{
+		return even ? v + (v % 2) : v;
+	}
+
+	/** A boxed field's value, 0 when it was not given. */
+	static int num(Integer v)
+	{
+		return v == null ? 0 : v;
 	}
 
 	public void applyDefaults()

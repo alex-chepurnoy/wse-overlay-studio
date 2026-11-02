@@ -586,7 +586,7 @@ class InstallerTest
 		wellFormed(bytes("conf/live/Application.xml"));
 		try(Stream<Path> s = Files.list(home.resolve("lib")))
 		{
-			assertTrue(s.map(p -> p.getFileName().toString()).anyMatch(n -> n.matches("wse-plugin-overlay-studio-\\d[\\d.]*\\.jar")), "the module jar is installed");
+			assertTrue(s.map(p -> p.getFileName().toString()).anyMatch(n -> n.matches("wse-plugin-overlay-studio-\\d[\\d.]*(-SNAPSHOT)?\\.jar")), "the module jar is installed");
 		}
 		for(String jar: new Payload().under("lib/"))
 		{

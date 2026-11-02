@@ -68,7 +68,7 @@ public class NamedOverlayPreviewConfig extends VHostResourceBase
 			m.put("rawPng", img == null ? null : CaptureConfig.toBase64Png(img));
 		}
 		// png as a stream would draw it, keyed and cropped, at the size the page shows it
-		m.put("png", img == null ? null : CaptureConfig.toBase64Png(CaptureConfig.fit(obj.cropped(ObjectConfig.keyOut(img, obj.awt_keyColor(), obj.keyTolerance)), CaptureConfig.width(body.get("width")))));
+		m.put("png", img == null ? null : CaptureConfig.toBase64Png(CaptureConfig.fit(obj.cropped(ObjectConfig.keyOut(img, obj.awt_keyColor(), ObjectConfig.num(obj.keyTolerance))), CaptureConfig.width(body.get("width")))));
 		return m;
 	}
 }
