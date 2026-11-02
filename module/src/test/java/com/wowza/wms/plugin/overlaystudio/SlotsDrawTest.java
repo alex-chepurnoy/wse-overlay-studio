@@ -180,6 +180,28 @@ class SlotsDrawTest
 	}
 
 	@Test
+	@SuppressWarnings("unchecked")
+	void statusListsEverySlotAndWhichEncodesCarryEach() throws Exception
+	{
+		OverlayStudioModule m = module(false);
+		OverlayStudioModule.OverlayTranscoderVideoDecoderNotifier n = m.new OverlayTranscoderVideoDecoderNotifier("cam1", 640, 360);
+		n.addEncoder("720p", "cam1_720p", new TranscoderSessionVideoEncode("720p"), new Encode(), 640, 360);
+		n.addEncoder("360p", "cam1_360p", new TranscoderSessionVideoEncode("360p"), new Encode(), 640, 360);
+		m.setOverlayImage("cam1", 1, image());
+		m.setOverlayImage("cam1", 2, image("720p"));
+		Map<String, Object> st = m.streamStatus("cam1");
+		List<Map<String, Object>> slots = (List<Map<String, Object>>)st.get("overlays");
+		assertEquals(List.of(1, 2), slots.stream().map(x -> x.get("slot")).toList());
+		assertEquals(List.of(16, 17), slots.stream().map(x -> x.get("index")).toList());
+		assertEquals("stream", slots.get(0).get("source"), "no template here: set over per-stream REST");
+		assertEquals(true, slots.get(1).get("configured"));
+		List<Map<String, Object>> encodes = (List<Map<String, Object>>)((Map<String, Object>)st.get("transcoder")).get("encodes");
+		assertEquals(List.of(1, 2), encodes.get(0).get("slots"), "720p carries both");
+		assertEquals(List.of(1), encodes.get(1).get("slots"), "360p only the source overlay");
+		assertEquals(true, encodes.get(1).get("overlay"));
+	}
+
+	@Test
 	void overlayStudioIndexStaysClearOfTheTemplatesImages()
 	{
 		assertNull(OverlayStudioModule.indexProblem(0), "not set");

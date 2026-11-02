@@ -113,9 +113,18 @@ public class OverlayStudioModule extends ModuleBase
 				em.put("width", e.getFrameWidth());
 				em.put("height", e.getFrameHeight());
 				em.put("passThrough", e.destinationVideo.isPassThrough());
-				boolean carries = overlay != null && !e.destinationVideo.isPassThrough()
-						&& (overlay.getOverlaySource() || overlay.overlayEncode(e.encodeName, e.streamName));
-				em.put("overlay", carries);
+				// the slots this encode carries
+				List<Integer> carried = new ArrayList<>();
+				for(int n = 1; n <= SLOTS; n++)
+				{
+					OverlayImage img = getOverlayImage(streamName, n);
+					if(img != null && !e.destinationVideo.isPassThrough() && (img.getOverlaySource() || img.overlayEncode(e.encodeName, e.streamName)))
+					{
+						carried.add(n);
+					}
+				}
+				em.put("overlay", !carried.isEmpty());
+				em.put("slots", carried);
 				encodes.add(em);
 			}
 		}
@@ -136,6 +145,31 @@ public class OverlayStudioModule extends ModuleBase
 		from.put("missing", named != null && missingOverlays.contains(streamName + "#1"));
 		m.put("overlayFrom", from);
 
+		// every slot in use, by the template or (slot 1) the per-stream overlay (plan 3.9)
+		List<java.util.Map<String, Object>> slots = new ArrayList<>();
+		for(int n = 1; n <= SLOTS; n++)
+		{
+			OverlayImage img = getOverlayImage(streamName, n);
+			TemplateValidator.Slot t = slot(streamName, n);
+			if(img == null && t == null)
+			{
+				continue;
+			}
+			java.util.Map<String, Object> sm = new java.util.LinkedHashMap<>();
+			sm.put("slot", n);
+			sm.put("index", overlayIndex(n));
+			sm.put("name", t == null ? null : t.name());
+			sm.put("source", t != null ? "template" : "stream");
+			sm.put("encodes", t == null ? null : t.encodes());
+			sm.put("configured", img != null);
+			sm.put("missing", t != null && missingOverlays.contains(streamName + "#" + n));
+			sm.put("draw", img == null ? null : img.drawStats());
+			sm.put("imageProblems", img == null ? java.util.List.of() : img.imageProblems());
+			slots.add(sm);
+		}
+		m.put("overlays", slots);
+
+		// slot 1, as before, until the page reads overlays (PR 11)
 		m.put("draw", overlay == null ? null : overlay.drawStats());
 		// image layers that draw nothing (a missing or unusable file), and why
 		m.put("imageProblems", overlay == null ? java.util.List.of() : overlay.imageProblems());
