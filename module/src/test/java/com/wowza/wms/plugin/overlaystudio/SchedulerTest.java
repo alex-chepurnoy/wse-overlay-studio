@@ -102,11 +102,11 @@ class SchedulerTest
 	}
 
 	@Test
-	void aDisplayWindowWakesAtItsStartAndStop()
+	void aShowWindowWakesAtItsStartAndEnd()
 	{
 		java.time.Instant start = java.time.Instant.parse("2027-01-01T10:00:00Z"), stop = java.time.Instant.parse("2027-01-01T10:05:00Z");
 		ObjectConfig box = JSON.convertValue(Map.of("id", "box", "type", "rectangle", "w", 10, "h", 10,
-				"displayStart", "2027-01-01T10:00:00Z", "displayStop", "2027-01-01T10:05:00Z"), ObjectConfig.class);
+				"showFrom", "2027-01-01T10:00:00Z", "hideAt", "2027-01-01T10:05:00Z"), ObjectConfig.class);
 		OverlayImage img = image(box);
 		assertEquals(start.toEpochMilli(), img.nextWakeAt(start.toEpochMilli() - 60_000));
 		assertEquals(stop.toEpochMilli(), img.nextWakeAt(start.toEpochMilli() + 1));
@@ -119,7 +119,7 @@ class SchedulerTest
 		final CountDownLatch release = new CountDownLatch(1);
 
 		@Override
-		public void draw(Graphics2D g, double scaled, boolean evenCoords)
+		public void draw(Graphics2D g, double scaled, boolean evenCoords, double timing)
 		{
 			if(scaled == 1.0)
 			{

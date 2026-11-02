@@ -99,7 +99,8 @@ class CopyOnWriteTest
 			OverlayImage.Published p = img.current(scale);
 			assertNotNull(p);
 			assertEquals(p.width() * p.height() * 4, p.buffer().length);
-			assertEquals((int)(40 * scale), p.width());
+			// an empty overlay publishes its smallest box at the overlay's own place
+			assertEquals(2, p.width());
 			assertEquals((int)(8 * scale), p.x());
 			assertEquals(config.getUuid(), p.uuid());
 		}

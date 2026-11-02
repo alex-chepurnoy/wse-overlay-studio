@@ -189,6 +189,8 @@ public class OverlayStudioModule extends ModuleBase
 		// overlay with no size of its own, and the denominator of every encode's scale.
 		private volatile int sourceWidth = 0;
 		private volatile int sourceHeight = 0;
+		// when the transcoder started for this stream, epoch ms; stream+N times in an overlay count from it
+		private volatile long transcoderStartedAt = 0;
 		// Last crop warning emitted, used to avoid logging on every refresh of the same overlay.
 		private volatile String lastCropWarning = null;
 		private OverlayImage streamOverlayImage = null;
@@ -787,6 +789,7 @@ public class OverlayStudioModule extends ModuleBase
 			streamInfo.streamOverlayImage = overlayImage;
 			overlayImage.setOverlayModule(this);
 			overlayImage.setStreamName(streamName);
+			overlayImage.setStreamStart(streamInfo.transcoderStartedAt);
 			streamInfo.streamOverlayImage.start();
 		}
 		if(oldImage != null && oldImage != overlayImage)
@@ -828,6 +831,7 @@ public class OverlayStudioModule extends ModuleBase
 			streamInfo.overlayImageQueue.add(overlayImage);
 			overlayImage.setOverlayModule(this);
 			overlayImage.setStreamName(streamName);
+			overlayImage.setStreamStart(streamInfo.transcoderStartedAt);
 			overlayImage.start();
 		}
 		checkOverlayFitsSource(streamName, overlayImage);
@@ -1139,10 +1143,12 @@ public class OverlayStudioModule extends ModuleBase
 			StreamInfo streamInfo = getStreamInfo(streamName);
 			streamInfo.sourceWidth = srcWidth;
 			streamInfo.sourceHeight = srcHeight;
+			streamInfo.transcoderStartedAt = System.currentTimeMillis();
 			if(streamInfo.streamOverlayImage != null)
 			{
 				streamInfo.streamOverlayImage.setWidth(srcWidth);
 				streamInfo.streamOverlayImage.setHeight(srcHeight);
+				streamInfo.streamOverlayImage.setStreamStart(streamInfo.transcoderStartedAt);
 				// overlay may have been created before the source size was known
 				checkOverlayFitsSource(streamName, streamInfo.streamOverlayImage);
 			}

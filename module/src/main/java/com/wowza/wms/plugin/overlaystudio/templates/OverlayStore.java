@@ -117,6 +117,18 @@ public final class OverlayStore
 			{
 				throw new TemplateFiles.Refused(400, "Object " + id + " has no type");
 			}
+			for(Map.Entry<String, String> r: com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig.REMOVED.entrySet())
+			{
+				if(m.containsKey(r.getKey()))
+				{
+					throw new TemplateFiles.Refused(400, "Object " + id + ": " + r.getKey() + " was removed in 2.0; use " + r.getValue());
+				}
+			}
+			String[] timing = com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig.timingProblem(m.get("showFrom"), m.get("hideAt"), m.get("blinkSeconds"), m.get("fadeIn"), m.get("fadeOut"));
+			if(timing != null)
+			{
+				throw new TemplateFiles.Refused(400, "Object " + id + ": " + timing[1]);
+			}
 			if("webPage".equals(m.get("type")))
 			{
 				String err = urlProblem.apply(m.get("url") == null ? null : m.get("url").toString());
