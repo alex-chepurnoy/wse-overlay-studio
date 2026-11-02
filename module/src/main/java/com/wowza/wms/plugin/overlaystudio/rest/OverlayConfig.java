@@ -124,11 +124,16 @@ public class OverlayConfig extends JsonApplicationConfigBase
 	@JsonProperty("fontSize")
 	protected int fontSize = 16;
 	
+	// Copy-on-write: never changed in place once set. An edit builds a new list and swaps it in under the image's lock
+	// (editLock), so a draw walks the list it took and never sees an edit half done (D12).
 	@JsonProperty("objects")
-	protected List<ObjectConfig> objects = new ArrayList<ObjectConfig>();
+	protected volatile List<ObjectConfig> objects = new ArrayList<ObjectConfig>();
+
+	// the image drawing this overlay, set by OverlayImage; null for an overlay that is not on a stream
+	private transient volatile OverlayImage image;
 
 	@JsonIgnore
-	private UUID uuid = UUID.randomUUID();
+	private volatile UUID uuid = UUID.randomUUID();
 
 	// set when this overlay came from a named overlay through the stream's template; such an overlay is not saved per stream
 	@JsonIgnore
@@ -238,6 +243,30 @@ public class OverlayConfig extends JsonApplicationConfigBase
 	public List<ObjectConfig> getObjects() { return objects; };
 	public void setObjects(List<ObjectConfig> objects) { this.objects = objects; };
 
+	/** Attaches the image that draws this overlay; its lock then orders every edit with every draw. */
+	public void setImage(OverlayImage image) { this.image = image; }
+
+	/** The lock edits take: the drawing image's, or this overlay's own when it is not on a stream. */
+	private Object editLock()
+	{
+		OverlayImage i = image;
+		return i != null ? i.lock() : this;
+	}
+
+	/** Disposes removed objects once no draw that may still use them is running. */
+	private void retire(List<ObjectConfig> removed)
+	{
+		OverlayImage i = image;
+		if(i != null)
+		{
+			i.retire(removed);
+		}
+		else
+		{
+			removed.forEach(ObjectConfig::dispose);
+		}
+	}
+
 	public BufferedImage getBackgroundImage(double scaled)
 	{
 		if(backgroundImage == null)
@@ -299,7 +328,7 @@ public class OverlayConfig extends JsonApplicationConfigBase
 		font = "Serif";
 		fontStyle = "plain";
 		fontSize = 16;
-		objects.clear();
+		objects = new ArrayList<>();
 		uuid = UUID.randomUUID();
 		backgroundImage = null;
 		backgroundImageCache.clear();
@@ -330,7 +359,10 @@ public class OverlayConfig extends JsonApplicationConfigBase
 
 	public void resetUuid()
 	{
-		uuid = UUID.randomUUID();
+		synchronized(editLock())
+		{
+			uuid = UUID.randomUUID();
+		}
 	}
 
 	/** Whether any web page on this overlay has a frame that has not been drawn yet. */
@@ -570,13 +602,18 @@ public class OverlayConfig extends JsonApplicationConfigBase
 
 	public void sortAndSaveObjects()
 	{
-		sortObjects(this.objects);
+		sortObjects();
 		saveObjectToFile();
 	}
 
 	public void sortObjects()
 	{
-		sortObjects(this.objects);
+		synchronized(editLock())
+		{
+			List<ObjectConfig> n = new ArrayList<>(this.objects);
+			sortObjects(n);
+			this.objects = n;
+		}
 	}
 
 	@SuppressWarnings("Convert2Lambda")
@@ -600,8 +637,36 @@ public class OverlayConfig extends JsonApplicationConfigBase
 
 	public void addObject(ObjectConfig obj)
 	{
-		this.objects.add(obj);
-		sortObjects();
+		putObject(obj);
+	}
+
+	/**
+	 * Adds obj, or puts it in place of the object with its id, in one swap with the uuid reset, so no draw sees the
+	 * overlay without either. The object it replaces is disposed once draws that may use it end.
+	 */
+	public void putObject(ObjectConfig obj)
+	{
+		List<ObjectConfig> removed = new ArrayList<>();
+		synchronized(editLock())
+		{
+			List<ObjectConfig> n = new ArrayList<>(this.objects.size() + 1);
+			for(ObjectConfig o: this.objects)
+			{
+				if(o != obj && o.getId() != null && o.getId().equals(obj.getId()))
+				{
+					removed.add(o);
+				}
+				else if(o != obj)
+				{
+					n.add(o);
+				}
+			}
+			n.add(obj);
+			sortObjects(n);
+			this.objects = n;
+			uuid = UUID.randomUUID();
+		}
+		retire(removed);
 	}
 
 	public ObjectConfig getObject(String obectId)
@@ -620,22 +685,29 @@ public class OverlayConfig extends JsonApplicationConfigBase
 
 	public void deleteObject(String objectId)
 	{
-		int idx = 0;
-		int deleteIdx = -1;
-		for (ObjectConfig obj : this.objects)
+		List<ObjectConfig> removed = new ArrayList<>();
+		synchronized(editLock())
 		{
-			if(obj.getId().equals(objectId))
+			List<ObjectConfig> n = new ArrayList<>(this.objects.size());
+			for(ObjectConfig obj: this.objects)
 			{
-				deleteIdx = idx;
-				break;
+				if(removed.isEmpty() && obj.getId().equals(objectId))
+				{
+					removed.add(obj);
+				}
+				else
+				{
+					n.add(obj);
+				}
 			}
-			idx++;
+			if(removed.isEmpty())
+			{
+				return;
+			}
+			this.objects = n;
+			uuid = UUID.randomUUID();
 		}
-		if(deleteIdx > -1)
-		{
-			this.objects.remove(deleteIdx).dispose();
-		}
-		sortObjects();
+		retire(removed);
 	}
 
 	public void applyDefaults()

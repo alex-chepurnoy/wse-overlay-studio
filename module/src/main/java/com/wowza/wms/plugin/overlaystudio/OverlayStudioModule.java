@@ -1289,20 +1289,21 @@ public class OverlayStudioModule extends ModuleBase
 									}
 									long startTime = System.currentTimeMillis();
 									//put overlay on source
-									byte[] newOverlayBuffer = overlayImage.getCurrentImageBuffer(scalingFactor);
+									// one record: the buffer with the size and place it was drawn for
+									OverlayImage.Published drawn = overlayImage.current(scalingFactor);
 									long endTime = System.currentTimeMillis();
-									streamInfo.lastImageUuid = overlayImage.getDrawnUuid(scalingFactor);
+									streamInfo.lastImageUuid = drawn != null ? drawn.uuid() : overlayImage.getDrawnUuid(scalingFactor);
 									warnIfSlow(overlayImage, endTime - startTime, streamName);
 
-									if (newOverlayBuffer != null)
+									if (drawn != null)
 									{
 										TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName, "Source",
 												srcWidth, srcHeight,
-												overlayImage.getWidth(scalingFactor),
-												overlayImage.getHeight(scalingFactor),
-												overlayImage.getxPos(scalingFactor),
-												overlayImage.getyPos(scalingFactor),
-												newOverlayBuffer);
+												drawn.width(),
+												drawn.height(),
+												drawn.x(),
+												drawn.y(),
+												drawn.buffer());
 										if (overlayFrame != null)
 										{
 											debugLog(logPrefix + "Adding Source Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight());
@@ -1345,22 +1346,22 @@ public class OverlayStudioModule extends ModuleBase
 													scalingFactor = (double)destinationWidth / (double)getStreamWidth(streamName);
 												}
 												long startTime = System.currentTimeMillis();
-												byte[] newOverlayBuffer = overlayImage.getCurrentImageBuffer(scalingFactor);
+												OverlayImage.Published drawn = overlayImage.current(scalingFactor);
 												long endTime = System.currentTimeMillis();
-												streamInfo.lastImageUuid = overlayImage.getDrawnUuid(scalingFactor);
+												streamInfo.lastImageUuid = drawn != null ? drawn.uuid() : overlayImage.getDrawnUuid(scalingFactor);
 												warnIfSlow(overlayImage, endTime - startTime, encoderInfo.streamName);
-												if (newOverlayBuffer != null)
+												if (drawn != null)
 												{
 													int frameWidth = encoderInfo.getFrameWidth();
 													int frameHeight = encoderInfo.getFrameHeight();
 													TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName,
 															"Encode <" + encoderInfo.encodeName + ">",
 															frameWidth, frameHeight,
-															overlayImage.getWidth(scalingFactor),
-															overlayImage.getHeight(scalingFactor),
-															overlayImage.getxPos(scalingFactor),
-															overlayImage.getyPos(scalingFactor),
-															newOverlayBuffer);
+															drawn.width(),
+															drawn.height(),
+															drawn.x(),
+															drawn.y(),
+															drawn.buffer());
 													if (overlayFrame != null)
 													{
 														debugLog(logPrefix + "Adding Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight() + " ScalingFactor:" + scalingFactor);
