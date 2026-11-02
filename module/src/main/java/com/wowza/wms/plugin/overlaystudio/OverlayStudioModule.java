@@ -504,6 +504,27 @@ public class OverlayStudioModule extends ModuleBase
 	}
 
 	/** Running streams of this application whose template names this overlay. */
+	/** The source size, {w, h}, of a running stream showing the overlay, or null when none does or it is not known yet. */
+	public static int[] sourceSize(String vhostName, String appName, String name)
+	{
+		for(OverlayStudioModule mod: RUNNING)
+		{
+			IApplicationInstance ai = mod.appInstance;
+			if(ai == null || !appName.equals(mod.appName) || !vhostName.equals(ai.getVHost().getName()))
+			{
+				continue;
+			}
+			for(java.util.Map.Entry<String, String> e: mod.streamOverlayNames.entrySet())
+			{
+				if(name.equals(e.getValue()) && mod.getSourceWidth(e.getKey()) > 0 && mod.getSourceHeight(e.getKey()) > 0)
+				{
+					return new int[] { mod.getSourceWidth(e.getKey()), mod.getSourceHeight(e.getKey()) };
+				}
+			}
+		}
+		return null;
+	}
+
 	public static List<String> streamsShowing(String vhostName, String appName, String name)
 	{
 		List<String> out = new ArrayList<>();

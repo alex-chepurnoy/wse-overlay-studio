@@ -133,6 +133,13 @@ public final class CapturePool<K, C>
 		return new java.util.ArrayList<>(keys.keySet());
 	}
 
+	/** The capture already open for this page, or null; never opens one and takes no hold, so nothing to release. */
+	public synchronized C peek(K key)
+	{
+		Entry<C> e = byKey.get(key);
+		return e == null ? null : e.capture;
+	}
+
 	/** Distinct pages open, including those in their grace period. */
 	public synchronized int size()
 	{

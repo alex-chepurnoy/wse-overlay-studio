@@ -97,14 +97,14 @@ public final class OverlayStore
 	public static final int MAX_CANVAS = 8192;
 
 	/**
-	 * As above, with imagePixels giving the pixels of an imageFile (0 when it is not there yet), for the overlay's
-	 * picture budget. Every refusal of a layer names its id and field.
+	 * The overlay as it would be written: its overlay-level fields and objects, every check and limit applied, nothing
+	 * written; the draft render checks an unsaved overlay with it. imagePixels gives the pixels of an imageFile (0 when
+	 * it is not there yet), for the overlay's picture budget. Every refusal of a layer names its id and field.
 	 */
 	@SuppressWarnings("unchecked")
-	public static Map<String, Object> write(Path dir, String name, Map<String, Object> body, Function<String, String> urlProblem, Function<String, Long> imagePixels)
+	public static Map<String, Object> checked(Map<String, Object> body, Function<String, String> urlProblem, Function<String, Long> imagePixels)
 			throws TemplateFiles.Refused, IOException
 	{
-		Path f = file(dir, name);
 		String[] top = overlayProblem(body);
 		if(top != null)
 		{
@@ -169,11 +169,21 @@ public final class OverlayStore
 			clean.add(m);
 		}
 		out.put("objects", clean);
-		byte[] bytes = JSON.writeValueAsBytes(out);
-		if(bytes.length > MAX_FILE_BYTES)
+		int bytes = JSON.writeValueAsBytes(out).length;
+		if(bytes > MAX_FILE_BYTES)
 		{
-			throw new TemplateFiles.Refused(400, "The overlay is " + bytes.length / 1024 + " KB; the most is " + MAX_FILE_BYTES / 1024 + " KB", null, "objects");
+			throw new TemplateFiles.Refused(400, "The overlay is " + bytes / 1024 + " KB; the most is " + MAX_FILE_BYTES / 1024 + " KB", null, "objects");
 		}
+		return out;
+	}
+
+	/** As write above, checked with imagePixels as checked is. */
+	public static Map<String, Object> write(Path dir, String name, Map<String, Object> body, Function<String, String> urlProblem, Function<String, Long> imagePixels)
+			throws TemplateFiles.Refused, IOException
+	{
+		Path f = file(dir, name);
+		Map<String, Object> out = checked(body, urlProblem, imagePixels);
+		byte[] bytes = JSON.writeValueAsBytes(out);
 		Files.createDirectories(dir);
 		// written beside the file and moved into place, so a stream loading it never reads half of it
 		Path tmp = Files.createTempFile(dir, "." + f.getFileName(), ".tmp");
@@ -265,6 +275,89 @@ public final class OverlayStore
 			w.put("field", "font");
 			w.put("message", "Font '" + f + "' is not installed on this server; the text draws in " + com.wowza.wms.plugin.overlaystudio.Fonts.DEFAULT_FAMILY + " until it is");
 			out.add(w);
+		}
+	}
+
+	/** The kinds of layer list entries report (plan 4.5), in this order. */
+	public static final List<String> KINDS = List.of("webPage", "text", "datetime", "shape", "image");
+	static final Set<String> SHAPES = Set.of("rectangle", "ellipse", "line", "triangle");
+
+	/**
+	 * The kinds an overlay holds, in KINDS order: a string layer is text, and datetime too when it holds a token;
+	 * the four shapes are shape; an unknown type reports nothing.
+	 */
+	@SuppressWarnings("unchecked")
+	public static List<String> kinds(Map<String, Object> overlay)
+	{
+		Set<String> found = new HashSet<>();
+		for(Object o: overlay.get("objects") instanceof List ? (List<Object>)overlay.get("objects") : List.of())
+		{
+			if(!(o instanceof Map))
+			{
+				continue;
+			}
+			Map<String, Object> m = (Map<String, Object>)o;
+			Object type = m.get("type");
+			if("string".equals(type))
+			{
+				found.add("text");
+				if(m.get("text") instanceof String t && com.wowza.wms.plugin.overlaystudio.TextTokens.hasTokens(t))
+				{
+					found.add("datetime");
+				}
+			}
+			else if(SHAPES.contains(type))
+			{
+				found.add("shape");
+			}
+			else if("webPage".equals(type) || "image".equals(type))
+			{
+				found.add((String)type);
+			}
+		}
+		return KINDS.stream().filter(found::contains).toList();
+	}
+
+	/** The image files an overlay's image layers name, each once, in layer order. */
+	@SuppressWarnings("unchecked")
+	public static List<String> imageFiles(Map<String, Object> overlay)
+	{
+		Set<String> out = new java.util.LinkedHashSet<>();
+		for(Object o: overlay.get("objects") instanceof List ? (List<Object>)overlay.get("objects") : List.of())
+		{
+			if(o instanceof Map && "image".equals(((Map<String, Object>)o).get("type")) && ((Map<String, Object>)o).get("imageFile") instanceof String f)
+			{
+				out.add(f);
+			}
+		}
+		return new ArrayList<>(out);
+	}
+
+	private static final ObjectMapper CANONICAL = new ObjectMapper().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+
+	/**
+	 * SHA-256 of the overlay as this store writes it, its kept fields only and every key sorted, so a hand-edited
+	 * file and its copy in another application match whatever order their keys are in (plan 4.5).
+	 */
+	public static String hash(Map<String, Object> overlay)
+	{
+		Map<String, Object> kept = new LinkedHashMap<>();
+		for(String k: OVERLAY_KEYS)
+		{
+			if(overlay.containsKey(k))
+			{
+				kept.put(k, overlay.get(k));
+			}
+		}
+		kept.put("objects", overlay.get("objects"));
+		try
+		{
+			byte[] d = java.security.MessageDigest.getInstance("SHA-256").digest(CANONICAL.writeValueAsBytes(kept));
+			return java.util.HexFormat.of().formatHex(d);
+		}
+		catch(java.security.NoSuchAlgorithmException | com.fasterxml.jackson.core.JsonProcessingException e)
+		{
+			throw new IllegalStateException(e);
 		}
 	}
 

@@ -15,7 +15,10 @@ import com.wowza.wms.plugin.overlaystudio.templates.OverlayStore;
 import com.wowza.wms.plugin.overlaystudio.templates.TemplateFiles;
 import com.wowza.wms.rest.WMSConfig;
 
-/** The application's named overlays, each with the templates that carry it and the running streams showing it. */
+/**
+ * The application's named overlays, each with the templates that carry it, the running streams showing it, its layer
+ * kinds, the image files it uses and a hash of its content.
+ */
 @WMSConfig(restLocation = "/v1/{server}/plugin/overlaystudio/vhosts/{vhostName}/applications/{appName}/overlays", restVerbs = "GET", xmlFilename = "")
 public class OverlaysConfig extends VHostResourceBase
 {
@@ -38,8 +41,13 @@ public class OverlaysConfig extends VHostResourceBase
 			m.put("name", name);
 			try
 			{
-				List<Object> objs = (List<Object>)OverlayStore.read(dir, name).get("objects");
+				Map<String, Object> overlay = OverlayStore.read(dir, name);
+				List<Object> objs = (List<Object>)overlay.get("objects");
 				m.put("pages", objs == null ? 0 : objs.size());
+				// for the Templates picker and Copy to other applications (plan 4.5)
+				m.put("kinds", OverlayStore.kinds(overlay));
+				m.put("imageFiles", OverlayStore.imageFiles(overlay));
+				m.put("hash", OverlayStore.hash(overlay));
 			}
 			catch(Exception e)
 			{
