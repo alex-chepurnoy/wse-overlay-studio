@@ -565,6 +565,13 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	/** Refuses a missing or unknown type as a client error naming the field. */
 	void checkType() throws ConfigBaseException
 	{
+		String badId = idProblem(id);
+		if(badId != null)
+		{
+			ConfigBaseException ex = new ConfigBaseException();
+			ex.addError("id", badId);
+			throw ex;
+		}
 		if(type == null || !TYPES.contains(type))
 		{
 			ConfigBaseException ex = new ConfigBaseException();
@@ -574,9 +581,33 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		checkTiming();
 	}
 
+	/** Refuses malformed colors, opacity and stroke (styleProblem) as a client error naming the field. */
+	void checkStyle() throws ConfigBaseException
+	{
+		Map<String, Object> m = new java.util.LinkedHashMap<>();
+		m.put("color", color);
+		m.put("fillColor", fillColor);
+		m.put("gradientColor", gradientColor);
+		m.put("shadowColor", shadowColor);
+		m.put("background", background);
+		m.put("outlineColor", outlineColor);
+		m.put("keyColor", keyColor);
+		m.put("opacity", opacity);
+		m.put("stroke", stroke);
+		m.values().removeIf(java.util.Objects::isNull);
+		String[] bad = styleProblem(m);
+		if(bad != null)
+		{
+			ConfigBaseException ex = new ConfigBaseException();
+			ex.addError(bad[0], bad[1]);
+			throw ex;
+		}
+	}
+
 	/** Refuses malformed text fields (textProblem) and shape and image fields (shapeProblem) as a client error naming the field. */
 	void checkText() throws ConfigBaseException
 	{
+		checkStyle();
 		Map<String, Object> shape = new java.util.LinkedHashMap<>();
 		shape.put("rotation", rotation);
 		shape.put("dash", dash);
@@ -793,7 +824,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	{
 		// rounded up to even as the scaled getters read them; the stored fields stay as given
 		even = evenCoords;
-		if(timing <= 0)
+		if(timing <= 0 || liveHidden)
 		{
 			return;
 		}
@@ -1047,6 +1078,12 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	private transient volatile String imageProblem = null;
 
 	/** The virtual host this layer belongs to: its own, else its overlay's. */
+	/** Names the virtual host whose content folder an off-air draw reads image files from. */
+	void bindVHost(String vhost)
+	{
+		vhostName = vhost;
+	}
+
 	private String vhost()
 	{
 		if(vhostName != null)
@@ -1606,6 +1643,241 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		return null;
 	}
 
+	/** A layer id: the page's rule, and never "..", which the Manager bridge refuses in a path (plan 3.10). */
+	static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
+	static final java.util.List<String> COLORS = java.util.List.of("color", "fillColor", "gradientColor", "shadowColor", "background", "outlineColor", "keyColor");
+	// where a layer sits and how big it is; anything past this is a mistake rather than a layout
+	static final double COORD_MAX = 100_000;
+	private static final Pattern RGB = Pattern.compile("rgb *\\( *([0-9]{1,3}) *, *([0-9]{1,3}) *, *([0-9]{1,3}) *(, *([0-9]{1,3}) *)?\\)");
+
+	/** Why a layer id is refused, or null. */
+	public static String idProblem(Object id)
+	{
+		if(!(id instanceof String s) || s.isBlank())
+		{
+			return "Each layer needs an id";
+		}
+		if(!ID.matcher(s).matches() || s.contains(".."))
+		{
+			return "Layer id '" + s + "' must be 1 to 64 letters, digits, dots, dashes or underscores, start with a letter or digit and not contain ..";
+		}
+		return null;
+	}
+
+	/** Whether awt_color reads this as the color it names: rgb(r,g,b), rgb(r,g,b,a) with each 0 to 255, or a java.awt.Color name. */
+	public static boolean isColor(Object v)
+	{
+		if(!(v instanceof String s))
+		{
+			return false;
+		}
+		Matcher m = RGB.matcher(s.trim().toLowerCase());
+		if(m.matches())
+		{
+			for(int g: new int[] { 1, 2, 3, 5 })
+			{
+				if(m.group(g) != null && Integer.parseInt(m.group(g)) > 255)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		try
+		{
+			return Color.class.getField(s.trim().toLowerCase()).get(null) instanceof Color;
+		}
+		catch(ReflectiveOperationException | SecurityException e)
+		{
+			return false;
+		}
+	}
+
+	/**
+	 * Why fields every layer and the overlay itself may carry are refused, as {field, message}, or null: colors,
+	 * opacity -1 (not set) to 100, stroke 0 to 1,000, position and size numbers, fontSize and fontStyle.
+	 */
+	public static String[] styleProblem(Map<String, Object> m)
+	{
+		for(String c: COLORS)
+		{
+			if(m.get(c) != null && !isColor(m.get(c)))
+			{
+				return new String[] { c, c + " must be rgb(r,g,b), rgb(r,g,b,a) with each from 0 to 255, or a color name such as white" };
+			}
+		}
+		Object op = m.get("opacity");
+		if(op != null && !(op instanceof Number n && n.doubleValue() >= -1 && n.doubleValue() <= 100))
+		{
+			return new String[] { "opacity", "opacity must be from 0 to 100" };
+		}
+		Object st = m.get("stroke");
+		if(st != null && !(st instanceof Number n && n.doubleValue() >= -1 && n.doubleValue() <= 1000))
+		{
+			return new String[] { "stroke", "stroke must be from 0 to 1000" };
+		}
+		for(String k: new String[] { "x", "y", "w", "h", "x2", "y2", "x3", "y3", "zOrder", "arcWidth", "arcHeight", "shadowOffset", "cropX", "cropY", "cropW", "cropH" })
+		{
+			Object v = m.get(k);
+			if(v != null && !(v instanceof Number n && Double.isFinite(n.doubleValue()) && Math.abs(n.doubleValue()) <= COORD_MAX))
+			{
+				return new String[] { k, k + " must be a number from -" + (long)COORD_MAX + " to " + (long)COORD_MAX };
+			}
+		}
+		Object size = m.get("fontSize");
+		if(size != null && !(size instanceof Number n && ((n.doubleValue() >= 1 && n.doubleValue() <= 1000) || n.doubleValue() == -1)))
+		{
+			return new String[] { "fontSize", "fontSize must be from 1 to 1000" };
+		}
+		Object style = m.get("fontStyle");
+		if(style != null && !Fonts.STYLES.contains(style.toString()))
+		{
+			return new String[] { "fontStyle", "fontStyle must be one of " + Fonts.STYLES };
+		}
+		if(m.get("font") != null && !(m.get("font") instanceof String))
+		{
+			return new String[] { "font", "font must be a family name" };
+		}
+		return null;
+	}
+
+	/**
+	 * Why a saved layer is refused, as {field, message}, or null (plan 3.10): its id and type, style, shape and image,
+	 * text and timing fields. Uniqueness and the overlay's limits are the store's to check.
+	 */
+	public static String[] layerProblem(Map<String, Object> m)
+	{
+		String bad = idProblem(m.get("id"));
+		if(bad != null)
+		{
+			return new String[] { "id", bad };
+		}
+		Object type = m.get("type");
+		if(type == null || !TYPES.contains(type.toString()))
+		{
+			return new String[] { "type", type == null ? "A layer needs a type: one of " + new java.util.TreeSet<>(TYPES) : "Unknown type '" + type + "': use one of " + new java.util.TreeSet<>(TYPES) };
+		}
+		for(Map.Entry<String, String> r: REMOVED.entrySet())
+		{
+			if(m.containsKey(r.getKey()))
+			{
+				return new String[] { r.getKey(), r.getKey() + " was removed in 2.0; use " + r.getValue() };
+			}
+		}
+		String[] p = styleProblem(m);
+		if(p == null)
+		{
+			p = shapeProblem(m);
+		}
+		if(p == null && "string".equals(type))
+		{
+			p = textProblem(m);
+		}
+		if(p == null)
+		{
+			p = timingProblem(m.get("showFrom"), m.get("hideAt"), m.get("blinkSeconds"), m.get("fadeIn"), m.get("fadeOut"));
+		}
+		return p;
+	}
+
+	/** The fields a live value may set (plan 3.6). */
+	public static final java.util.List<String> LIVE_FIELDS = java.util.List.of("text", "color", "background", "opacity", "hidden");
+
+	/**
+	 * Why a live value for this layer is refused, as {field, message}, or null: only LIVE_FIELDS, each fitting its
+	 * type, text and background on text layers only, and text checked as saved text is with the layer's locale.
+	 */
+	public static String[] liveProblem(Map<String, Object> layer, Map<String, Object> v)
+	{
+		if(v.isEmpty())
+		{
+			return new String[] { "", "A live value sets one or more of " + LIVE_FIELDS };
+		}
+		for(Map.Entry<String, Object> e: v.entrySet())
+		{
+			String k = e.getKey();
+			Object val = e.getValue();
+			if(!LIVE_FIELDS.contains(k))
+			{
+				return new String[] { k, k + " cannot be set live; use one of " + LIVE_FIELDS };
+			}
+			if((k.equals("text") || k.equals("background")) && !"string".equals(layer.get("type")))
+			{
+				return new String[] { k, k + " is set live on text layers only" };
+			}
+			if((k.equals("color") || k.equals("background")) && !isColor(val))
+			{
+				return new String[] { k, k + " must be rgb(r,g,b), rgb(r,g,b,a) with each from 0 to 255, or a color name such as white" };
+			}
+			if(k.equals("opacity") && !(val instanceof Number n && n.doubleValue() >= 0 && n.doubleValue() <= 100))
+			{
+				return new String[] { k, "opacity must be from 0 to 100" };
+			}
+			if(k.equals("hidden") && !(val instanceof Boolean))
+			{
+				return new String[] { k, "hidden must be true or false" };
+			}
+			if(k.equals("text"))
+			{
+				Map<String, Object> t = new java.util.HashMap<>();
+				t.put("text", val);
+				t.put("locale", layer.get("locale"));
+				String[] p = textProblem(t);
+				if(p != null)
+				{
+					return p;
+				}
+			}
+		}
+		return null;
+	}
+
+	// a live value set over REST (plan 3.6), and the layer as saved, which clearing the value goes back to
+	private transient Map<String, Object> live = null;
+	private transient ObjectConfig saved = null;
+	private transient boolean liveHidden = false;
+
+	/** The live value this layer draws with, or null. */
+	public Map<String, Object> liveValue()
+	{
+		return live;
+	}
+
+	/**
+	 * A copy of this layer as saved with live value v on top (null: as saved), for a swap into the overlay's list. It
+	 * takes its own hold on the page capture or picture this layer has, as an edited layer does.
+	 */
+	ObjectConfig withLive(Map<String, Object> v)
+	{
+		ObjectConfig base = saved != null ? saved : this;
+		ObjectConfig c = new ObjectConfig();
+		c.copyFrom(base);
+		c.saved = base;
+		if(v != null)
+		{
+			c.live = v;
+			if(v.get("text") instanceof String t)
+			{
+				c.text = t;
+			}
+			if(v.get("color") instanceof String s)
+			{
+				c.color = s;
+			}
+			if(v.get("background") instanceof String s)
+			{
+				c.background = s;
+			}
+			if(v.get("opacity") instanceof Number n)
+			{
+				c.opacity = (int)Math.round(n.doubleValue());
+			}
+			c.liveHidden = Boolean.TRUE.equals(v.get("hidden"));
+		}
+		c.shareCaptureOf(this);
+		return c;
+	}
+
 	/** What this layer's tokens draw from at now: its zone, locale, target and end text, and the stream's start. */
 	TextTokens.Context tokenContext(long now, long streamStart)
 	{
@@ -1871,6 +2143,52 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		int vw = num(viewportWidth) > 0 ? num(viewportWidth) : w;
 		int vh = num(viewportHeight) > 0 ? num(viewportHeight) : h;
 		return new WebPageCapture.Settings(url, vw, vh, awt_keyColor(), paintBackground == null || paintBackground, label());
+	}
+
+	/**
+	 * A page layer in a thumbnail (plan 3.8): the last frame of a capture already open for this page (on air, or open
+	 * in the editor), keyed and cropped, else a gray box with the page's host name. Never opens a capture.
+	 * @return whether a page frame was drawn
+	 */
+	boolean drawPageThumbnail(Graphics2D g, double scaled)
+	{
+		WebPageCapture c = WebPageCapture.POOL.peek(webPageSettings());
+		BufferedImage frame = c == null ? null : c.lastRawImage();
+		int bw = w > 0 ? w : num(viewportWidth), bh = h > 0 ? h : num(viewportHeight);
+		int x = getX(scaled), y = getY(scaled), dw = (int)(bw * scaled), dh = (int)(bh * scaled);
+		if(dw <= 0 || dh <= 0)
+		{
+			return false;
+		}
+		if(frame != null)
+		{
+			g.drawImage(cropped(keyOut(frame, awt_keyColor(), num(keyTolerance))), x, y, dw, dh, null);
+			return true;
+		}
+		g.setComposite(AlphaComposite.SrcOver);
+		g.setColor(new Color(110, 110, 110, 210));
+		g.fillRect(x, y, dw, dh);
+		String host;
+		try
+		{
+			host = url == null ? null : java.net.URI.create(url.trim()).getHost();
+		}
+		catch(IllegalArgumentException e)
+		{
+			host = null;
+		}
+		java.awt.Font f = Fonts.font(null, Fonts.PLAIN, (float)Math.max(8, Math.min(dh / 4.0, 28 * scaled)));
+		if(host != null && f != null)
+		{
+			g.setFont(f);
+			g.setColor(Color.WHITE);
+			java.awt.FontMetrics fm = g.getFontMetrics();
+			java.awt.Shape clip = g.getClip();
+			g.clipRect(x, y, dw, dh);
+			g.drawString(host, x + Math.max(2, (dw - fm.stringWidth(host)) / 2), y + (dh + fm.getAscent() - fm.getDescent()) / 2);
+			g.setClip(clip);
+		}
+		return false;
 	}
 
 	/** Object id plus the url without its query string, for logs and status; queries can carry secrets. */

@@ -81,9 +81,9 @@ class CoexistenceTest
 				}
 			}
 		}
-		// The three baseline resources (overlay, objects, object) and the twenty-six this module adds
-		assertEquals(List.of("AppModuleConfig", "AppStateConfig", "AppStreamsConfig", "CaptureConfig", "CaptureLimitConfig", "FontsCheckConfig", "FontsConfig", "FormatConfig", "ImagesConfig", "InfoConfig", "NamedOverlayCaptureConfig", "NamedOverlayConfig",
-				"NamedOverlayPreviewConfig", "ObjectConfig",
+		// The three baseline resources (overlay, objects, object) and the thirty this module adds
+		assertEquals(List.of("AppModuleConfig", "AppStateConfig", "AppStreamsConfig", "CaptureConfig", "CaptureLimitConfig", "FontsCheckConfig", "FontsConfig", "FormatConfig", "ImagesConfig", "InfoConfig", "NamedOverlayCaptureConfig", "NamedOverlayConfig", "NamedOverlayLiveConfig", "NamedOverlayLiveLayerConfig",
+				"NamedOverlayPreviewConfig", "NamedOverlayRenderConfig", "NamedOverlayThumbnailConfig", "ObjectConfig",
 				"ObjectsConfig", "OverlayAppsConfig", "OverlayConfig", "OverlaysConfig", "PreviewConfig", "SnapshotConfig", "StatusConfig", "StreamRestartConfig", "TemplateAssignConfig",
 				"TemplateCopiesConfig", "TemplateOrderConfig", "TemplateOverlayConfig", "TemplateSpecConfig", "TemplateStarterConfig", "TemplateStartersConfig", "TemplateUseConfig",
 				"TemplateValidateConfig", "TemplatesBuildConfig"),

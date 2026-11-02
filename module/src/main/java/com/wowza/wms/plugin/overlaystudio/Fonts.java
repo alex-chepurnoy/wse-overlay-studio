@@ -148,6 +148,35 @@ public final class Fonts
 		return state().unavailable();
 	}
 
+	/**
+	 * Whether this server draws family as itself: a bundled family or face, a logical font or an installed one. Blank
+	 * is the default and known; so is everything when text cannot be drawn at all, which is reported on its own.
+	 */
+	public static boolean known(String family)
+	{
+		State s = state();
+		if(family == null || family.isBlank() || s.unavailable() != null || s.faces().containsKey(family) || s.faceFamilies().containsKey(family)
+				|| LOGICAL.contains(family))
+		{
+			return true;
+		}
+		try
+		{
+			for(String f: GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames())
+			{
+				if(f.equalsIgnoreCase(family))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+		catch(Throwable t)
+		{
+			return true;
+		}
+	}
+
 	/** The fontStyle values, with anything else as plain. */
 	public static String style(String fontStyle)
 	{

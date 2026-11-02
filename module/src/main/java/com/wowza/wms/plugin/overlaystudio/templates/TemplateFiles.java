@@ -51,16 +51,35 @@ public final class TemplateFiles
 	public static class Refused extends Exception
 	{
 		private final int status;
+		// the layer and field refused, when it is one (plan 3.10: a 400 names the field)
+		private final String id, field;
 
 		public Refused(int status, String message)
 		{
+			this(status, message, null, null);
+		}
+
+		public Refused(int status, String message, String id, String field)
+		{
 			super(message);
 			this.status = status;
+			this.id = id;
+			this.field = field;
 		}
 
 		public int status()
 		{
 			return status;
+		}
+
+		public String id()
+		{
+			return id;
+		}
+
+		public String field()
+		{
+			return field;
 		}
 	}
 
