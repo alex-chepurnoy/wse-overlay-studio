@@ -125,46 +125,26 @@ a test capture).
     whatever the stream holds; 2.0 passes the slot's canvas size explicitly. Unchanged by bounding boxes.
   - **Published box:** the crop origin and size inside the canvas, carried only in the published record.
   - (`checkOverlayFitsSource` reads the image's own size and the source size, `:627-645`, and is unaffected.)
-- **Default path, the boundary redraw:** at each `nextChangeAt` the scheduler calls `resetUuid()` and the next frame
-  starts the draw for each scale on its own in-flight flag, as today. The change reaches the video one draw after the
-  boundary. Spike S2 measures that draw; if it stays under one frame interval (33 ms at 30 fps) at the 12-stream load,
-  this is the design and render ahead below is not built.
-- **Render ahead, only if S2 shows boundary draws longer than one frame interval.** For a time token the scheduler
-  draws the next boundary's image ahead of time and swaps it in at the boundary, so a slow draw does not delay the
-  change. Its own pull request, after PR 4, only if S2 calls for it. If built, all of the following hold:
-  - **Own surface:** the pre-render paints into its own drawing image per scale, sized to its revision's bounding box,
-    not the shared `BufferedImage` every draw uses today (`OverlayImage.java:428`, `:546-558`), and it does not take
-    the scale's in-flight flag, so a slow page-frame draw never blocks it.
-  - **Swap, once per overlay per boundary, under the image lock:** the hand-off compares each scale's published
-    `uuid` with one current `uuid` on the overlay config (`OverlayImage.java:299`, `:355`; `OverlayConfig.java:131`,
-    `:331`), so the swap makes one boundary `uuid` for the overlay, sets it current, and publishes every scale whose
-    pre-render is ready and of the current content revision with that same `uuid`, incrementing each such scale's swap
-    counter. The next frame then hands those off without starting a draw, and the module's gate sees a new `uuid`
-    (`UrlOverlayModule.java:1250`, `:1294`). A scale with no ready pre-render keeps an older `uuid`, so it draws by
-    the default path. A revision bump (live write, per-stream PUT, `imageFile`) also takes the
-    image lock, so it can never land between the check and the publish. A save is safe for another reason: it replaces
-    the `OverlayImage`, and the old image's scheduler stops when it is disposed (`setOverlayImage`,
-    `UrlOverlayModule.java:772-775`), so its pre-render is never swapped in. A stale pre-render is dropped and the boundary draws by the default path.
-  - **Draws in flight across a swap:** a draw records the swap counter when it starts (today it reads the `uuid` at
-    `OverlayImage.java:426` and publishes unconditionally at `:475-486`) and does not publish if a swap happened since.
-  - **Page frames:** the per-scale markers above are committed only when a draw publishes, so a dropped draw hides
-    nothing; after a swap, a page whose frame is newer than the one the pre-render used triggers an ordinary redraw at
-    once. So the swapped image's page frame is at most one draw old.
-  - The lead is min(300 ms, half the smallest unit), so a tenths token renders 50 ms ahead and only one image is ever
-    pending per scale. Streams are spread over the lead, not all drawn at once.
+- **The boundary redraw:** at each `nextChangeAt` the scheduler calls `resetUuid()` and the next frame starts the
+  draw for each scale on its own in-flight flag, as today. Spike S2 (`docs/perf/2026-11-02-s2-redraw-cost.md`) measured
+  it: with bounding-box drawing (below), 12 streams redraw all four outputs within 2.5 ms of the second even on the
+  8-core AWS server, so no draw-ahead scheme is built. An overlay that must use the full canvas can show a clock change
+  one or two frames late at 12 streams on 8 cores (38 to 56 ms), which a seconds clock does not visibly show.
 - **Inline draws** (`threadDrawing: false`, drawn on the transcoder thread, `OverlayImage.java:362-380`): the scheduler still decides when the image changes by calling `resetUuid()`; the
-  next frame then draws inline as today. Render ahead and the per-scale in-flight flag do not apply to them.
+  next frame then draws inline as today. The per-scale in-flight flag does not apply to them.
 - **Per target, not per stream:** one in-flight draw per output scale instead of one per overlay (fixes D13), and the
   last image sent is tracked per target (the source, or each encode) instead of the single `lastImageUuid` every encode
   overwrites today (`M/UrlOverlayModule.java:1294`, `:1350`), so an encode whose draw finished late still gets it.
-- **Draw the layers' bounding box, not the full frame**, where the overlay has no full-frame layer: allocate, clear and
+- **Draw the layers' bounding box, not the full frame** (required: S2 found a full-canvas redraw is almost all
+  clearing and converting the frame, and the box cuts a clock's redraw 35 to 40 times), wherever the overlay has no
+  full-frame layer: allocate, clear and
   convert only that region (`createOverlayFrame` already crops at hand-off, `M/UrlOverlayModule.java:666-719`; this
   moves the crop before drawing). The box covers shadow, stroke, outline, a text layer's background box and
   rotation, keeps an even origin per scale,
   and is fixed per content revision (with text boxes at their `w`,`h`), so a ticking clock reuses its buffer instead of
   allocating one each draw (the spare buffer is reused only at the same length, `M/OverlayImage.java:478`). Text whose
   width changes between draws without a revision (a token in text without `box`) counts as spanning
-  the frame's full width over its line height, so a wider second is never clipped. Sized by S2.
+  the frame's full width over its line height, so a wider second is never clipped.
 - Blink moves to seconds: `blinkSeconds` (3.3a), from wall-clock time so every output blinks together. `flashRate`
   (counted in draws) is removed.
 - `SharedFrameTest.anOverlayWithNoPageNeverAsksForARedraw` (`module/src/test/.../SharedFrameTest.java:71-83`) stays
@@ -786,7 +766,7 @@ Each answers a question the design depends on. Results go to `docs/perf/` or the
 | # | Question | How | Blocks |
 |---|---|---|---|
 | S1 | Does WSE draw overlay slots 16 to 19 and the 1 to 8 image slots, and in what order? | Read how the native transcoder receives the overlay maps in `C:\wowza\wse`. Both Java maps are `HashMap`s (`TranscoderStreamSourceVideo.java:21-22`): if the native side follows Java's iteration order, keys 16 to 19 come between 1 and 4, not after 8 (an inference, **unverified**). Then draw colored squares overlapping in slots 1, 8, 16, 17, 18, 19 on Windows and Linux, CPU and GPU | 3.9, 4.5 |
-| S2 | What does one redraw cost at 1080p, with four outputs and many streams? Does a boundary draw finish within one frame interval, or is render ahead needed (3.1)? | Time `drawImage` plus `transferImage` (`OverlayImage.java:422-591`) for a clock, a full-frame lower third and a 64-layer overlay, full frame against bounding box; CPU of WSE with one clock on 1, 4 and 12 streams; how often a scale's draw misses its second | 3.1 budget, bounding box |
+| S2 | What does one redraw cost at 1080p, with four outputs and many streams? Does a boundary draw finish within one frame interval? | **Done 2026-11-02** (`docs/perf/2026-11-02-s2-redraw-cost.md`): a full-canvas redraw is almost all clearing and converting the frame (2.2 ms Windows, 5.3 ms AWS at 1080p, empty or not); a clock's bounding box is 35 to 40 times cheaper; 12 streams on all four outputs finish in 2.5 ms with boxes, 38 to 56 ms on the 8-core server without. Bounding boxes required, no draw-ahead scheme. Still to measure with the built module: the same burst while WSE transcodes 12 streams | 3.1 |
 | S3 | Do bundled fonts register on headless Linux with WSE's own Java, and do logical fonts resolve there? | **Done 2026-10-31** (`docs/perf/2026-10-31-font-spike.md`): bundled static fonts register and render pixel-identical on Windows and Linux; bold needs a Bold file; variable fonts and italic do not work as hoped; missing characters draw boxes; logical fonts differ by system; on Linux, with no system fonts or no `libfontconfig`, Java draws no text at all, bundled fonts included, unless given its own `fontconfig.properties` | 3.7 |
 | S4 | How close is the browser's text to Java2D's for the bundled fonts, on Windows and Linux? | Pixel difference of 20 text samples, both sides, both servers | 4.4 tolerance, golden image tolerance |
 
@@ -820,11 +800,6 @@ Each answers a question the design depends on. Results go to `docs/perf/` or the
   reads never pairs a buffer with another revision's box; the content revision bumps on live write, per-stream PUT
   and `imageFile` change (a replacement of another pixel size gets a new box) and on nothing else; a save starts a new
   `OverlayImage`. A live write racing a save reaches the new `OverlayImage`.
-- (If built) render ahead: a revision bump racing the swap is never overwritten by it; a slow page-frame draw does not
-  block the pre-render; a page frame newer than the pre-render's is drawn right after the swap; a live write or
-  `imageFile` change inside the lead drops it; at the boundary the hand-off returns the pre-rendered buffer and starts
-  no draw; a page-frame draw running across the boundary does not publish over the swap; a tenths token keeps one
-  pending image.
 - Bounding box: a proportional-font clock never clips as its width changes.
 - Copy-on-write: a page layer edited during a draw keeps one capture (reference count checked), none opened anew.
 - Decoded images: 12 streams on one overlay hold one decoded copy of each image; unreferenced entries are evicted past
@@ -977,7 +952,6 @@ the pull requests below it that it depends on.
 | 2 | The rename (section 5): packages, classes, REST and bridge paths, properties, folders, services, page identifiers, packaging, new Windows upgrade UUID, the 1.x check in all three places (installer preflight with exit code 9; `.deb` `Conflicts` and `preinst`; the MSI launch condition over `OnlyDetect`, the service-key `RegistrySearch` and the two `DirectorySearch` entries), the rename build check, the shipped docs renamed mechanically, and the template property as `overlayStudio1`/`overlayStudioEncodes1` (PR 6 adds 2 to 4), the `.deb` control text moved to the template `packaging/linux/deb/control` with the `Conflicts:` line, and `build_dist.py` (which names each control member, `:170-178` on 1.15.1) adding `preinst` and reading that template, and a short README Before you install section so the refusal message points somewhere real (PR 12 completes it). No behavior change otherwise | |
 | 3 | Playwright harness with smoke flows for today's screens, and `tests/ui/labels_test.py` ported from the local checkout under the new names | 2 |
 | 4 | Module: defects D1, D4 to D9, D11 to D14, thread safety, content revision, published records and the image lock, redraw scheduler and draw path, 3.3a timing fields with their validation (3.10), removal of `flashRate`, `displayStart`/`displayStop` and `rotate` | 2 |
-| 4a | Module: render ahead, only if spike S2 calls for it (3.1) | 4, 5 |
 | 5 | Module: D2, D3, D10 (`rotation`), text fields, tokens and their scheduling, removal of `useDate` and `base64Image` (`ScaledDrawTest.java:56` moves to `imageFile`), shape and image fields; fonts, `/fonts`, `/format`; validation; draft render and thumbnails; live values; `kinds`, `imageFiles` and `hash` on the overlay list | 4 |
 | 6 | Module: several overlays per template (`overlayStudio1` to `4`). Responses add `overlays: [...]` and keep sending the single `overlay`/`encodes` (the first slot), and `/overlay`, `/spec`, `POST /templates` and `/use` keep accepting them as slot 1, until PR 11, because the page reads and writes them until then (writes: `ui/js/uo-template.js:84-88`, `:126`, `:1040`, `ui/js/uo-task.js:287`; reads) (`ui/js/uo-stream.js:50`, `:58`, `ui/js/uo-home.js:24-34`, `ui/js/uo-task.js:252`) | 4 |
 | 7 | Page: SVG drawing of every kind (token layers show their pattern text until PR 8 adds `/format` samples), the page's `@font-face` font files, Add bar, placement, selection, guides, layer list with plain names, "layer" wording. "Date and time" adds its layer; its Format tab arrives in 8 | 3, 5 |
