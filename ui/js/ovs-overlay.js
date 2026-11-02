@@ -2,8 +2,9 @@
  * This code and all components (c) Copyright 2006 - 2026, Wowza Media Systems, LLC.  All rights reserved.
  * This code is licensed pursuant to the Wowza Public License version 1.0, available at www.wowza.com/legal.
  */
-/* Overlay Studio overlay editor: a named overlay's pages placed over a live preview of a stream (the canvas), the page
-   list under the overlay in the list column, and the inspector for the selected page. Edits stay in a draft until Save; a draft is kept in memory per
+/* Overlay Studio overlay editor: a named overlay's layers placed over a live preview of a stream (the canvas), the
+   layer list under the overlay in the list column, and the inspector for the selected layer. Web pages show their
+   captures; text, shapes and images are drawn in the browser (ovs-draw.js). Edits stay in a draft until Save; a draft is kept in memory per
    overlay while the page is open, so leaving for another screen and coming back loses nothing. Placement is in
    source pixels: screen pixels / (frame width / source width), clamped to the frame.
    Also the New overlay screen, with a test capture before anything is written. */
@@ -11,7 +12,9 @@
   'use strict';
   var U = window.OverlayStudio;
   var F = U.fields;
-  var OVERLAY_KEYS = ['refreshRate', 'threadDrawing', 'maxDrawingTime', 'even_coords', 'opacity', 'overlayIndex'];
+  // every overlay-level field the module keeps (OverlayStore.OVERLAY_KEYS), its style defaults included, so a save keeps them
+  var OVERLAY_KEYS = ['refreshRate', 'threadDrawing', 'maxDrawingTime', 'even_coords', 'opacity', 'stroke', 'color', 'fillColor', 'shadowColor', 'shadowOffset',
+    'font', 'fontStyle', 'fontSize'];
   // the page settings a capture depends on; a page whose draft differs here is captured from the draft
   var CAPTURE_KEYS = ['url', 'viewportWidth', 'viewportHeight', 'keyColor', 'keyTolerance', 'paintBackground', 'pageDelay', 'cropX', 'cropY', 'cropW', 'cropH'];
   var el = {};
@@ -37,7 +40,17 @@
     if (v && v.videoWidth) return { w: v.videoWidth, h: v.videoHeight, known: true };
     return { w: 1920, h: 1080, known: false };
   }
-  function size(o) { return { w: o.w > 0 ? o.w : (o.viewportWidth || 640), h: o.h > 0 ? o.h : (o.viewportHeight || 360) }; }
+  function size(o) { if (o.type !== 'webPage') { var b = area(o); return { w: b.w, h: b.h }; } return { w: o.w > 0 ? o.w : (o.viewportWidth || 640), h: o.h > 0 ? o.h : (o.viewportHeight || 360) }; }
+  // where a layer sits on the source, unrotated: a page's box, or what ovs-draw measures for text, shapes and images
+  function area(o) { if (o.type === 'webPage') { var z = size(o); return { x: o.x || 0, y: o.y || 0, w: z.w, h: z.h }; } return U.draw.bounds(o, S.draft); }
+  // layers whose box is their x, y, w, h, so the corners resize them; a line or triangle moves by its points, free text by its start
+  function resizable(o) { return o.type === 'webPage' || o.type === 'rectangle' || o.type === 'ellipse' || o.type === 'image' || (o.type === 'string' && o.box === true && o.w > 0 && o.h > 0); }
+  // moves a layer by dx, dy from where it was (from): its start, and a line's or triangle's other points with it
+  function shift(o, from, dx, dy) {
+    o.x = even((from.x || 0) + dx); o.y = even((from.y || 0) + dy);
+    if (o.type === 'line' || o.type === 'triangle') { o.x2 = even((from.x2 || 0) + dx); o.y2 = even((from.y2 || 0) + dy); }
+    if (o.type === 'triangle') { o.x3 = even((from.x3 || 0) + dx); o.y3 = even((from.y3 || 0) + dy); }
+  }
   function entry() { return U.overlayEntry(S.name); }
   function ro() { return !!U.readOnly; }
 
@@ -57,7 +70,7 @@
     var out = [], so = (saved && saved.objects) || [];
     ((draft && draft.objects) || []).forEach(function (o) {
       var s = so.filter(function (x) { return x.id === o.id; })[0];
-      if (!s) { out.push('add page ' + o.id); return; }
+      if (!s) { out.push('add ' + (o.type === 'webPage' ? 'page ' : 'layer ') + o.id); return; }
       if (JSON.stringify(s) === JSON.stringify(o)) return;
       var w = [];
       var dx = (o.x || 0) - (s.x || 0), dy = (o.y || 0) - (s.y || 0);
@@ -73,7 +86,7 @@
       });
       out.push(o.id + ' ' + w.join(', '));
     });
-    so.forEach(function (s) { if (!((draft && draft.objects) || []).some(function (o) { return o.id === s.id; })) out.push('remove page ' + s.id); });
+    so.forEach(function (s) { if (!((draft && draft.objects) || []).some(function (o) { return o.id === s.id; })) out.push('remove ' + (s.type === 'webPage' ? 'page ' : 'layer ') + s.id); });
     if (saved && draft && OVERLAY_KEYS.some(function (k) { return JSON.stringify(saved[k]) !== JSON.stringify(draft[k]); })) out.push('overlay settings');
     return out;
   }
@@ -384,7 +397,7 @@
   /* ---------- canvas ---------- */
   function renderStage() {
     if (S.player) { S.player.stop(); S.player = null; }
-    el.stage.innerHTML = '<div class="frame" data-frame aria-label="Canvas: pages over a background stream"><video muted playsinline></video><div class="waiting" data-wait></div>' +
+    el.stage.innerHTML = '<div class="frame" data-frame aria-label="Canvas: layers over a background stream"><video muted playsinline></video><div class="waiting" data-wait></div>' +
       '<div class="safe" data-safe' + (S.guides ? '' : ' hidden') + '></div><span class="lbl top" data-airlbl hidden></span></div>';
     var v = el.stage.querySelector('video'), wait = el.stage.querySelector('[data-wait]');
     var url = U.hls(S.previewInfo && S.previewInfo.source && S.previewInfo.source.hls);
@@ -399,17 +412,17 @@
       S.player.load(url);
       v.addEventListener('loadedmetadata', placeBoxes);
     } else {
-      wait.textContent = S.preview ? 'Connecting...' : 'No stream is publishing in ' + (U.app || 'this application') + '. Pages can still be placed on a frame of the assumed size.';
+      wait.textContent = S.preview ? 'Connecting...' : 'No stream is publishing in ' + (U.app || 'this application') + '. Layers can still be placed on a frame of the assumed size.';
     }
     placeBoxes(); renderCaption();
   }
-  // the stream behind the pages is only a background: whether viewers see this overlay on it is the template's doing
+  // the stream behind the layers is only a background: whether viewers see this overlay on it is the template's doing
   function onAirHere() { var r = S.preview && U.streamRow(S.preview); return !!(r && r.publishing && r.overlay === S.name); }
   function renderCaption() {
     var dirty = !ro() && changes() > 0, air = onAirHere();
     el.caption.innerHTML = !S.preview ? '<span class="bdg">Blank frame</span>' :
       (air ? '<span class="bdg on">On air on ' + U.esc(S.preview) + '</span>' : '<span class="bdg warn">Background only</span>' +
-        U.tip(S.preview + ' does not show ' + S.name + '. It is here to place the pages on. Viewers see an overlay only when the template a stream runs names it.')) +
+        U.tip(S.preview + ' does not show ' + S.name + '. It is here to place the layers on. Viewers see an overlay only when the template a stream runs names it.')) +
       (dirty ? '<span class="chip-draft">Unsaved</span>' + U.tip('Shown here only. Nothing is written until Save.') : '');
     var lbl = el.stage.querySelector('[data-airlbl]');
     if (lbl) { lbl.hidden = !S.preview || air; lbl.textContent = 'Background: ' + (S.preview || '') + '. Not on air with ' + S.name; }
@@ -423,15 +436,15 @@
     frame.style.aspectRatio = s.w + ' / ' + s.h; frame.style.setProperty('--ar', String(s.w / s.h));
     frame.querySelectorAll('.pg').forEach(function (b) { b.remove(); });
     objects().slice().sort(function (x, y) { return (x.zOrder || 0) - (y.zOrder || 0); }).forEach(function (o) {
-      var b = document.createElement('div'), draft = isDraftPage(o), sel = o.id === S.layer && !ro();
-      b.className = 'pg' + (sel ? ' sel' : '') + (draft || (!ro() && edited(o.id)) ? ' draft' : '');
+      var b = document.createElement('div'), web = o.type === 'webPage', draft = web ? isDraftPage(o) : !ro() && !savedById(o.id), sel = o.id === S.layer && !ro();
+      b.className = 'pg' + (web ? '' : ' lyr') + (sel ? ' sel' : '') + (draft || (!ro() && edited(o.id)) ? ' draft' : '');
       b.setAttribute('data-id', o.id);
       if (!ro()) { b.tabIndex = 0; b.setAttribute('role', 'button'); }
-      b.setAttribute('aria-label', o.id + ', X ' + (o.x || 0) + ', Y ' + (o.y || 0) + (ro() ? '' : '. Arrow keys move 1 px, Shift 10 px.'));
-      b.innerHTML = '<img alt="" hidden><span class="pg-name">' + U.esc(o.id) + (draft || edited(o.id) ? ', unsaved' : '') + '</span>' +
-        (sel ? '<i class="h nw" data-g="nw"></i><i class="h ne" data-g="ne"></i><i class="h sw" data-g="sw"></i><i class="h se" data-g="se"></i>' : '');
-      if (S.captures[o.id]) { b.querySelector('img').src = S.captures[o.id]; b.querySelector('img').hidden = false; }
-      if (o.opacity != null && o.opacity >= 0) b.querySelector('img').style.opacity = String(o.opacity / 100);
+      b.setAttribute('aria-label', (web ? o.id : U.draw.kind(o) + ' ' + o.id + ', ' + U.draw.name(o)) + ', X ' + (o.x || 0) + ', Y ' + (o.y || 0) + (ro() ? '' : '. Arrow keys move 1 px, Shift 10 px.'));
+      b.innerHTML = (web ? '<img alt="" hidden>' : U.draw.svg(o, S.draft, 'ovs-' + o.id)) + '<span class="pg-name">' + U.esc(o.id) + (draft || edited(o.id) ? ', unsaved' : '') + '</span>' +
+        (sel && resizable(o) ? '<i class="h nw" data-g="nw"></i><i class="h ne" data-g="ne"></i><i class="h sw" data-g="sw"></i><i class="h se" data-g="se"></i>' : '');
+      if (web && S.captures[o.id]) { b.querySelector('img').src = S.captures[o.id]; b.querySelector('img').hidden = false; }
+      if (web && o.opacity != null && o.opacity >= 0) b.querySelector('img').style.opacity = String(o.opacity / 100);
       frame.appendChild(b);
       position(b, o, s);
       b.addEventListener('pointerdown', function (e) { startDrag(e, o.id, e.target.getAttribute('data-g')); });
@@ -442,11 +455,13 @@
   }
 
   function position(b, o, s) {
-    var z = size(o);
-    b.style.left = (100 * (o.x || 0) / s.w) + '%';
-    b.style.top = (100 * (o.y || 0) / s.h) + '%';
+    var z = area(o);
+    b.style.left = (100 * z.x / s.w) + '%';
+    b.style.top = (100 * z.y / s.h) + '%';
     b.style.width = (100 * z.w / s.w) + '%';
     b.style.height = (100 * z.h / s.h) + '%';
+    // text, shapes and images draw as they change, a page keeps its capture
+    if (o.type !== 'webPage') { var g = b.querySelector('.lyr-svg'); if (g) g.outerHTML = U.draw.svg(o, S.draft, 'ovs-' + o.id); }
   }
 
   function renderCoords() {
@@ -455,7 +470,7 @@
       (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + (o.y || 0) + ' &middot; ' + z.w + ' x ' + z.h + '</span>' : '');
     var outside = o && s.known && ((o.x || 0) >= s.w || (o.y || 0) >= s.h);
     el.outside.hidden = !outside;
-    if (outside) el.outside.textContent = 'Page ' + o.id + ' starts at ' + (o.x || 0) + ', ' + (o.y || 0) + ', outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '). Move it under Place.';
+    if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' starts at ' + (o.x || 0) + ', ' + (o.y || 0) + ', outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '). Move it under Place.';
   }
 
   function select(id, keepFocus) {
@@ -476,23 +491,26 @@
     }
     var frame = el.stage.querySelector('[data-frame]');
     var box = frame.querySelector('.pg[data-id="' + CSS.escape(id) + '"]');
-    var o = byId(id), s = src(), scale = frame.clientWidth / s.w, z = size(o);
-    var st = { x: e.clientX, y: e.clientY, ox: o.x || 0, oy: o.y || 0, ow: z.w, oh: z.h }, moved = false;
+    var o = byId(id), s = src(), scale = frame.clientWidth / s.w, z = area(o);
+    var st = { x: e.clientX, y: e.clientY, ox: z.x, oy: z.y, ow: z.w, oh: z.h, from: clone(o) }, moved = false;
     box.setPointerCapture(e.pointerId);
     function move(ev) {
       if (!moved) { snapshot(); moved = true; }
       var dx = (ev.clientX - st.x) / scale, dy = (ev.clientY - st.y) / scale;
       var x = st.ox, y = st.oy, w = st.ow, h = st.oh;
-      if (!grip) { x += dx; y += dy; }
-      else {
+      if (!grip) {
+        // the whole layer stays on the frame: its area is clamped, and every point moves by the same amount
+        dx = Math.max(-st.ox, Math.min(dx, s.w - st.ow - st.ox)); dy = Math.max(-st.oy, Math.min(dy, s.h - st.oh - st.oy));
+        shift(o, st.from, dx, dy);
+      } else {
         if (grip.indexOf('w') >= 0) { x += dx; w -= dx; }
         if (grip.indexOf('e') >= 0) w += dx;
         if (grip.indexOf('n') >= 0) { y += dy; h -= dy; }
         if (grip.indexOf('s') >= 0) h += dy;
+        w = Math.max(2, Math.min(w, s.w)); h = Math.max(2, Math.min(h, s.h));
+        x = Math.max(0, Math.min(x, s.w - w)); y = Math.max(0, Math.min(y, s.h - h));
+        o.x = even(x); o.y = even(y); o.w = even(w); o.h = even(h);
       }
-      w = Math.max(2, Math.min(w, s.w)); h = Math.max(2, Math.min(h, s.h));
-      x = Math.max(0, Math.min(x, s.w - w)); y = Math.max(0, Math.min(y, s.h - h));
-      o.x = even(x); o.y = even(y); o.w = even(w); o.h = even(h);
       position(box, o, s); afterMove();
     }
     function up() {
@@ -517,28 +535,30 @@
     var o = S.layer && byId(S.layer);
     if (!o) return;
     snapshot('nudge');
-    var s = src(), z = size(o);
-    o.x = Math.max(0, Math.min((o.x || 0) + dx, s.w - z.w));
-    o.y = Math.max(0, Math.min((o.y || 0) + dy, s.h - z.h));
+    var s = src(), z = area(o);
+    shift(o, clone(o), Math.max(-z.x, Math.min(dx, s.w - z.w - z.x)), Math.max(-z.y, Math.min(dy, s.h - z.h - z.y)));
     var box = el.stage.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]');
     if (box) { position(box, o, s); box.classList.add('draft'); }
     renderCoords(); syncPlacement(); renderBar(); markEdited(); renderCaption(); U.changed();
   }
 
-  /* ---------- pages ---------- */
+  /* ---------- layers ---------- */
   function renderLayers() {
     var list = sorted();
     el.pagesAdd.hidden = ro() || !S.draft;
     if (!list.length) {
-      el.layers.innerHTML = '<p class="small faint lpages-empty">No pages yet.</p>';
+      el.layers.innerHTML = '<p class="small faint lpages-empty">No layers yet.</p>';
       return;
     }
     el.layers.innerHTML = list.map(function (o, i) {
-      return '<div class="prow" data-id="' + U.esc(o.id) + '"' + (ro() ? '' : ' draggable="true"') + ' tabindex="0" role="button" aria-selected="' + (o.id === S.layer) + '" title="' + (ro() ? '' : 'Drag to reorder; the top page draws on top') + '">' +
-        '<div class="thumb"><img alt="" hidden></div><div style="min-width:0"><div class="nm"><span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) +
-        (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + pageTag(o.id) + '</div>' +
-        '<div class="sub">' + U.esc(o.type === 'webPage' ? host(o.url) : o.type) + '</div></div>' +
-        U.rowMenuHtml('page:' + o.id, 'Actions for page ' + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], ['reload', 'Reload page', false, o.type !== 'webPage' || !savedById(o.id)], '-', ['rm', 'Remove page', true]]) + '</div>';
+      var web = o.type === 'webPage', kind = U.draw.kind(o);
+      // a page by its id and host, as before; any other layer by what it shows, with its kind and id under it
+      return '<div class="prow" data-id="' + U.esc(o.id) + '"' + (ro() ? '' : ' draggable="true"') + ' tabindex="0" role="button" aria-selected="' + (o.id === S.layer) + '" title="' + (ro() ? '' : 'Drag to reorder; the top layer draws on top') + '">' +
+        (web ? '<div class="thumb"><img alt="" hidden></div>' : '<div class="thumb kind" title="' + U.esc(kind) + '">' + U.icon(U.draw.icon(o)) + '</div>') +
+        '<div style="min-width:0"><div class="nm">' + (web ? '<span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) : '<span class="lname">' + U.esc(U.draw.name(o)) + '</span>') +
+        (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + (web ? pageTag(o.id) : '') + '</div>' +
+        '<div class="sub">' + U.esc(web ? host(o.url) : kind.charAt(0).toUpperCase() + kind.slice(1) + ', ' + o.id) + '</div></div>' +
+        U.rowMenuHtml('page:' + o.id, 'Actions for ' + (web ? 'page ' : 'layer ') + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], ['reload', 'Reload page', false, !web || !savedById(o.id)], '-', ['rm', web ? 'Remove page' : 'Remove layer', true]]) + '</div>';
     }).join('');
     var dragId = null;
     el.layers.querySelectorAll('.prow').forEach(function (l) {
@@ -605,7 +625,7 @@
     S.draft.objects = objects().filter(function (x) { return x.id !== id; });
     if (S.layer === id) { var top = sorted()[0]; S.layer = top ? top.id : null; }
     renderEditor();
-    U.toast('Removed page ' + id + ' from the draft. Viewers keep it until Save.', { undo: function () { S.redo = []; restore(before); S.layer = id; renderLayers(); renderInspector(); placeBoxes(); } });
+    U.toast('Removed ' + (o.type === 'webPage' ? 'page ' : 'layer ') + id + ' from the draft. Viewers keep it until Save.', { undo: function () { S.redo = []; restore(before); S.layer = id; renderLayers(); renderInspector(); placeBoxes(); } });
   }
 
   function urlProblem(url) {
@@ -656,8 +676,8 @@
     if (S.adding) { renderAddPage(); return; }
     var h = '';
     if (!o) {
-      h = '<div class="pnl-h"><div><h3>No page selected</h3><span class="small faint">' + U.esc(S.name) + '</span></div></div>' +
-        '<section><p class="small muted">Select a page in the list or on the canvas' + (ro() ? '.' : ', or add the page with the clock and score.') + '</p>' +
+      h = '<div class="pnl-h"><div><h3>No layer selected</h3><span class="small faint">' + U.esc(S.name) + '</span></div></div>' +
+        '<section><p class="small muted">Select a layer in the list or on the canvas' + (ro() ? '.' : ', or add the page with the clock and score.') + '</p>' +
         (ro() ? '' : '<p style="margin-top:12px"><button type="button" class="btn sm" data-addpage>' + U.icon('plus') + 'Add page</button></p>') + '</section>';
     } else {
       var web = o.type === 'webPage', z = size(o), s = src(), past = (o.x || 0) + z.w > s.w * 0.95 || (o.y || 0) + z.h > s.h * 0.95;
@@ -666,7 +686,7 @@
         '<button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
       var tabs = web ? [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']] : [['place', 'Place']];
       if (!tabs.some(function (t) { return t[0] === S.inspTab; })) S.inspTab = tabs[0][0];
-      h += '<div class="itabs" role="tablist" aria-label="Page settings">' + tabs.map(function (t) {
+      h += '<div class="itabs" role="tablist" aria-label="' + (web ? 'Page' : 'Layer') + ' settings">' + tabs.map(function (t) {
         return '<button type="button" role="tab" data-itab="' + t[0] + '" aria-selected="' + (S.inspTab === t[0]) + '" tabindex="' + (S.inspTab === t[0] ? 0 : -1) + '">' + t[1] + '</button>'; }).join('') + '</div>';
       var body = '';
       if (S.inspTab === 'page') body = fieldHtml('url', o.url, { saved: sv.url }) +
@@ -677,13 +697,13 @@
         fieldHtml('w', z.w, { noHelp: true, saved: sv.id ? size(sv).w : undefined }) + fieldHtml('h', z.h, { noHelp: true, saved: sv.id ? size(sv).h : undefined }) + '</div>' +
         fieldHtml('opacity', o.opacity == null || o.opacity < 0 ? 100 : o.opacity, { noHelp: true }) +
         '<div class="hrow chips">' + (past ? '<span class="bdg warn">Past title safe</span>' : '<span class="bdg">Inside title safe</span>') +
-        '<span class="bdg">Source ' + s.w + ' x ' + s.h + '</span>' + (ro() ? '' : U.tip('Drag the page on the canvas; its corners resize it. Arrow keys move 1 px, Shift 10 px. Positions are in source pixels.')) + '</div>' + (ro() ? U.roNote() : '');
+        '<span class="bdg">Source ' + s.w + ' x ' + s.h + '</span>' + (ro() ? '' : U.tip('Drag the layer on the canvas; its corners resize it. Arrow keys move 1 px, Shift 10 px. Positions are in source pixels.')) + '</div>' + (ro() ? U.roNote() : '');
       else if (S.inspTab === 'look') body = keyHtml(o, sv);
       else if (S.inspTab === 'time') body = '<div class="grid2">' + fieldHtml('pageDelay', o.pageDelay, { saved: sv.pageDelay }) + fieldHtml('reloadRate', o.reloadRate, { saved: sv.reloadRate }) + '</div>';
       if (web && capNote(o.id) === 'bad') h += '<section><div class="note bad" data-capnote><span class="dot bad"></span><div>' + capLine(o.id) + '</div></div></section>';
       if (body) h += '<section>' + body + '</section>';
     }
-    if (!o || !web) h += '<section>' + (o ? '' : '<div class="sec-h">Every page of ' + U.esc(S.name) + '</div>') + overlaySettings(d) + U.roNote() + '</section>';
+    if (!o || !web) h += '<section>' + (o ? '' : '<div class="sec-h">Every layer of ' + U.esc(S.name) + '</div>') + overlaySettings(d) + U.roNote() + '</section>';
     el.insp.innerHTML = h;
     el.insp.querySelectorAll('details[data-ovadv]').forEach(function (x) { x.addEventListener('toggle', function () { S.advOpen = x.open; }); });
     // a named speed fills in the exact value beside it, so the draft, Save and Revert treat it as that field
@@ -892,7 +912,7 @@
     var ask = !losing.length ? Promise.resolve(true) : U.confirm(S.name + ' disappears from ' + losing.join(', ') + '?', '<ul>' + losing.map(function (n) {
       var r = U.streamRow(n), v = U.viewers(r);
       return '<li><b>' + U.esc(S.name) + ' disappears' + (v != null ? ' for ' + U.viewersText(v) : '') + ' now</b> on ' + U.esc(n) + '.</li>';
-    }).join('') + '</ul><p>The draft has no pages left.</p>', 'Save', false);
+    }).join('') + '</ul><p>The draft has no layers left.</p>', 'Save', false);
     return ask.then(function (ok) {
       if (!ok) return false;
       var body = {};
@@ -940,7 +960,7 @@
       U.toast('Templates carry ' + name + ': ' + tpls.join(', ') + (live.length ? ', and ' + live.join(', ') + ' show it' : '') + '. Take it off those templates first, so no stream names an overlay that does not exist.', { level: 'bad' });
       return;
     }
-    U.confirm('Delete overlay ' + name + '?', '<p>Its pages and placement are deleted. No template carries it, so no stream changes. This cannot be undone.</p>', 'Delete overlay', true).then(function (ok) {
+    U.confirm('Delete overlay ' + name + '?', '<p>Its layers and placement are deleted. No template carries it, so no stream changes. This cannot be undone.</p>', 'Delete overlay', true).then(function (ok) {
       if (!ok) return;
       var near = U.neighborOf('overlay:' + name);
       U.api.del(ovPath(name)).then(function () {
@@ -963,7 +983,7 @@
     insp: true,
     init: function (box, insp) {
       box.innerHTML = '<div class="pnl"><div class="ed-h"><button type="button" class="btn sm ghost only-narrow" data-showlist aria-expanded="false"></button><h2 data-title></h2><span data-chips class="hrow"></span>' +
-        '<span class="spacer"></span><label class="small muted" for="ovs-pv">Background' + U.tip('A publishing stream to place the pages on. It does not put this overlay on that stream.') + '</label><select id="ovs-pv" data-preview></select>' +
+        '<span class="spacer"></span><label class="small muted" for="ovs-pv">Background' + U.tip('A publishing stream to place the layers on. It does not put this overlay on that stream.') + '</label><select id="ovs-pv" data-preview></select>' +
         '<label class="check small"><input type="checkbox" data-guides>Safe area</label>' +
         '<button type="button" class="btn sm only-1200" data-togglei>' + U.icon('panel') + 'Inspector</button></div>' +
         '<div class="canvas"><div data-stage></div><div class="canvas-bar"><span class="coords" data-coords></span><span class="spacer"></span><span class="hrow" data-caption></span></div>' +
@@ -1045,8 +1065,8 @@
   }
   function renderNew() {
     var starts = [['page', 'One page', 'Start from a single web page, tested before it is created']].concat((U.overlays || []).map(function (o) {
-      return ['copy:' + o.name, 'Copy of ' + o.name, (o.pages || 0) + ' page' + (o.pages === 1 ? '' : 's') + ', same positions and keys'];
-    })).concat([['empty', 'Empty', 'Add pages in the editor']]);
+      return ['copy:' + o.name, 'Copy of ' + o.name, (o.pages || 0) + ' layer' + (o.pages === 1 ? '' : 's') + ', same positions and keys'];
+    })).concat([['empty', 'Empty', 'Add layers in the editor']]);
     if (!starts.some(function (s) { return s[0] === N.start; })) N.start = 'page';
     nbox.innerHTML = '<div class="pnl formp"><div class="ed-h"><h2>New overlay in ' + U.esc(U.app) + '</h2></div><div class="pnl-b stack-4">' +
       '<div class="grid2"><div class="fld"><label class="f" for="ovs-nn">Name</label><input id="ovs-nn" type="text" data-n="name" value="' + U.esc(N.name) + '" placeholder="for example Scoreboard" autocomplete="off" spellcheck="false">' +
@@ -1133,4 +1153,6 @@
     save: function () { createOverlay(); },
     unsaved: function () { return N.name || N.url ? [{ label: 'New overlay' + (N.name ? ' ' + N.name : ''), go: 'new-overlay:' }] : []; }
   };
+  // an image or a font that has just arrived changes what text, shapes and images look like and how big they are
+  U.draw.onLoad(function () { if (U.current() === 'overlay' && S.draft) { placeBoxes(); renderCoords(); } });
 })();

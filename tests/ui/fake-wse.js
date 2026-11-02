@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 
 const FIXTURES = path.join(__dirname, 'fixtures');
+const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
 const MODULE = '/v1/server/plugin/overlaystudio';
 const VH = '/vhosts/_defaultVHost_';
 // the version the page's script tags carry in ui/index.html; the installer stamps the release version over it
@@ -99,6 +100,8 @@ class FakeWse {
     if (r === VH + '/applications' && method === 'GET') return { applications: this.apps };
     if (r === VH + '/images') {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
+      // one image whole, as ImageLibrary.data answers: a 1 x 1 PNG standing for a 200 x 100 picture
+      if (q.get('file')) return { file: q.get('file'), width: 200, height: 100, data: 'data:image/png;base64,' + PIXEL };
       return { images: [] };
     }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/state$/.exec(r)) && method === 'GET') {

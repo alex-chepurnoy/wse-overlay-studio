@@ -359,6 +359,18 @@
 .ovs-plugin .canvas-bar { display: flex; align-items: center; gap: var(--s-3); margin-top: var(--s-2); flex-wrap: wrap; }
 .ovs-plugin .coords { display: inline-flex; gap: 6px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
 .ovs-plugin [data-caption] { gap: 4px; align-items: center; }
+/* the module's bundled fonts (module/src/main/resources/fonts, copied to fonts/ at install), so the canvas draws text in
+   the faces the video uses; a style with no file of its own is slanted or emboldened by the browser, as the module slants it */
+@font-face { font-family: "Fira Sans"; src: url("../fonts/FiraSans-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("../fonts/FiraSans-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fira Sans"; src: url("../fonts/FiraSans-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Fira Sans Condensed"; src: url("../fonts/FiraSansCondensed-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fira Sans Condensed"; src: url("../fonts/FiraSansCondensed-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fira Sans Condensed"; src: url("../fonts/FiraSansCondensed-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Fira Mono"; src: url("../fonts/FiraMono-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Fira Mono"; src: url("../fonts/FiraMono-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "PT Serif"; src: url("../fonts/PTSerif-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "PT Serif"; src: url("../fonts/PTSerif-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; font-display: swap; }
 .ovs-plugin .pg { position: absolute; border: 1px dashed rgba(255, 255, 255, .55); cursor: move; touch-action: none; }
 .ovs-plugin .pg img { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .ovs-plugin .pg.sel { border: 0; outline: 2px solid #fff; outline-offset: 2px; box-shadow: 0 0 0 4px rgba(37, 99, 235, .9); }
@@ -372,6 +384,14 @@
 .ovs-plugin .pg .h.sw { left: -7px; bottom: -7px; cursor: nesw-resize; } .ovs-plugin .pg .h.se { right: -7px; bottom: -7px; cursor: nwse-resize; }
 .ovs-plugin .pg.updating::after { content: "updating"; position: absolute; right: 3px; bottom: 3px; font-size: 11px; background: rgba(0, 0, 0, .65); color: #fff; padding: 1px 5px; border-radius: var(--r-sm); }
 .ovs-plugin[data-readonly] .pg { cursor: default; }
+/* text, shapes and images: drawn, not captured, so no box around them until selected or unsaved */
+.ovs-plugin .pg.lyr { border-color: transparent; }
+.ovs-plugin .pg.lyr.draft:not(.sel) { border: 1px dashed rgba(255, 255, 255, .7); }
+.ovs-plugin .pg .lyr-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.ovs-plugin .pg .lyr-svg .img-wait { stroke: rgba(255, 255, 255, .7); stroke-dasharray: 6 4; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ovs-plugin .thumb.kind { display: grid; place-items: center; background: var(--surface-2); color: var(--text-2); }
+.ovs-plugin .thumb.kind svg { width: 16px; height: 16px; }
+.ovs-plugin .prow .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
 /* ---------- overlay editor ---------- */
 .ovs-plugin .ed-h { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; min-height: 48px; }

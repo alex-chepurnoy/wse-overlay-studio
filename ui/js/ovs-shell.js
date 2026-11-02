@@ -205,7 +205,7 @@
       });
       var nu = unsavedFor('new-overlay:');
       if (v.screen === 'new-overlay' || nu) h.unshift(item('new-overlay:', '', 'New overlay', 'Not created yet', nu, v.screen === 'new-overlay'));
-      if (!(U.overlays || []).length) foot.innerHTML = '<p class="small faint lfoot">An overlay holds the pages to burn in, for example the scoring vendor\'s clock and score.</p>';
+      if (!(U.overlays || []).length) foot.innerHTML = '<p class="small faint lfoot">An overlay holds the layers to burn in: web pages such as the scoring vendor\'s clock and score, text, shapes and images.</p>';
     } else if (tab === 'templates') {
       var nt = unsavedFor('template:');
       if ((v.screen === 'template' && !v.id) || nt) h.push(item('template:', '', 'New master template', 'Not created yet', nt, v.screen === 'template' && !v.id));
@@ -384,12 +384,12 @@
   /* ---------- help ---------- */
   function help() {
     var rows = [['Ctrl+S', 'Save the screen in view'], ['Ctrl+Z', 'Undo an unsaved overlay edit'], ['Ctrl+Shift+Z', 'Redo'],
-      ['Delete', 'Remove the selected page from the draft (Undo in the message)'], ['Arrow keys', 'Nudge the selected page by 1 px'],
+      ['Delete', 'Remove the selected layer from the draft (Undo in the message)'], ['Arrow keys', 'Nudge the selected layer by 1 px'],
       ['Shift+Arrow keys', 'Nudge by 10 px'], ['Left, Right', 'Move between the list tabs'], ['Up, Down, Home, End', 'Move in a list'],
-      ['Escape', 'Close a drawer, menu or dialog; deselect a page'], ['?', 'This help']];
+      ['Escape', 'Close a drawer, menu or dialog; deselect a layer'], ['?', 'This help']];
     U.choose('How Overlay Studio works', '<p>A camera publishes a stream to a Wowza application. The application\'s transcoder loads a ' +
       '<strong>transcoder template</strong> for the stream, which decodes it, draws the overlay and makes the outputs viewers watch, ' +
-      'for example <code>stream_720p</code>. An <strong>overlay</strong> holds the web pages to draw; a template names the overlay it draws.</p>' +
+      'for example <code>stream_720p</code>. An <strong>overlay</strong> holds the layers to draw: web pages, text, date and time, shapes and images; a template names up to four overlays.</p>' +
       '<p>You edit a <strong>master template</strong>. Putting it on a stream gives that stream its own copy, so a stream changes only when its copy is updated from the master.</p>' +
       '<p>Nothing is written while you edit. Each screen has one save bar at the bottom, for that screen\'s object only. Unsaved work stays while this page is open.</p>' +
       '<h4>Keyboard</h4><div class="shortcuts">' + rows.map(function (r) {

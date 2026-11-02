@@ -15,7 +15,10 @@ const UI = path.join(__dirname, '..', '..', 'ui');
 const ORIGIN = 'http://wse.test';
 const HOST = ORIGIN + '/enginemanager/overlay-studio';
 const PLUGIN = '/enginemanager/wse-plugins/server/overlay-studio/';
-const TYPES = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const TYPES = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
+  '.ttf': 'font/ttf' };
+// the installer copies the module's bundled fonts to the page's fonts/ folder; here they are served from where they live
+const FONTS = path.join(__dirname, '..', '..', 'module', 'src', 'main', 'resources', 'fonts');
 
 function hostPage() {
   // the Manager's own page around the plugin: a full document with the plugin's markup inside its content area
@@ -42,8 +45,9 @@ const test = base.test.extend({
         return route.fulfill({ status: 200, contentType: 'text/html', body: hostPage() });
       }
       if (url.origin === ORIGIN && url.pathname.startsWith(PLUGIN)) {
-        const file = path.join(UI, decodeURIComponent(url.pathname.slice(PLUGIN.length)));
-        if (!file.startsWith(UI) || !fs.existsSync(file)) return route.fulfill({ status: 404, body: '' });
+        const rel = decodeURIComponent(url.pathname.slice(PLUGIN.length));
+        const file = rel.startsWith('fonts/') ? path.join(FONTS, rel.slice(6)) : path.join(UI, rel);
+        if (!(file.startsWith(UI) || file.startsWith(FONTS)) || !fs.existsSync(file)) return route.fulfill({ status: 404, body: '' });
         return route.fulfill({ status: 200, contentType: TYPES[path.extname(file)] || 'application/octet-stream', body: fs.readFileSync(file) });
       }
       if (url.origin === ORIGIN && url.pathname.startsWith('/enginemanager/overlaystudio-api/')) return route.fallback();

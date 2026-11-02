@@ -53,6 +53,21 @@ class ImageLibraryTest
 		assertTrue(Files.exists(vhost.resolve("content/house.png")));
 	}
 
+	// the editor's canvas draws an image layer from this (plan 4.4)
+	@Test
+	void oneImageIsGivenWholeWithItsSize() throws Exception
+	{
+		ImageLibrary.save(vhost, "logo.png", png(200, 100));
+		Map<String, Object> d = ImageLibrary.data(vhost, "overlaystudio/logo.png");
+		assertEquals(200, d.get("width"));
+		assertEquals(100, d.get("height"));
+		String data = (String)d.get("data");
+		assertTrue(data.startsWith("data:image/png;base64,"), data.substring(0, 30));
+		assertEquals(200, ImageIO.read(new java.io.ByteArrayInputStream(Base64.getDecoder().decode(data.substring(data.indexOf(',') + 1)))).getWidth());
+		assertEquals(404, assertThrows(TemplateFiles.Refused.class, () -> ImageLibrary.data(vhost, "overlaystudio/gone.png")).status());
+		assertEquals(400, assertThrows(TemplateFiles.Refused.class, () -> ImageLibrary.data(vhost, "../secrets.png")).status());
+	}
+
 	@Test
 	void onlyImagesWseCanLoadAreSaved() throws Exception
 	{
