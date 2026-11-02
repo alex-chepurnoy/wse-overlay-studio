@@ -24,6 +24,7 @@ import com.wowza.wms.mediacaster.MediaCasterItem;
 import com.wowza.wms.mediacaster.MediaCasterStreamId;
 import com.wowza.wms.module.ModuleBase;
 import com.wowza.wms.plugin.overlaystudio.rest.OverlayConfig;
+import com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator;
 import com.wowza.wms.rest.ConfigBase;
 import com.wowza.wms.rest.vhosts.VHostsConfig;
 import com.wowza.wms.stream.IMediaStream;
@@ -59,8 +60,12 @@ public class OverlayStudioModule extends ModuleBase
 
 	private boolean debugOverlayLogs = false;
 	private int maxDebugOverlayLogs = 100;
-	// overlay slot used when an overlay's own overlayIndex is 0; OverlayStudioIndex in Application.xml
+	/** Overlays one stream shows, one per template slot (plan 3.9). */
+	static final int SLOTS = TemplateValidator.SLOTS;
+	// the transcoder overlay index of slot 1; slot n draws at this + n - 1. OverlayStudioIndex in Application.xml
 	private int appOverlayIndex = OverlayConfig.DEFAULT_OVERLAY_INDEX;
+	// why OverlayStudioIndex was not used, for /status; null when it was or is not set
+	private String indexProblem = null;
 	// kept apart from StreamInfo, which is removed when the transcoder stops, so status can still say "stopped"
 	private final java.util.Map<String, String> transcoderStates = new java.util.concurrent.ConcurrentHashMap<>();
 	private final java.util.Map<String, List<EncoderInfo>> encodersByStream = new java.util.concurrent.ConcurrentHashMap<>();
@@ -71,8 +76,9 @@ public class OverlayStudioModule extends ModuleBase
 	// the template file each stream's transcoder loaded, and what its outputs were then (structure(), not the overlay)
 	private final java.util.Map<String, File> streamTemplateFiles = new java.util.concurrent.ConcurrentHashMap<>();
 	private final java.util.Map<String, String> streamStructure = new java.util.concurrent.ConcurrentHashMap<>();
-	private final java.util.Map<String, String> streamOverlayNames = new java.util.concurrent.ConcurrentHashMap<>();
-	private final java.util.Map<String, List<String>> streamOverlayEncodes = new java.util.concurrent.ConcurrentHashMap<>();
+	// per stream, the overlays its template names, by slot (overlayStudio1 to 4 and their encodes)
+	private final java.util.Map<String, List<TemplateValidator.Slot>> streamSlots = new java.util.concurrent.ConcurrentHashMap<>();
+	// stream#slot whose named overlay does not exist, so the warning is logged once
 	private final java.util.Set<String> missingOverlays = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	// running modules, so an edit to a named overlay reaches every stream using it
 	private static final java.util.Set<OverlayStudioModule> RUNNING = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -87,7 +93,8 @@ public class OverlayStudioModule extends ModuleBase
 		m.put("stream", streamName);
 		OverlayImage overlay = getOverlayImage(streamName);
 		m.put("configured", overlay != null);
-		m.put("overlayIndex", overlay == null ? null : (overlay.getOverlayIndex() > 0 ? overlay.getOverlayIndex() : appOverlayIndex));
+		m.put("overlayIndex", overlay == null ? null : appOverlayIndex);
+		m.put("indexProblem", indexProblem);
 
 		java.util.Map<String, Object> transcoder = new java.util.LinkedHashMap<>();
 		transcoder.put("state", transcoderStates.getOrDefault(streamName, "not-started"));
@@ -122,10 +129,11 @@ public class OverlayStudioModule extends ModuleBase
 		}
 		m.put("template", tpl);
 		java.util.Map<String, Object> from = new java.util.LinkedHashMap<>();
-		String named = streamOverlayNames.get(streamName);
+		TemplateValidator.Slot first = slot(streamName, 1);
+		String named = first == null ? null : first.name();
 		from.put("source", named != null ? "template" : (overlay != null ? "stream" : null));
 		from.put("name", named);
-		from.put("missing", named != null && missingOverlays.contains(streamName));
+		from.put("missing", named != null && missingOverlays.contains(streamName + "#1"));
 		m.put("overlayFrom", from);
 
 		m.put("draw", overlay == null ? null : overlay.drawStats());
@@ -195,18 +203,27 @@ public class OverlayStudioModule extends ModuleBase
 		private volatile long transcoderStartedAt = 0;
 		// Last crop warning emitted, used to avoid logging on every refresh of the same overlay.
 		private volatile String lastCropWarning = null;
-		private OverlayImage streamOverlayImage = null;
+		// one per template slot; slot 1 is also the per-stream REST overlay's
+		private final SlotState[] slots = { new SlotState(), new SlotState(), new SlotState(), new SlotState() };
+		// the draw queue (slot 1 only)
 		private final Queue<OverlayImage> overlayImageQueue = new LinkedList<>();;
 		private volatile boolean queueDrawings = false;
 		private OverlayImage lastQueuedOverlayImage = null;
 		private final ArrayList<IOverlayListener> overlayListeners = new ArrayList<>();
-		private int lastOverlayIndex = OverlayConfig.DEFAULT_OVERLAY_INDEX;
+	}
+
+	/** What one slot of a stream shows and where it last put it; image under the StreamInfo lock, the rest on the transcoder thread. */
+	static class SlotState
+	{
+		private OverlayImage image = null;
 		private UUID lastImageUuid = new UUID(0L,0L);
-		// the content each target last got: SOURCE_TARGET, or ENCODE_TARGET + the encode's name; transcoder thread only
+		// the content each target last got: SOURCE_TARGET, or ENCODE_TARGET + the encode's name
 		private final HashMap<String, UUID> sent = new HashMap<>();
 		private final HashMap<String, Boolean> overlayOnEncode = new HashMap<>();
 		private boolean overlayOnSource = false;
-		private boolean overlayOnEncodes =false;		
+		private boolean overlayOnEncodes = false;
+		// the transparent first-use fill has been put in this slot
+		private boolean filled = false;
 	}
 
     public OverlayStudioModule() {
@@ -226,10 +243,12 @@ public class OverlayStudioModule extends ModuleBase
 		initTransparentOverlay = this.appInstance.getProperties().getPropertyBoolean("OverlayStudioInitTransparentOverlay",
 				initTransparentOverlay);
 		maxDebugOverlayLogs = this.appInstance.getProperties().getPropertyInt("OverlayStudioMaxDebugOverlayLogs",maxDebugOverlayLogs);
-		appOverlayIndex = this.appInstance.getProperties().getPropertyInt("OverlayStudioIndex", appOverlayIndex);
-		if(appOverlayIndex <= 0)
+		int index = this.appInstance.getProperties().getPropertyInt("OverlayStudioIndex", 0);
+		indexProblem = indexProblem(index);
+		appOverlayIndex = index > 0 && indexProblem == null ? index : OverlayConfig.DEFAULT_OVERLAY_INDEX;
+		if(indexProblem != null)
 		{
-			appOverlayIndex = OverlayConfig.DEFAULT_OVERLAY_INDEX;
+			logger.warn(logPrefix + indexProblem);
 		}
 		RUNNING.add(this);
 	}
@@ -241,49 +260,103 @@ public class OverlayStudioModule extends ModuleBase
 	}
 
 	/**
-	 * Applies the named overlay this stream's template names, from its file, replacing what the stream shows. The
-	 * template decides which encodes carry it: none listed means drawn on the source, so every encode gets it.
+	 * Why OverlayStudioIndex cannot be used, or null (0, not set, is fine): its four slots must stay clear of the
+	 * template's image overlays, indexes 1 to 8 (plan 3.9). VIF is never drawn on with this module (isVifSession).
+	 */
+	static String indexProblem(int index)
+	{
+		if(index > 0 && index <= 8)
+		{
+			return "OverlayStudioIndex " + index + " would put overlay slots " + index + " to " + (index + SLOTS - 1)
+					+ " on the template's image overlays (1 to 8); using " + OverlayConfig.DEFAULT_OVERLAY_INDEX + " instead";
+		}
+		return null;
+	}
+
+	/** The transcoder overlay index slot n (1 to SLOTS) draws at. */
+	int overlayIndex(int slot)
+	{
+		return appOverlayIndex + slot - 1;
+	}
+
+	/** The overlay the stream's template names in this slot, or null. */
+	TemplateValidator.Slot slot(String streamName, int slot)
+	{
+		for(TemplateValidator.Slot x: streamSlots.getOrDefault(streamName, List.of()))
+		{
+			if(x.slot() == slot)
+			{
+				return x;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Applies every overlay this stream's template names, from their files, each in its slot, and clears the slots
+	 * it names nothing in. Each template slot decides which encodes carry it: none listed means drawn on the source,
+	 * so every encode gets it.
 	 * @return false when the stream's template names no overlay
 	 */
 	private boolean applyNamedOverlay(String streamName)
 	{
-		String name = streamOverlayNames.get(streamName);
-		if(name == null)
+		List<TemplateValidator.Slot> slots = streamSlots.get(streamName);
+		if(slots == null || slots.isEmpty())
 		{
 			return false;
 		}
+		for(int n = 1; n <= SLOTS; n++)
+		{
+			TemplateValidator.Slot x = slot(streamName, n);
+			if(x == null)
+			{
+				clearOverlayImage(streamName, n);
+			}
+			else
+			{
+				applyNamedOverlay(streamName, x);
+			}
+		}
+		return true;
+	}
+
+	/** Applies one template slot's named overlay from its file, replacing what that slot shows. */
+	private void applyNamedOverlay(String streamName, TemplateValidator.Slot x)
+	{
+		String name = x.name();
+		String key = streamName + "#" + x.slot();
 		try
 		{
 			File f = com.wowza.wms.plugin.overlaystudio.templates.OverlayStore.file(overlayDir(), name).toFile();
 			if(!f.isFile())
 			{
-				if(missingOverlays.add(streamName))
+				if(missingOverlays.add(key))
 				{
-					logger.warn(logPrefix + "stream " + streamName + ": its template names overlay '" + name + "', which does not exist");
+					logger.warn(logPrefix + "stream " + streamName + ": its template names overlay '" + name + "' in slot " + x.slot() + ", which does not exist");
 				}
-				clearOverlayImage(streamName);
-				return true;
+				clearOverlayImage(streamName, x.slot());
+				return;
 			}
-			missingOverlays.remove(streamName);
+			missingOverlays.remove(key);
 			OverlayConfig cfg = OverlayConfig.loadStreamFile(f, appInstance.getVHost().getName(), appName, appInstance.getName(), streamName);
 			cfg.setNamedOverlay(name);
-			List<String> enc = streamOverlayEncodes.getOrDefault(streamName, List.of());
-			cfg.setOverlaySource(enc.isEmpty());
-			cfg.setOverlayEncodes(new ArrayList<>(enc));
+			cfg.setSlot(x.slot());
+			cfg.setOverlaySource(x.encodes().isEmpty());
+			cfg.setOverlayEncodes(new ArrayList<>(x.encodes()));
 			cfg.saveNewObject();
 			// read after the new image is in place, so a live write meanwhile reaches either it or this read (plan 3.6)
-			OverlayImage img = getOverlayImage(streamName);
+			OverlayImage img = getOverlayImage(streamName, x.slot());
 			if(img != null)
 			{
 				img.getOverlayConfig().applyLive(LiveValues.get(new LiveValues.Key(appInstance.getVHost().getName(), appName, name), overlayDir()));
 			}
-			logger.info(logPrefix + "stream " + streamName + ": overlay '" + name + "' from its template, " + (enc.isEmpty() ? "on every encode" : "on " + enc));
+			logger.info(logPrefix + "stream " + streamName + ": overlay '" + name + "' from its template in slot " + x.slot() + " (index " + overlayIndex(x.slot()) + "), "
+					+ (x.encodes().isEmpty() ? "on every encode" : "on " + x.encodes()));
 		}
 		catch(Exception e)
 		{
-			logger.error(logPrefix + "stream " + streamName + ": could not apply overlay '" + name + "': " + e);
+			logger.error(logPrefix + "stream " + streamName + ": could not apply overlay '" + name + "' in slot " + x.slot() + ": " + e);
 		}
-		return true;
 	}
 
 	/**
@@ -301,13 +374,19 @@ public class OverlayStudioModule extends ModuleBase
 			{
 				continue;
 			}
-			for(java.util.Map.Entry<String, String> e: mod.streamOverlayNames.entrySet())
+			for(java.util.Map.Entry<String, List<TemplateValidator.Slot>> e: mod.streamSlots.entrySet())
 			{
-				OverlayImage img = key.name().equals(e.getValue()) ? mod.getOverlayImage(e.getKey()) : null;
-				if(img != null)
+				for(TemplateValidator.Slot x: e.getValue())
 				{
-					img.getOverlayConfig().applyLive(LiveValues.get(key, mod.overlayDir()));
-					out.add(e.getKey());
+					OverlayImage img = key.name().equals(x.name()) ? mod.getOverlayImage(e.getKey(), x.slot()) : null;
+					if(img != null)
+					{
+						img.getOverlayConfig().applyLive(LiveValues.get(key, mod.overlayDir()));
+						if(!out.contains(e.getKey()))
+						{
+							out.add(e.getKey());
+						}
+					}
 				}
 			}
 		}
@@ -316,7 +395,7 @@ public class OverlayStudioModule extends ModuleBase
 
 	/**
 	 * After a named overlay is saved or deleted: re-applies it to every running stream of this application whose
-	 * template names it.
+	 * template names it, in whichever slot.
 	 * @return the streams updated
 	 */
 	public static List<String> reapplyNamedOverlay(String vhostName, String appName, String name)
@@ -329,12 +408,22 @@ public class OverlayStudioModule extends ModuleBase
 			{
 				continue;
 			}
-			for(java.util.Map.Entry<String, String> e: mod.streamOverlayNames.entrySet())
+			for(java.util.Map.Entry<String, List<TemplateValidator.Slot>> e: mod.streamSlots.entrySet())
 			{
-				if(name.equals(e.getValue()) && "running".equals(mod.transcoderStates.get(e.getKey())))
+				if(!"running".equals(mod.transcoderStates.get(e.getKey())))
 				{
-					mod.applyNamedOverlay(e.getKey());
-					out.add(e.getKey());
+					continue;
+				}
+				for(TemplateValidator.Slot x: e.getValue())
+				{
+					if(name.equals(x.name()))
+					{
+						mod.applyNamedOverlay(e.getKey(), x);
+						if(!out.contains(e.getKey()))
+						{
+							out.add(e.getKey());
+						}
+					}
 				}
 			}
 		}
@@ -386,9 +475,9 @@ public class OverlayStudioModule extends ModuleBase
 
 	/**
 	 * After a template file is written: every running stream of this virtual host whose transcoder loaded that file
-	 * takes the overlay it now names, and on which outputs, at once. The module draws through the transcoder's dynamic
+	 * takes the overlays it now names, in their slots and on their outputs, at once. The module draws through the transcoder's dynamic
 	 * overlays on every output it registered at start, so this needs no restart; outputs need one (outputsChanged).
-	 * @return per stream: application, stream, the overlay now shown, and whether its outputs wait for a restart
+	 * @return per stream: application, stream, the overlays now shown, and whether its outputs wait for a restart
 	 */
 	public static List<java.util.Map<String, Object>> reloadTemplateFile(String vhostName, java.nio.file.Path file)
 	{
@@ -408,36 +497,32 @@ public class OverlayStudioModule extends ModuleBase
 				{
 					continue;
 				}
-				String name = null;
-				List<String> encs = new ArrayList<>();
+				TemplateValidator.Result r;
 				try(java.io.InputStream in = new java.io.FileInputStream(target))
 				{
-					com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator.Result r = com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator.validate(in);
-					name = r.overlay();
-					encs.addAll(r.overlayEncodes());
+					r = TemplateValidator.validate(in);
 				}
 				catch(Exception ex)
 				{
 					mod.logger.warn(mod.logPrefix + "stream " + stream + ": could not read " + target + " after it changed: " + ex);
 					continue;
 				}
-				if(name != null)
+				if(!r.overlays().isEmpty())
 				{
-					mod.streamOverlayNames.put(stream, name);
-					mod.streamOverlayEncodes.put(stream, encs);
+					mod.streamSlots.put(stream, r.overlays());
 					mod.applyNamedOverlay(stream);
 				}
 				else
 				{
-					mod.streamOverlayNames.remove(stream);
-					mod.streamOverlayEncodes.remove(stream);
-					mod.clearOverlayImage(stream);
+					mod.streamSlots.remove(stream);
+					mod.clearOverlayImages(stream);
 					mod.logger.info(mod.logPrefix + "stream " + stream + ": its template now names no overlay; cleared");
 				}
 				java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
 				m.put("application", mod.appName);
 				m.put("stream", stream);
-				m.put("overlay", name);
+				m.put("overlays", TemplateValidator.toMaps(r.overlays()));
+				m.put("overlay", r.overlay());
 				m.put("outputsChanged", mod.outputsChanged(stream));
 				out.add(m);
 			}
@@ -503,7 +588,12 @@ public class OverlayStudioModule extends ModuleBase
 		return false;
 	}
 
-	/** Running streams of this application whose template names this overlay. */
+	/** Whether this stream's template names the overlay in any slot. */
+	private boolean names(String streamName, String overlay)
+	{
+		return streamSlots.getOrDefault(streamName, List.of()).stream().anyMatch(x -> x.name().equals(overlay));
+	}
+
 	/** The source size, {w, h}, of a running stream showing the overlay, or null when none does or it is not known yet. */
 	public static int[] sourceSize(String vhostName, String appName, String name)
 	{
@@ -514,17 +604,18 @@ public class OverlayStudioModule extends ModuleBase
 			{
 				continue;
 			}
-			for(java.util.Map.Entry<String, String> e: mod.streamOverlayNames.entrySet())
+			for(String stream: mod.streamSlots.keySet())
 			{
-				if(name.equals(e.getValue()) && mod.getSourceWidth(e.getKey()) > 0 && mod.getSourceHeight(e.getKey()) > 0)
+				if(mod.names(stream, name) && mod.getSourceWidth(stream) > 0 && mod.getSourceHeight(stream) > 0)
 				{
-					return new int[] { mod.getSourceWidth(e.getKey()), mod.getSourceHeight(e.getKey()) };
+					return new int[] { mod.getSourceWidth(stream), mod.getSourceHeight(stream) };
 				}
 			}
 		}
 		return null;
 	}
 
+	/** Running streams of this application whose template names this overlay, in any slot. */
 	public static List<String> streamsShowing(String vhostName, String appName, String name)
 	{
 		List<String> out = new ArrayList<>();
@@ -535,11 +626,11 @@ public class OverlayStudioModule extends ModuleBase
 			{
 				continue;
 			}
-			for(java.util.Map.Entry<String, String> e: mod.streamOverlayNames.entrySet())
+			for(String stream: mod.streamSlots.keySet())
 			{
-				if(name.equals(e.getValue()) && "running".equals(mod.transcoderStates.get(e.getKey())))
+				if(mod.names(stream, name) && "running".equals(mod.transcoderStates.get(stream)))
 				{
-					out.add(e.getKey());
+					out.add(stream);
 				}
 			}
 		}
@@ -809,12 +900,35 @@ public class OverlayStudioModule extends ModuleBase
 		getStreamInfo(streamName).queueDrawings = queueDrawing;
 	}
 
+	/** The overlay slot 1 shows: the template's first, or the per-stream REST overlay. */
 	public OverlayImage getOverlayImage(String streamName)
 	{
-		return getStreamInfo(streamName).streamOverlayImage;
+		return getOverlayImage(streamName, 1);
 	}
 
+	/** The overlay this slot (1 to SLOTS) shows, or null. */
+	public OverlayImage getOverlayImage(String streamName, int slot)
+	{
+		return getStreamInfo(streamName).slots[slot - 1].image;
+	}
+
+	/** Clears slot 1. */
 	public void clearOverlayImage(String streamName)
+	{
+		clearOverlayImage(streamName, 1);
+	}
+
+	/** Clears every slot. */
+	public void clearOverlayImages(String streamName)
+	{
+		for(int n = 1; n <= SLOTS; n++)
+		{
+			clearOverlayImage(streamName, n);
+		}
+	}
+
+	/** Clears one slot; the draw loop then takes its overlay off the source and every encode. */
+	public void clearOverlayImage(String streamName, int slot)
 	{
 		StreamInfo streamInfo = getStreamInfo(streamName);
 		OverlayImage oldImage;
@@ -822,8 +936,8 @@ public class OverlayStudioModule extends ModuleBase
 		// concurrent set; otherwise a clear can drop a just-configured overlay.
 		synchronized(streamInfo)
 		{
-			oldImage = streamInfo.streamOverlayImage;
-			streamInfo.streamOverlayImage = null;
+			oldImage = streamInfo.slots[slot - 1].image;
+			streamInfo.slots[slot - 1].image = null;
 		}
 		// outside the lock: closing headless browsers can be slow
 		if(oldImage != null)
@@ -832,7 +946,13 @@ public class OverlayStudioModule extends ModuleBase
 		}
 	}
 
+	/** Sets slot 1. */
 	public void setOverlayImage(String streamName, OverlayImage overlayImage)
+	{
+		setOverlayImage(streamName, 1, overlayImage);
+	}
+
+	public void setOverlayImage(String streamName, int slot, OverlayImage overlayImage)
 	{
 		if(overlayImage == null)
 		{
@@ -842,12 +962,13 @@ public class OverlayStudioModule extends ModuleBase
 		OverlayImage oldImage;
 		synchronized(streamInfo)
 		{
-			oldImage = streamInfo.streamOverlayImage;
-			streamInfo.streamOverlayImage = overlayImage;
+			SlotState s = streamInfo.slots[slot - 1];
+			oldImage = s.image;
+			s.image = overlayImage;
 			overlayImage.setOverlayModule(this);
 			overlayImage.setStreamName(streamName);
 			overlayImage.setStreamStart(streamInfo.transcoderStartedAt);
-			streamInfo.streamOverlayImage.start();
+			s.image.start();
 		}
 		if(oldImage != null && oldImage != overlayImage)
 		{
@@ -939,7 +1060,35 @@ public class OverlayStudioModule extends ModuleBase
 		return destinationNames.stream().anyMatch(com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator.VIF_ENCODE::equals);
 	}
 
-	// Records which template the stream's transcoder loaded and the overlay it names (Transcode/Properties).
+	/**
+	 * The overlays a transcoder's properties name, overlayStudio1 to 4 with their encodes, as the validator reads
+	 * them: an overlay named twice keeps its first slot.
+	 */
+	static List<TemplateValidator.Slot> slotsFrom(java.util.function.UnaryOperator<String> property)
+	{
+		List<TemplateValidator.Slot> slots = new ArrayList<>();
+		for(int n = 1; n <= SLOTS; n++)
+		{
+			String name = property.apply(TemplateValidator.propOverlay(n));
+			if(name == null || name.isBlank() || slots.stream().anyMatch(x -> x.name().equals(name.trim())))
+			{
+				continue;
+			}
+			List<String> encs = new ArrayList<>();
+			String enc = property.apply(TemplateValidator.propEncodes(n));
+			for(String e: (enc == null ? "" : enc).split(","))
+			{
+				if(!e.trim().isEmpty())
+				{
+					encs.add(e.trim());
+				}
+			}
+			slots.add(new TemplateValidator.Slot(n, name.trim(), List.copyOf(encs)));
+		}
+		return slots;
+	}
+
+	// Records which template the stream's transcoder loaded and the overlays it names (Transcode/Properties).
 	private void noteTemplate(String streamName, LiveStreamTranscoder lst)
 	{
 		java.util.Map<String, Object> t = new java.util.LinkedHashMap<>();
@@ -962,28 +1111,16 @@ public class OverlayStudioModule extends ModuleBase
 			streamTemplateFiles.remove(streamName);
 			streamStructure.remove(streamName);
 		}
-		String name = lst.getProperties() == null ? null : lst.getProperties().getPropertyStr(
-				com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator.PROP_OVERLAY, null);
-		if(name != null && !name.isBlank())
+		List<TemplateValidator.Slot> slots = lst.getProperties() == null ? List.of() : slotsFrom(k -> lst.getProperties().getPropertyStr(k, null));
+		if(slots.isEmpty())
 		{
-			streamOverlayNames.put(streamName, name.trim());
-			String enc = lst.getProperties().getPropertyStr(com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator.PROP_ENCODES, "");
-			List<String> encs = new ArrayList<>();
-			for(String e: enc.split(","))
-			{
-				if(!e.trim().isEmpty())
-				{
-					encs.add(e.trim());
-				}
-			}
-			streamOverlayEncodes.put(streamName, encs);
+			streamSlots.remove(streamName);
 		}
 		else
 		{
-			streamOverlayNames.remove(streamName);
-			streamOverlayEncodes.remove(streamName);
+			streamSlots.put(streamName, List.copyOf(slots));
 		}
-		missingOverlays.remove(streamName);
+		missingOverlays.removeIf(k -> k.startsWith(streamName + "#"));
 	}
 
 	class OverlayTranscoderActionNotifier extends LiveStreamTranscoderActionNotifyBase
@@ -1201,13 +1338,17 @@ public class OverlayStudioModule extends ModuleBase
 			streamInfo.sourceWidth = srcWidth;
 			streamInfo.sourceHeight = srcHeight;
 			streamInfo.transcoderStartedAt = System.currentTimeMillis();
-			if(streamInfo.streamOverlayImage != null)
+			for(SlotState s: streamInfo.slots)
 			{
-				streamInfo.streamOverlayImage.setWidth(srcWidth);
-				streamInfo.streamOverlayImage.setHeight(srcHeight);
-				streamInfo.streamOverlayImage.setStreamStart(streamInfo.transcoderStartedAt);
-				// overlay may have been created before the source size was known
-				checkOverlayFitsSource(streamName, streamInfo.streamOverlayImage);
+				OverlayImage img = s.image;
+				if(img != null)
+				{
+					img.setWidth(srcWidth);
+					img.setHeight(srcHeight);
+					img.setStreamStart(streamInfo.transcoderStartedAt);
+					// overlay may have been created before the source size was known
+					checkOverlayFitsSource(streamName, img);
+				}
 			}
 		}
 
@@ -1223,16 +1364,19 @@ public class OverlayStudioModule extends ModuleBase
 			StreamInfo streamInfo = removeStreamInfo(streamName);
 			if(streamInfo != null)
 			{
-				OverlayImage oldImage;
+				List<OverlayImage> old = new ArrayList<>();
 				synchronized(streamInfo)
 				{
-					oldImage = streamInfo.streamOverlayImage;
-					streamInfo.streamOverlayImage = null;
+					for(SlotState s: streamInfo.slots)
+					{
+						if(s.image != null)
+						{
+							old.add(s.image);
+						}
+						s.image = null;
+					}
 				}
-				if(oldImage != null)
-				{
-					oldImage.dispose();
-				}
+				old.forEach(OverlayImage::dispose);
 			}
 		}
 
@@ -1245,14 +1389,11 @@ public class OverlayStudioModule extends ModuleBase
 		}
 
 
-		//The real work for putting overlays onto video
+		//The real work for putting overlays onto video: each slot on its own, in slot order (a higher slot draws on top)
 		@Override
 		public void onBeforeScaleFrame(TranscoderSessionVideo sessionVideo, TranscoderStreamSourceVideo sourceVideo,
 				long frameCount)
 		{
-
-			int overlayIndex = appOverlayIndex;
-			double scalingFactor = 1.0;
 			synchronized(lock)
 			{
 				// after shutdown a late frame must not bring the stream's entry back
@@ -1261,226 +1402,227 @@ public class OverlayStudioModule extends ModuleBase
 				{
 					return;
 				}
-
-				// on the first frame, a transparent overlay in every slot; some WSE builds otherwise also drew encode overlays on the source
-				if (frameCount == 0 && initTransparentOverlay)
+				for(int n = 1; n <= SLOTS; n++)
 				{
-					for (EncoderInfo encoderInfo : encoderInfoList)
-					{
-						if (!encoderInfo.destinationVideo.isPassThrough())
-						{
-							//fully transparent overlay
-							int frameWidth = encoderInfo.getFrameWidth();
-							int frameHeight = encoderInfo.getFrameHeight();
-							byte[] newOverlayBuffer = new byte[frameWidth*frameHeight*4];
-							TranscoderVideoOverlayFrame overlayFrame = new TranscoderVideoOverlayFrame(
-									frameWidth,
-									frameHeight,
-									newOverlayBuffer);
-							overlayFrame.setDstX(0);
-							overlayFrame.setDstY(0);
-							logger.info(logPrefix + "Adding Transparent Encode <" + encoderInfo.encodeName + "> " + "Overlay (" + overlayIndex + "): " + frameWidth + "x" + frameHeight);
-							encoderInfo.destinationVideo.addOverlay(overlayIndex, overlayFrame);
-						}
-					}
-					byte[] newOverlayBuffer = new byte[srcWidth*srcHeight*4];
-					TranscoderVideoOverlayFrame overlayFrame = new TranscoderVideoOverlayFrame(
-							srcWidth,
-							srcHeight,
-							newOverlayBuffer);
+					drawSlot(streamInfo, n, sourceVideo, frameCount);
+				}
+			}
+		}
+
+		// a fully transparent overlay in this slot on the source and every encode; some WSE builds otherwise also drew
+		// encode overlays on the source
+		private void fillTransparent(int overlayIndex, TranscoderStreamSourceVideo sourceVideo)
+		{
+			for (EncoderInfo encoderInfo : encoderInfoList)
+			{
+				if (!encoderInfo.destinationVideo.isPassThrough())
+				{
+					int frameWidth = encoderInfo.getFrameWidth();
+					int frameHeight = encoderInfo.getFrameHeight();
+					TranscoderVideoOverlayFrame overlayFrame = new TranscoderVideoOverlayFrame(frameWidth, frameHeight, new byte[frameWidth*frameHeight*4]);
 					overlayFrame.setDstX(0);
 					overlayFrame.setDstY(0);
-					logger.info(logPrefix + "Adding Transparent Source Overlay ("+overlayIndex+ "): " +srcWidth +"x"+srcHeight);
-					sourceVideo.addOverlay(overlayIndex,overlayFrame);
-					return;
+					logger.info(logPrefix + "Adding Transparent Encode <" + encoderInfo.encodeName + "> " + "Overlay (" + overlayIndex + "): " + frameWidth + "x" + frameHeight);
+					encoderInfo.destinationVideo.addOverlay(overlayIndex, overlayFrame);
 				}
-				OverlayImage overlayImage;
-				Boolean queueDrawing = streamInfo.queueDrawings;
-				if(queueDrawing)
+			}
+			TranscoderVideoOverlayFrame overlayFrame = new TranscoderVideoOverlayFrame(srcWidth, srcHeight, new byte[srcWidth*srcHeight*4]);
+			overlayFrame.setDstX(0);
+			overlayFrame.setDstY(0);
+			logger.info(logPrefix + "Adding Transparent Source Overlay ("+overlayIndex+ "): " +srcWidth +"x"+srcHeight);
+			sourceVideo.addOverlay(overlayIndex,overlayFrame);
+		}
+
+		// caller holds lock
+		private void drawSlot(StreamInfo streamInfo, int n, TranscoderStreamSourceVideo sourceVideo, long frameCount)
+		{
+			SlotState slot = streamInfo.slots[n - 1];
+			int overlayIndex = overlayIndex(n);
+			double scalingFactor = 1.0;
+			OverlayImage overlayImage;
+			if(n == 1 && streamInfo.queueDrawings)
+			{
+				overlayImage = getOverlayImageQueue(streamName);
+				OverlayImage lastQueuedOverlayImage = streamInfo.lastQueuedOverlayImage;
+				if(overlayImage == null)
 				{
-					overlayImage = getOverlayImageQueue(streamName);
-					OverlayImage lastQueuedOverlayImage = streamInfo.lastQueuedOverlayImage;
-					if(overlayImage == null)
-					{
-						//nothing to do, just leave the current image there
-						overlayImage = lastQueuedOverlayImage;
-					}
-					if(lastQueuedOverlayImage!= null &&lastQueuedOverlayImage != overlayImage)
-					{
-						lastQueuedOverlayImage.dispose();
-					}
-					streamInfo.lastQueuedOverlayImage = overlayImage;
+					//nothing to do, just leave the current image there
+					overlayImage = lastQueuedOverlayImage;
 				}
-				else {
-					overlayImage = getOverlayImage(streamName);
-				}
-				try
+				if(lastQueuedOverlayImage!= null &&lastQueuedOverlayImage != overlayImage)
 				{
-					UUID currentImageUuid;
-					if(overlayImage == null)
+					lastQueuedOverlayImage.dispose();
+				}
+				streamInfo.lastQueuedOverlayImage = overlayImage;
+			}
+			else
+			{
+				overlayImage = slot.image;
+			}
+			// the transparent fill, once per slot: slot 1 on the first frame as before, any slot when it is first used, so
+			// an overlay added to a running stream gets it too
+			if(initTransparentOverlay && !slot.filled && (overlayImage != null || (n == 1 && frameCount == 0)))
+			{
+				fillTransparent(overlayIndex, sourceVideo);
+				slot.filled = true;
+				return;
+			}
+			try
+			{
+				UUID currentImageUuid = overlayImage == null ? new UUID(0L,0L) : overlayImage.getCurrentImageUuid();
+				if(currentImageUuid.equals(new UUID(0L,0L)))
+				{
+					// nothing in this slot now: take what it last put off the source and every encode
+					if(!slot.lastImageUuid.equals(currentImageUuid))
 					{
-						currentImageUuid = new UUID(0L,0L);
-						overlayIndex = streamInfo.lastOverlayIndex;
+						debugLog(logPrefix + "Updating Image: " + slot.lastImageUuid + "->" + currentImageUuid);
 					}
-					else {
-						overlayIndex = overlayImage.getOverlayIndex() > 0 ? overlayImage.getOverlayIndex() : appOverlayIndex;
-						currentImageUuid = overlayImage.getCurrentImageUuid();
-					}
-					if(currentImageUuid.equals(new UUID(0L,0L)))
+					if(slot.overlayOnSource)
 					{
-						if(!streamInfo.lastImageUuid.equals(currentImageUuid))
+						debugLog(logPrefix + "Clearing Source Overlay (" + overlayIndex + ")");
+						sourceVideo.clearOverlay(overlayIndex);
+					}
+					slot.overlayOnSource = false;
+					if(slot.overlayOnEncodes)
+					{
+						for (EncoderInfo encoderInfo : encoderInfoList)
 						{
-							debugLog(logPrefix + "Updating Image: " + streamInfo.lastImageUuid + "->" + currentImageUuid);
+							debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
+							encoderInfo.destinationVideo.clearOverlay(overlayIndex);
+							slot.overlayOnEncode.put(encoderInfo.encodeName,false);
 						}
-						if(streamInfo.overlayOnSource)
-						{
-							debugLog(logPrefix + "Clearing Source Overlay (" + overlayIndex + ")");
-							sourceVideo.clearOverlay(overlayIndex);
-						}
-						streamInfo.overlayOnSource = false;
-						if(streamInfo.overlayOnEncodes)
+					}
+					slot.overlayOnEncodes = false;
+					slot.sent.clear();
+					slot.lastImageUuid = currentImageUuid;
+				}
+				else
+				{
+					if(!slot.lastImageUuid.equals(currentImageUuid))
+					{
+						debugLog(logPrefix + "Updating Image: " + slot.lastImageUuid + "->" + currentImageUuid);
+						slot.lastImageUuid = currentImageUuid;
+					}
+					// Where the overlay goes on this frame, and at which scale, is decided before any content check, so the
+					// image knows its active scales even while every target is up to date. Each target (the source, or each
+					// encode) then gets the current content once, on its own: an encode whose draw finished late still gets it.
+					java.util.Set<Double> active = new java.util.HashSet<>();
+					if (overlayImage.getOverlaySource())
+					{
+						if (slot.overlayOnEncodes)
 						{
 							for (EncoderInfo encoderInfo : encoderInfoList)
 							{
 								debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
 								encoderInfo.destinationVideo.clearOverlay(overlayIndex);
-								streamInfo.overlayOnEncode.put(encoderInfo.encodeName,false);
+								slot.overlayOnEncode.put(encoderInfo.encodeName, false);
+								slot.sent.remove(ENCODE_TARGET + encoderInfo.encodeName);
+							}
+							slot.overlayOnEncodes = false;
+						}
+						active.add(scalingFactor);
+						overlayImage.setActiveScales(active);
+						if (!currentImageUuid.equals(slot.sent.get(SOURCE_TARGET)))
+						{
+							long startTime = System.currentTimeMillis();
+							// one record: the buffer with the size and place it was drawn for
+							OverlayImage.Published drawn = overlayImage.current(scalingFactor);
+							long endTime = System.currentTimeMillis();
+							warnIfSlow(overlayImage, endTime - startTime, streamName);
+							if (drawn != null)
+							{
+								TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName, "Source",
+										srcWidth, srcHeight,
+										drawn.width(),
+										drawn.height(),
+										drawn.x(),
+										drawn.y(),
+										drawn.buffer());
+								if (overlayFrame != null)
+								{
+									debugLog(logPrefix + "Adding Source Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight());
+									sourceVideo.addOverlay(overlayIndex, overlayFrame);
+									slot.overlayOnSource = true;
+								}
+								slot.sent.put(SOURCE_TARGET, drawn.uuid());
 							}
 						}
-						streamInfo.overlayOnEncodes = false;
-						streamInfo.sent.clear();
-						streamInfo.lastImageUuid = currentImageUuid;
 					}
-					else if(overlayImage != null)
+					else
 					{
-						if(!streamInfo.lastImageUuid.equals(currentImageUuid))
+						//put overlay on each encode
+						if (slot.overlayOnSource)
 						{
-							debugLog(logPrefix + "Updating Image: " + streamInfo.lastImageUuid + "->" + currentImageUuid);
-							streamInfo.lastImageUuid = currentImageUuid;
+							debugLog(logPrefix + "Clearing Source Overlay ("+overlayIndex+")");
+							sourceVideo.clearOverlay(overlayIndex);
+							slot.overlayOnSource = false;
 						}
-						// Where the overlay goes on this frame, and at which scale, is decided before any content check, so the
-						// image knows its active scales even while every target is up to date. Each target (the source, or each
-						// encode) then gets the current content once, on its own: an encode whose draw finished late still gets it.
-						java.util.Set<Double> active = new java.util.HashSet<>();
-						if (overlayImage.getOverlaySource())
+						slot.sent.remove(SOURCE_TARGET);
+						List<EncoderInfo> targets = new ArrayList<>();
+						List<Double> scales = new ArrayList<>();
+						for (EncoderInfo encoderInfo : encoderInfoList)
 						{
-							if (streamInfo.overlayOnEncodes)
+							if (!encoderInfo.destinationVideo.isPassThrough() && overlayImage.overlayEncode(encoderInfo.encodeName, encoderInfo.streamName))
 							{
-								for (EncoderInfo encoderInfo : encoderInfoList)
+								// always the encode's size over the source's: a save never changes the denominator (D14)
+								double f = encodeScale(encoderInfo.destWidth, encoderInfo.destHeight,
+										encoderInfo.destinationVideo.getFrameSizeFitMode() == TranscoderStream.FRAMESIZE_FITMODE_MATCHSOURCE, srcWidth, srcHeight);
+								targets.add(encoderInfo);
+								scales.add(f);
+								active.add(f);
+							}
+							else
+							{
+								if (slot.overlayOnEncode.getOrDefault(encoderInfo.encodeName, false))
 								{
 									debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
 									encoderInfo.destinationVideo.clearOverlay(overlayIndex);
-									streamInfo.overlayOnEncode.put(encoderInfo.encodeName, false);
-									streamInfo.sent.remove(ENCODE_TARGET + encoderInfo.encodeName);
+									slot.overlayOnEncode.put(encoderInfo.encodeName, false);
 								}
-								streamInfo.overlayOnEncodes = false;
-							}
-							active.add(scalingFactor);
-							overlayImage.setActiveScales(active);
-							if (!currentImageUuid.equals(streamInfo.sent.get(SOURCE_TARGET)))
-							{
-								long startTime = System.currentTimeMillis();
-								// one record: the buffer with the size and place it was drawn for
-								OverlayImage.Published drawn = overlayImage.current(scalingFactor);
-								long endTime = System.currentTimeMillis();
-								warnIfSlow(overlayImage, endTime - startTime, streamName);
-								if (drawn != null)
-								{
-									TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName, "Source",
-											srcWidth, srcHeight,
-											drawn.width(),
-											drawn.height(),
-											drawn.x(),
-											drawn.y(),
-											drawn.buffer());
-									if (overlayFrame != null)
-									{
-										debugLog(logPrefix + "Adding Source Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight());
-										sourceVideo.addOverlay(overlayIndex, overlayFrame);
-										streamInfo.overlayOnSource = true;
-									}
-									streamInfo.sent.put(SOURCE_TARGET, drawn.uuid());
-								}
+								slot.sent.remove(ENCODE_TARGET + encoderInfo.encodeName);
 							}
 						}
-						else
+						overlayImage.setActiveScales(active);
+						for (int t = 0; t < targets.size(); t++)
 						{
-							//put overlay on each encode
-							if (streamInfo.overlayOnSource)
+							EncoderInfo encoderInfo = targets.get(t);
+							double f = scales.get(t);
+							slot.overlayOnEncodes = true; //at least on has an encode
+							if (currentImageUuid.equals(slot.sent.get(ENCODE_TARGET + encoderInfo.encodeName)))
 							{
-								debugLog(logPrefix + "Clearing Source Overlay ("+overlayIndex+")");
-								sourceVideo.clearOverlay(overlayIndex);
-								streamInfo.overlayOnSource = false;
+								continue;
 							}
-							streamInfo.sent.remove(SOURCE_TARGET);
-							List<EncoderInfo> targets = new ArrayList<>();
-							List<Double> scales = new ArrayList<>();
-							for (EncoderInfo encoderInfo : encoderInfoList)
+							long startTime = System.currentTimeMillis();
+							OverlayImage.Published drawn = overlayImage.current(f);
+							long endTime = System.currentTimeMillis();
+							warnIfSlow(overlayImage, endTime - startTime, encoderInfo.streamName);
+							if (drawn != null)
 							{
-								if (!encoderInfo.destinationVideo.isPassThrough() && overlayImage.overlayEncode(encoderInfo.encodeName, encoderInfo.streamName))
+								int frameWidth = encoderInfo.getFrameWidth();
+								int frameHeight = encoderInfo.getFrameHeight();
+								TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName,
+										"Encode <" + encoderInfo.encodeName + ">",
+										frameWidth, frameHeight,
+										drawn.width(),
+										drawn.height(),
+										drawn.x(),
+										drawn.y(),
+										drawn.buffer());
+								if (overlayFrame != null)
 								{
-									// always the encode's size over the source's: a save never changes the denominator (D14)
-									double f = encodeScale(encoderInfo.destWidth, encoderInfo.destHeight,
-											encoderInfo.destinationVideo.getFrameSizeFitMode() == TranscoderStream.FRAMESIZE_FITMODE_MATCHSOURCE, srcWidth, srcHeight);
-									targets.add(encoderInfo);
-									scales.add(f);
-									active.add(f);
+									debugLog(logPrefix + "Adding Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight() + " ScalingFactor:" + f);
+									encoderInfo.destinationVideo.addOverlay(overlayIndex, overlayFrame);
+									slot.overlayOnEncode.put(encoderInfo.encodeName, true);
 								}
-								else
-								{
-									if (streamInfo.overlayOnEncode.getOrDefault(encoderInfo.encodeName, false))
-									{
-										debugLog(logPrefix + "Clearing Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + ")");
-										encoderInfo.destinationVideo.clearOverlay(overlayIndex);
-										streamInfo.overlayOnEncode.put(encoderInfo.encodeName, false);
-									}
-									streamInfo.sent.remove(ENCODE_TARGET + encoderInfo.encodeName);
-								}
-							}
-							overlayImage.setActiveScales(active);
-							for (int t = 0; t < targets.size(); t++)
-							{
-								EncoderInfo encoderInfo = targets.get(t);
-								double f = scales.get(t);
-								streamInfo.overlayOnEncodes = true; //at least on has an encode
-								if (currentImageUuid.equals(streamInfo.sent.get(ENCODE_TARGET + encoderInfo.encodeName)))
-								{
-									continue;
-								}
-								long startTime = System.currentTimeMillis();
-								OverlayImage.Published drawn = overlayImage.current(f);
-								long endTime = System.currentTimeMillis();
-								warnIfSlow(overlayImage, endTime - startTime, encoderInfo.streamName);
-								if (drawn != null)
-								{
-									int frameWidth = encoderInfo.getFrameWidth();
-									int frameHeight = encoderInfo.getFrameHeight();
-									TranscoderVideoOverlayFrame overlayFrame = createOverlayFrame(streamName,
-											"Encode <" + encoderInfo.encodeName + ">",
-											frameWidth, frameHeight,
-											drawn.width(),
-											drawn.height(),
-											drawn.x(),
-											drawn.y(),
-											drawn.buffer());
-									if (overlayFrame != null)
-									{
-										debugLog(logPrefix + "Adding Encode <" + encoderInfo.encodeName + "> Overlay (" + overlayIndex + "): " + overlayFrame.getVideoFrame().getWidth() + "x" + overlayFrame.getVideoFrame().getHeight() + " ScalingFactor:" + f);
-										encoderInfo.destinationVideo.addOverlay(overlayIndex, overlayFrame);
-										streamInfo.overlayOnEncode.put(encoderInfo.encodeName, true);
-									}
-									streamInfo.sent.put(ENCODE_TARGET + encoderInfo.encodeName, drawn.uuid());
-								}
+								slot.sent.put(ENCODE_TARGET + encoderInfo.encodeName, drawn.uuid());
 							}
 						}
 					}
-					streamInfo.lastOverlayIndex = overlayIndex;
 				}
-
-				catch(Exception e)
-				{
-					logger.error(logPrefix + "onBeforeScaleFrame:Error:" + e.toString(), e);
-				}
+			}
+			catch(Exception e)
+			{
+				logger.error(logPrefix + "onBeforeScaleFrame:Error:" + e.toString(), e);
 			}
 		}
 	}

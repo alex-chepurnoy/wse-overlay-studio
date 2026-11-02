@@ -31,7 +31,7 @@ public final class OverlayStore
 	 * Overlay-level fields a named overlay keeps, its style defaults included (objects fall back on them).
 	 * overlaySource and overlayEncodes come from the template.
 	 */
-	static final List<String> OVERLAY_KEYS = List.of("refreshRate", "threadDrawing", "maxDrawingTime", "even_coords", "opacity", "overlayIndex",
+	static final List<String> OVERLAY_KEYS = List.of("refreshRate", "threadDrawing", "maxDrawingTime", "even_coords", "opacity",
 			"stroke", "color", "fillColor", "shadowColor", "shadowOffset", "font", "fontStyle", "fontSize");
 	private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
