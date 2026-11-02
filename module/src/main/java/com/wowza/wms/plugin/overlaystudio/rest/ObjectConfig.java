@@ -67,10 +67,25 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	public long draw_count=0;
 	public boolean ok_to_draw=true;
 
-	private static HashMap<String, Font> fontCache = new HashMap<>();
-	private static HashMap<String, Color> colorCache = new HashMap<>();
-	private static HashMap<String, BasicStroke> basicStrokeCache = new HashMap<>();
-	private static HashMap<String, GradientPaint> gradientPaintCache = new HashMap<>();
+	// Shared by every draw thread, so synchronized, and bounded so dragging and scaling cannot grow them (D11). There
+	// is no gradient cache: a GradientPaint holds its own start and end points, and one is cheap to build per draw.
+	private static final Map<String, Font> fontCache = boundedCache();
+	private static final Map<String, Color> colorCache = boundedCache();
+	private static final Map<String, BasicStroke> basicStrokeCache = boundedCache();
+
+	static final int CACHE_ENTRIES = 256;
+
+	private static <V> Map<String, V> boundedCache()
+	{
+		return java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, V>(64, 0.75f, true)
+		{
+			@Override
+			protected boolean removeEldestEntry(Map.Entry<String, V> eldest)
+			{
+				return size() > CACHE_ENTRIES;
+			}
+		});
+	}
 
 	// Runtime state, transient so copyFrom() never overwrites it with a request object's empty state.
 	private transient final Object webPageLock = new Object();
@@ -375,11 +390,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	private Font getFont(String name, int style, int size)
 	{
 		String key= name+":"+style+":"+size;
-		if(!fontCache.containsKey(key))
-		{
-			fontCache.put(key, new Font(font, style, fontSize));
-		}
-		return fontCache.get(key);
+		return fontCache.computeIfAbsent(key, k -> new Font(font, style, fontSize));
 	}
 
 	private Color getColor(int r, int g, int b)
@@ -390,21 +401,13 @@ public class ObjectConfig extends JsonApplicationConfigBase
 	private Color getColor(int r, int g, int b, int a)
 	{
 		String key= r+":"+g+":"+b+":"+a;
-		if(!colorCache.containsKey(key))
-		{
-			colorCache.put(key, new Color(r, g, b, a));
-		}
-		return colorCache.get(key);
+		return colorCache.computeIfAbsent(key, k -> new Color(r, g, b, a));
 	}
 
 	private BasicStroke getBasicStroke(int size)
 	{
 		String key= size + ":";
-		if(!basicStrokeCache.containsKey(key))
-		{
-			basicStrokeCache.put(key, new BasicStroke(size));
-		}
-		return basicStrokeCache.get(key);
+		return basicStrokeCache.computeIfAbsent(key, k -> new BasicStroke(size));
 	}
 
 	public String getInstanceName()
@@ -513,14 +516,10 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		this.created_at = DateTime.now();
 		this.updated_at = DateTime.now();
 
-		// delete object if it already exists and replace
+		// added, or in place of the object with this id, in one swap
 		ObjectConfig oldObj = oImage.getOverlayConfig().getObject(this.id);
-		if(oldObj != null)
-		{
-			oImage.getOverlayConfig().deleteObject(oldObj.id);
-		}
-
-		oImage.getOverlayConfig().addObject(this);
+		this.oImage = oImage;
+		oImage.getOverlayConfig().putObject(this);
 		oImage.getOverlayConfig().saveObjectToFile();
 		oImage.getOverlayConfig().resetUuid();
 		OverlayStudioLog.change(this, (oldObj != null ? "replaced" : "added") + " " + type + " object " + label().trim() + " on "
@@ -553,9 +552,14 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		}
 		this.mergeOjbect(oldObj);
 		checkWebPageUrl();
-		oldObj.copyFrom(this);
-		oldObj.updated_at = DateTime.now();
-		oImage.getOverlayConfig().sortAndSaveObjects();
+		// A new object in place of the live one, which a draw may be walking (D12). It takes its own reference on the
+		// page capture the old one holds, so releasing the old one later only lowers the count and no draw opens a new one.
+		this.oImage = oImage;
+		this.created_at = oldObj.created_at;
+		this.updated_at = DateTime.now();
+		this.shareCaptureOf(oldObj);
+		oImage.getOverlayConfig().putObject(this);
+		oImage.getOverlayConfig().saveObjectToFile();
 		OverlayStudioLog.change(this, "updated " + oldObj.type + " object " + oldObj.label().trim() + " on "
 				+ OverlayStudioLog.stream(vhostName, appName, instanceName, streamName));
 
@@ -1102,6 +1106,30 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		}
 	}
 
+	/** Takes its own reference on the page capture old holds, when it would show the same page. */
+	void shareCaptureOf(ObjectConfig old)
+	{
+		WebPageCapture c;
+		synchronized(old.webPageLock)
+		{
+			c = old.webPageCapture;
+		}
+		if(c == null || !"webPage".equals(type))
+		{
+			return;
+		}
+		synchronized(webPageLock)
+		{
+			WebPageCapture.Settings settings = webPageSettings();
+			if(webPageCapture == null && !disposed && c.isFor(settings))
+			{
+				webPageCapture = WebPageCapture.POOL.acquire(settings);
+				webPageCapture.usePageDelay(this::getPageDelay);
+				webPageCapture.addReloadListener(reloadListener);
+			}
+		}
+	}
+
 	// Caller must hold webPageLock.
 	private void releaseCapture()
 	{
@@ -1435,12 +1463,7 @@ public class ObjectConfig extends JsonApplicationConfigBase
 
 	public GradientPaint getGradientPaint(Color c1, Color c2, String direction, int x, int y, int x2, int y2)
 	{
-		GradientPaint retVal;
-		String key = c1+":"+c2+":"+direction+":"+x+":"+y+":"+x2+":"+y2;
-		if(!gradientPaintCache.containsKey(key))
-		{
-			GradientPaint gp;
-			gp = switch (this.gradientDirection) {
+		return switch (this.gradientDirection) {
 				case "up" -> new GradientPaint(x, y2, c1, x, y, c2);
 				case "down" -> new GradientPaint(x, y, c1, x, y2, c2);
 				case "left" -> new GradientPaint(x2, y, c1, x, y, c2);
@@ -1451,10 +1474,6 @@ public class ObjectConfig extends JsonApplicationConfigBase
 				case "upright" -> new GradientPaint(x, y2, c1, x2, y, c2);
 				default -> new GradientPaint(x, y, c1, x, y2, c2);
 			}; //default = down
-			gradientPaintCache.put(key,gp);
-		}
-		retVal = gradientPaintCache.get(key);
-		return retVal;
 	}
 
 	public void mergeOjbect(ObjectConfig obj)

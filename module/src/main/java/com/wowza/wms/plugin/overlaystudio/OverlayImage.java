@@ -31,12 +31,29 @@ public class OverlayImage
 {
 	//done so memory allocations are minimized
 	private final Map<Double, BufferedImage> bufferedImageMap = new HashMap<>();
-	private final Map<Double, byte[]> byteImageMap = new HashMap<>();
-	// the other half of each double buffer; guarded by byteImageMap
+	// the other half of each double buffer; guarded by imageLock
 	private final Map<Double, byte[]> spareByteImageMap = new HashMap<>();
-	private final Map<Double, UUID> drawnUuidMap = new HashMap<>();
 
-	//drawnUuidMap replaces alreadyDrawn
+	/**
+	 * What one draw produced for one scale, handed to the transcoder as a whole: the buffer, its size and place, and
+	 * the content (uuid) it shows. Immutable, so a buffer is never paired with another draw's size or place.
+	 */
+	public record Published(byte[] buffer, int width, int height, int x, int y, UUID uuid)
+	{
+	}
+
+	// the last record per scale; guarded by imageLock
+	private final Map<Double, Published> published = new HashMap<>();
+
+	/**
+	 * The image lock: a draw takes the object list and the uuid together under it, and publishes under it; every edit
+	 * swaps the list and resets the uuid under it (OverlayConfig.editLock). So a draw never pairs one list with
+	 * another's uuid, and an edit never waits for a draw to finish.
+	 */
+	private final Object imageLock = new Object();
+	// draws that took a list and have not finished; objects replaced meanwhile wait in retired until it is 0
+	private int drawsInFlight = 0;
+	private final List<ObjectConfig> retired = new ArrayList<>();
 
 	public int xPos = 0;
 	public int yPos = 0;
@@ -75,7 +92,6 @@ public class OverlayImage
 	private String streamName;
 	private boolean overlaySource;
 	private ArrayList<String> overlayEncodes;
-	private final Object overlayObjectLock = new Object();
 	private boolean threadDrawing = true;
 	private long maxDrawingTime = 0;
 	private final Object statsLock = new Object();
@@ -113,6 +129,31 @@ public class OverlayImage
 		this.maxDrawingTime = maxDrawingTime;
 		this.overlaySource = overlayConfig.getOverlaySource();
 		this.overlayEncodes = overlayConfig.getOverlayEncodes();
+		overlayConfig.setImage(this);
+	}
+
+	/** The image lock (see imageLock). */
+	public Object lock()
+	{
+		return imageLock;
+	}
+
+	/** Disposes objects taken out of this overlay, now or once the draws that may still use them end. */
+	public void retire(List<ObjectConfig> objects)
+	{
+		if(objects.isEmpty())
+		{
+			return;
+		}
+		synchronized(imageLock)
+		{
+			if(drawsInFlight > 0)
+			{
+				retired.addAll(objects);
+				return;
+			}
+		}
+		objects.forEach(ObjectConfig::dispose);
 	}
 
 	//specal constructor to create an overlay that removes the overlay from the stream
@@ -146,7 +187,7 @@ public class OverlayImage
 
 	public void setOverlayConfig(OverlayConfig overlayConfig)
 	{
-		synchronized(this.overlayObjectLock)
+		synchronized(imageLock)
 		{
 			this.mainOverlayConfig = overlayConfig;
 			if(this.mainOverlayConfig != null)
@@ -160,6 +201,7 @@ public class OverlayImage
 			{
 				obj.oImage = this;
 			}
+			overlayConfig.setImage(this);
 		}
 
 	}
@@ -198,17 +240,14 @@ public class OverlayImage
 	{
 		stop();
 		List<ObjectConfig> objects = new ArrayList<>();
-		synchronized(this.overlayObjectLock)
+		synchronized(imageLock)
 		{
 			if(this.mainOverlayConfig != null && this.mainOverlayConfig.getObjects() != null)
 			{
 				objects.addAll(this.mainOverlayConfig.getObjects());
 			}
 		}
-		for(ObjectConfig obj : objects)
-		{
-			obj.dispose();
-		}
+		retire(objects);
 	}
 
 	public class RefreshTimer implements Runnable
@@ -234,7 +273,7 @@ public class OverlayImage
 	public void mergeOverlayConfig(OverlayConfig overlayConfig)
 	{
 		List<ObjectConfig> replacedObjs = new ArrayList<>();
-		synchronized(this.overlayObjectLock)
+		synchronized(imageLock)
 		{
 			LinkedHashMap<String, ObjectConfig> overlayObjects =  new LinkedHashMap<>();
 			if(this.mainOverlayConfig.getObjects() != null)
@@ -276,6 +315,7 @@ public class OverlayImage
 			int oldOpacity = this.mainOverlayConfig.getOpacity();
 			this.mainOverlayConfig = overlayConfig;
 			this.mainOverlayConfig.setObjects(newObjs);
+			overlayConfig.setImage(this);
 			if(overlayConfig.getOpacity() < 0)
 			{
 				this.mainOverlayConfig.setOpacity(oldOpacity);
@@ -284,13 +324,9 @@ public class OverlayImage
 			{
 				this.mainOverlayConfig.setOpacity(100);
 			}
-
+			overlayConfig.resetUuid();
 		}
-		for(ObjectConfig obj : replacedObjs)
-		{
-			obj.dispose();
-		}
-		overlayConfig.resetUuid();
+		retire(replacedObjs);
 	}
 
 
@@ -301,11 +337,10 @@ public class OverlayImage
 
 	public UUID getDrawnUuid(double scaled)
 	{
-		synchronized(drawnUuidMap)
+		synchronized(imageLock)
 		{
-			if(drawnUuidMap.containsKey(scaled))
-				return drawnUuidMap.get(scaled);
-			return new UUID(0L,0L);
+			Published p = published.get(scaled);
+			return p != null ? p.uuid() : new UUID(0L,0L);
 		}
 	}
 
@@ -347,14 +382,27 @@ public class OverlayImage
 
 	public byte[] getCurrentImageBuffer(double scaled)
 	{
+		Published p = current(scaled);
+		return p == null ? null : p.buffer();
+	}
+
+	/**
+	 * The record for this scale when it shows the current content; otherwise starts a draw (in the background, or now
+	 * for an inline overlay) and returns null until a background one is published.
+	 */
+	public Published current(double scaled)
+	{
 		if (mainOverlayConfig == null)
 		{
 			return null;
 		}
-
-		if(mainOverlayConfig.getUuid().equals(getDrawnUuid(scaled)))
+		synchronized(imageLock)
 		{
-			return getByteImage(scaled);
+			Published p = published.get(scaled);
+			if(p != null && p.uuid().equals(mainOverlayConfig.getUuid()))
+			{
+				return p;
+			}
 		}
 
 		try
@@ -378,7 +426,11 @@ public class OverlayImage
 			else
 			{
 				//drawing the image during transcoder session, careful not to take too long
-				return drawImage(mainOverlayConfig, scaled);
+				drawImage(mainOverlayConfig, scaled);
+				synchronized(imageLock)
+				{
+					return published.get(scaled);
+				}
 			}
 		}
 		catch (Exception e)
@@ -422,8 +474,39 @@ public class OverlayImage
 	public byte[] drawImage(OverlayConfig overlayConfig, double scaled)
 	{
 		long drawStart = System.nanoTime();
-		// what this draw shows: a refresh that lands while it runs must still cause the next one
-		UUID drawing = overlayConfig.getUuid();
+		// what this draw shows, taken together: an edit or a refresh that lands while it runs causes the next one
+		UUID drawing;
+		List<ObjectConfig> objects;
+		synchronized(imageLock)
+		{
+			drawing = overlayConfig.getUuid();
+			objects = overlayConfig.getObjects();
+			drawsInFlight++;
+		}
+		try
+		{
+			return drawImage(overlayConfig, scaled, drawing, objects, drawStart);
+		}
+		finally
+		{
+			List<ObjectConfig> done = null;
+			synchronized(imageLock)
+			{
+				if(--drawsInFlight == 0 && !retired.isEmpty())
+				{
+					done = new ArrayList<>(retired);
+					retired.clear();
+				}
+			}
+			if(done != null)
+			{
+				done.forEach(ObjectConfig::dispose);
+			}
+		}
+	}
+
+	private byte[] drawImage(OverlayConfig overlayConfig, double scaled, UUID drawing, List<ObjectConfig> objects, long drawStart)
+	{
 		ObjectConfig.CAPTURE_WAIT_NS.set(0L);
 		BufferedImage bImage = getBufferedImage(scaled);
 		Graphics2D g = bImage.createGraphics();
@@ -448,14 +531,12 @@ public class OverlayImage
 			g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 			g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-			synchronized(overlayObjectLock)
+			// the list this draw took; an edit swaps in a new one and never changes this one
+			if (objects != null)
 			{
-				if (overlayConfig.getObjects() != null)
+				for (ObjectConfig obj : objects)
 				{
-					for (ObjectConfig obj : overlayConfig.getObjects())
-					{
-						obj.draw(g, scaled, evenCoords);
-					}
+					obj.draw(g, scaled, evenCoords);
 				}
 			}
 		}
@@ -463,7 +544,7 @@ public class OverlayImage
 		// Draw into the spare buffer, then swap: WSE copies the published buffer when it takes the overlay frame, and a
 		// draw writing into that same array meanwhile would tear it.
 		byte[] retVal;
-		synchronized(byteImageMap)
+		synchronized(imageLock)
 		{
 			retVal = spareByteImageMap.remove(scaled);
 			if(retVal == null)
@@ -472,17 +553,14 @@ public class OverlayImage
 			}
 		}
 		transferImage(bImage, retVal, overlayConfig.getOpacity());
-		synchronized(byteImageMap)
+		Published next = new Published(retVal, getWidth(scaled), getHeight(scaled), getxPos(scaled), getyPos(scaled), drawing);
+		synchronized(imageLock)
 		{
-			byte[] old = byteImageMap.put(scaled, retVal);
-			if(old != null && old.length == retVal.length)
+			Published old = published.put(scaled, next);
+			if(old != null && old.buffer().length == retVal.length)
 			{
-				spareByteImageMap.put(scaled, old);
+				spareByteImageMap.put(scaled, old.buffer());
 			}
-		}
-		synchronized(drawnUuidMap)
-		{
-			this.drawnUuidMap.put(scaled, drawing);
 		}
 		g.dispose();
 		long waitNs = ObjectConfig.CAPTURE_WAIT_NS.get();
@@ -557,18 +635,6 @@ public class OverlayImage
 		return retVal;
 	}
 
-
-	private byte[] getByteImage(double scaled)
-	{
-		synchronized(byteImageMap)
-		{
-			if (!byteImageMap.containsKey(scaled))
-			{
-				byteImageMap.put(scaled, new byte[getWidth(scaled) * getHeight(scaled) * 4]);
-			}
-			return byteImageMap.get(scaled);
-		}
-	}
 
 	private static void transferImage(BufferedImage sourceImg, byte[] destImgBytes, int opacity)
 	{
