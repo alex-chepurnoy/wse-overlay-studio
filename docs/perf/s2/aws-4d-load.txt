@@ -1,0 +1,24 @@
+AWS server (8 cores), WSE 4.12.1; module at part 4d. 12 streams published on the server itself (ffmpeg testsrc2
+1280x720 30 fps, libx264 ultrafast), each transcoded to 720p and 360p by a copy of the CPU starter with the Clock4c
+overlay (box, HH:mm:ss text, a web page) on both encodes. All 12 transcoders started and all overlays applied.
+During the run: WSE's java at 518% CPU, load average 69.7 at the start of the bench and 82.8 at its end, on 8 cores.
+OverlayDrawBench run with WSE's Java while the 12 streams transcoded, 2026-11-02 17:43 UTC.
+
+java 21.0.3, Linux, cores=8, draw pool would be 4 threads
+Each case: median / p95 / max ms of one drawImage, at each output scale (1080, 720, 480, 360 lines).
+
+empty overlay, full 1920x1080 canvas              1080:  0.03/ 0.11/ 4.19   720:  0.02/ 0.03/ 6.17   480:  0.01/ 0.01/ 2.52   360:  0.00/ 0.01/ 0.06
+clock HH:mm:ss, full canvas                       1080:  0.92/ 5.39/17.54   720:  0.38/ 2.09/19.23   480:  0.19/ 1.34/13.74   360:  0.12/ 0.22/ 9.87
+clock HH:mm:ss, 420x100 bounding box              1080:  0.20/ 2.35/47.51   720:  0.10/ 0.19/11.91   480:  0.06/ 0.12/11.02   360:  0.05/ 0.07/ 9.03
+live badge (rounded box + text), full canvas      1080:  1.07/ 6.26/17.07   720:  0.39/ 1.91/17.73   480:  0.22/ 0.44/15.83   360:  0.18/ 3.29/16.25
+lower third (bar + two lines), full canvas        1080:  2.34/ 7.94/31.22   720:  1.33/ 6.14/36.69   480:  0.63/ 3.09/107.00   360:  0.42/ 2.27/12.00
+64 layers (32 boxes + 32 strings), full canvas    1080: 17.35/48.09/170.01   720:  7.05/19.96/61.84   480:  3.50/10.81/13.95   360:  2.48/ 7.72/31.97
+
+Second-boundary burst: N streams each with a full-canvas clock redraw all 4 scales at once,
+on a pool the size the module uses. Time from the boundary until the last draw finishes.
+   1 streams x 4 scales =   4 draws, full canvas,     pool 4: median   1.16 ms, p95   7.71 ms, max  12.51 ms
+   1 streams x 4 scales =   4 draws, bounding box,    pool 4: median   0.47 ms, p95   1.07 ms, max   3.84 ms
+   4 streams x 4 scales =  16 draws, full canvas,     pool 4: median   4.39 ms, p95  10.10 ms, max  13.12 ms
+   4 streams x 4 scales =  16 draws, bounding box,    pool 4: median   1.64 ms, p95   7.42 ms, max  12.21 ms
+  12 streams x 4 scales =  48 draws, full canvas,     pool 4: median  15.90 ms, p95  25.35 ms, max  42.73 ms
+  12 streams x 4 scales =  48 draws, bounding box,    pool 4: median   4.21 ms, p95  10.75 ms, max  12.03 ms
