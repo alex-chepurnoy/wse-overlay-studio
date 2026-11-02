@@ -264,7 +264,17 @@ setup program, `install.cmd` and `install.sh` all run this jar.
 
 1. Find WSE (`--home`, `-Dcom.wowza.wms.ConfigHome`, `WMSAPP_HOME`, then the single install found) and read its version
    from `lib/wms-server.jar`; refuse below 4.11.1.
-2. Preflight: write access to every folder the plan touches, WSE not running, on Windows no jar in use.
+2. Preflight: no 1.x on the machine (exit 9, below), write access to every folder the plan touches, WSE not running,
+   on Windows no jar in use.
+   <!-- 1x-compat:begin -->
+   The 1.x check (`LegacyInstallCheck`) looks for `lib/wse-plugin-url-overlay-*.jar`, the `UrlOverlayServer` listener
+   in `Server.xml`, a `UrlOverlayModule` entry in any `Application.xml`, 1.x's Manager plugin folder in either place and
+   its bridge under `manager/temp`, the `WowzaURLOverlayCapture` service and its folders, and on Linux the
+   `wse-url-overlay` package in dpkg's installed state. 1.x's install manifest is not a signal: its uninstall can leave
+   it behind. The `.deb` checks the same before unpacking (`Conflicts: wse-url-overlay`, then `preinst`, in every WSE
+   home it can find), and the setup program in a launch condition (1.x's upgrade code, the service key, its
+   ProgramData and program folders). Only installing runs it, so 2.0 can always be removed.
+   <!-- 1x-compat:end -->
 3. Discover applications from disk (every virtual host's `conf/<app>/Application.xml`). Live applications are
    selectable; VOD applications are not; applications that have the module are not offered again. An unattended run
    (`--yes`) changes no application unless `--appName` or `--all-live-apps` names them.

@@ -15,8 +15,8 @@ the overlays and the transcoder templates that carry them, assigns templates to 
     v                                              |
  +-------------------------------------+           |
  | WSE Manager                         |           |
- |  Overlay Studio page (plugin)          |           |
- |  Overlay Studio bridge (manager/temp)  |           |
+ |  Overlay Studio page (plugin)       |           |
+ |  Overlay Studio bridge              |           |
  +-------------------------------------+           |
     |                                              |
     | server side, signed-in user's credentials    |
@@ -24,14 +24,14 @@ the overlays and the transcoder templates that carry them, assigns templates to 
  +-----------------------------------------------------------------+
  | WSE                                                             |
  |  REST on 127.0.0.1:8087                                         |
- |  OverlayStudioServer   REST resources, egress rules                |
- |  OverlayStudioModule   per application, draws into the transcoder  |
+ |  OverlayStudioServer  REST resources, egress rules              |
+ |  OverlayStudioModule  per application, draws in the transcoder  |
  +-----------------------------------------------------------------+
     |
     | Unix domain socket
     v
  +-----------------------------------------------------------------+
- | Capture service WowzaOverlayStudioCapture (own unprivileged user)  |
+ | Capture service WowzaOverlayStudioCapture (unprivileged user)   |
  |  Chrome (headless shell on Linux), sandbox always on            |
  |  egress proxy: every connection Chrome makes is checked         |
  +-----------------------------------------------------------------+
@@ -59,6 +59,26 @@ Source: `ui/` (the page), `bridge/`, `module/`, `capture/`, and `installer/` wit
 
 Stop WSE first: the installer refuses to change a running WSE. Every file it edits is backed up first as
 `<file>.overlaystudio-<time>.bak`, and the run is logged to `logs/overlaystudio-install-<time>.log` in the WSE folder.
+
+### Before you install
+
+<!-- 1x-compat:begin -->
+Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Every installer refuses to run while 1.x is
+on the machine (the zip and tarball with exit code 9, the setup program and the `.deb` with the same message), so
+uninstall 1.x first, with WSE stopped, the way it was installed:
+
+- Setup program: Windows Settings, Apps, **Wowza URL Overlay**, Uninstall.
+- Zip: 1.x's `uninstall.cmd` (add `--purge` to delete its saved overlays too).
+- `.deb`: `sudo /opt/wse-url-overlay/uninstall.sh --purge` to delete its saved overlays, then
+  `sudo apt remove wse-url-overlay`.
+- Tarball: 1.x's `sudo ./uninstall.sh` (add `--purge` to delete its saved overlays too).
+
+If the refusal names a folder that 1.x's uninstall could not delete (`C:\ProgramData\WowzaURLOverlay`,
+`C:\Program Files\Wowza URL Overlay Service`, `/opt/wse-url-overlay` or `/etc/wse-url-overlay`), delete it by hand.
+Overlays, templates and settings made with 1.x are not carried over: what 1.x leaves (`conf.modules/urloverlay`,
+`content/urloverlay`, templates with `urlOverlay` properties) is ignored, and those templates draw no overlay until they
+are rebuilt in Overlay Studio.
+<!-- 1x-compat:end -->
 
 **Windows, setup program**
 1. Stop the Wowza Streaming Engine service, then run `Wowza-Overlay-Studio-<version>.exe`; it asks for administrator rights.
@@ -144,6 +164,7 @@ with no Chrome for Testing build, pass your own: `--chrome <path>` with `--no-do
 | 6 | Failed and the rollback is incomplete; the log names what is left |
 | 7 | Failed before anything was changed |
 | 8 | The zip's or tarball's script found no Java 21 or later, or no installer jar beside it |
+| 9 | An earlier, incompatible version is installed ([Before you install](#before-you-install)) |
 
 ## Quick start
 

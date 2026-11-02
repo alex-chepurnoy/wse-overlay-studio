@@ -312,12 +312,18 @@ final class InstallSession
 	}
 
 	/**
-	 * What stops an install, checked before anything is downloaded or written: folders that cannot be written, a WSE
+	 * What stops an install, checked before anything is downloaded or written: a 1.x install (LegacyInstallCheck, exit
+	 * 9), folders that cannot be written, a WSE
 	 * that is running (Linux, where it does not lock its jars) and module or dependency jars a running WSE holds open
 	 * (Windows). Null when the install can go ahead.
 	 */
 	Problem installBlocker(List<Wse.App> chosen, boolean download) throws IOException
 	{
+		String legacy = LegacyInstallCheck.problem(home, managerHome);
+		if(legacy != null)
+		{
+			return new Problem(legacy, LegacyInstallCheck.EXIT);
+		}
 		List<Path> dirs = new ArrayList<>(List.of(home.resolve("conf"), home.resolve("lib"), home.resolve("transcoder").resolve("templates"), pluginDir));
 		for(Path v: Wse.vhosts(home).values())
 		{

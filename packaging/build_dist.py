@@ -33,7 +33,9 @@ RUNTIME_MODULES = 'java.base,java.desktop,java.net.http,jdk.crypto.ec'
 # The same runtime is copied next to the capture service on Windows, so it also carries every module the service and
 # any libraries it has need, as jdeps lists them from the payload the installer jar was built with.
 CAPTURE_PAYLOAD = os.path.join(ROOT, 'installer', 'build', 'payload', 'payload', 'capture')
-UPGRADE_UUID = '6f0b6b8e-3c1e-4c55-9f0e-2a7d6b1f4e21'  # stays the same across versions, so a new setup program upgrades
+# Stays the same across versions, so a new setup program upgrades. New in 2.0: 1.x's setup program is a different
+# product, detected by main.wxs and refused rather than upgraded.
+UPGRADE_UUID = 'e0ebc59b-04ad-4a61-a559-7b8ac9f444a8'
 DEB_NAME = 'wse-overlay-studio'
 DEB_PREFIX = 'opt/wse-overlay-studio'
 # Maintainer field of the .deb (--maintainer). The package is assembled here, not by dpkg-deb, so nothing requires an
@@ -160,6 +162,13 @@ def linux_files(jar_name, jar):
            [(n, lf(d) if n.endswith(('.md', '.txt')) else d, 0o644) for n, d in docs()]
 
 
+def deb_control(template, package, ver, maintainer, size_kb):
+    """The control file from packaging/linux/deb/control, without the rename check's 1x-compat marker lines."""
+    lines = [l for l in template.replace('\r\n', '\n').split('\n') if not l.startswith('# 1x-compat:')]
+    return '\n'.join(lines).format(package=package, version=ver, maintainer=maintainer, size_kb=size_kb,
+                                   recommends=DEB_RECOMMENDS).encode('utf-8')
+
+
 def build_deb(path, ver, jar_name, jar, maintainer):
     data_entries = [('./' + DEB_PREFIX + '/' + n, d, m) for n, d, m in linux_files(jar_name, jar)]
     data_entries.append(('./usr/share/doc/' + DEB_NAME + '/copyright',
@@ -167,15 +176,10 @@ def build_deb(path, ver, jar_name, jar, maintainer):
     data = tar_bytes(data_entries, parents([e[0] for e in data_entries]))
     size_kb = sum(len(d) for _n, d, _m in data_entries) // 1024 + 1
     md5 = ''.join('%s  %s\n' % (hashlib.md5(d).hexdigest(), n[2:]) for n, d, _m in data_entries).encode('utf-8')
-    control = ('Package: %s\nVersion: %s\nArchitecture: all\nMaintainer: %s\nInstalled-Size: %d\nSection: video\n'
-               'Priority: optional\nRecommends: %s\nDescription: Overlay Studio for Wowza Streaming Engine\n'
-               ' Captures a web page with headless Chrome and composites it onto live streams in the\n'
-               ' Wowza Streaming Engine transcoder. Adds the module to /usr/local/WowzaStreamingEngine and\n'
-               ' sets up the capture service WowzaOverlayStudioCapture (system user wse-overlay-studio, Chrome for\n'
-               ' Testing downloaded during the install into /opt/wse-overlay-studio).\n'
-               % (DEB_NAME, ver, maintainer, size_kb, DEB_RECOMMENDS)).encode('utf-8')
     deb = os.path.join(PKG, 'linux', 'deb')
+    control = deb_control(read(os.path.join(deb, 'control')).decode('utf-8'), DEB_NAME, ver, maintainer, size_kb)
     ctrl = tar_bytes([('./control', control, 0o644), ('./md5sums', md5, 0o644),
+                      ('./preinst', lf(read(os.path.join(deb, 'preinst'))), 0o755),
                       ('./postinst', lf(read(os.path.join(deb, 'postinst'))), 0o755),
                       ('./prerm', lf(read(os.path.join(deb, 'prerm'))), 0o755)], ['./'])
     ar(path, [('debian-binary', b'2.0\n'), ('control.tar.gz', ctrl), ('data.tar.gz', data)])

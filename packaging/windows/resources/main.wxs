@@ -62,6 +62,30 @@
         IncludeMinimum="$(var.JpUpgradeVersionOnlyDetectDowngrade)" />
     </Upgrade>
 
+    <!-- 1x-compat:begin -->
+    <!-- URL Overlay 1.x is a different product with its own upgrade code: never upgraded, and the install stops while any
+         sign of it is on the machine. Every 1.x install, from its setup program or its zip, set up the capture service,
+         so the service key and its ProgramData and program folders catch a 1.x from the zip too. FindRelatedProducts
+         and AppSearch run before LaunchConditions, in silent and UI installs alike. An installed 2.0 can still be
+         repaired and removed. -->
+    <Upgrade Id="6f0b6b8e-3c1e-4c55-9f0e-2a7d6b1f4e21">
+      <UpgradeVersion OnlyDetect="yes" Property="LEGACY1X_PRODUCT" Minimum="0.0.0" IncludeMinimum="yes" />
+    </Upgrade>
+    <Property Id="LEGACY1X_SERVICE">
+      <RegistrySearch Id="Legacy1xService" Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\WowzaURLOverlayCapture"
+        Name="ImagePath" Type="raw" />
+    </Property>
+    <Property Id="LEGACY1X_DATA">
+      <DirectorySearch Id="Legacy1xData" Path="[CommonAppDataFolder]WowzaURLOverlay" Depth="0" />
+    </Property>
+    <Property Id="LEGACY1X_PROGRAM">
+      <DirectorySearch Id="Legacy1xProgram" Path="[ProgramFiles64Folder]Wowza URL Overlay Service" Depth="0" />
+    </Property>
+    <Condition Message="URL Overlay 1.x is installed. Uninstall it first (README, Before you install). Overlay Studio does not read its overlays or templates.">
+      Installed OR NOT (LEGACY1X_PRODUCT OR LEGACY1X_SERVICE OR LEGACY1X_DATA OR LEGACY1X_PROGRAM)
+    </Condition>
+    <!-- 1x-compat:end -->
+
     <?ifndef JpAllowUpgrades ?>
     <CustomAction Id="JpDisallowUpgrade" Error="!(loc.DisallowUpgradeErrorMessage)" />
     <?endif?>

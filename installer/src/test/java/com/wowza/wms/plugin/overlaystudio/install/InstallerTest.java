@@ -254,6 +254,8 @@ class InstallerTest
 		CaptureSetup.testLayout = testLayout(tmp, home);
 		// no WSE is running for the test trees, whatever runs on this machine
 		Preflight.testCommandLines = Stream::empty;
+		// and no 1.x, whatever is installed on this machine
+		LegacyInstallCheck.testMachine = new LegacyInstallCheck.Machine(List.of(), cmd -> null);
 		startCft();
 	}
 
@@ -263,6 +265,7 @@ class InstallerTest
 		cft.stop(0);
 		ChromeDownload.source = ChromeDownload.GOOGLE;
 		Preflight.testCommandLines = null;
+		LegacyInstallCheck.testMachine = null;
 		Installer.testAfterOp = null;
 		Installer.testBeforeManifestMove = null;
 		Ownership.testFactory = null;
@@ -1041,6 +1044,19 @@ class InstallerTest
 		{
 			assertTrue(p.substring(4).startsWith(Installer.MODULE_JAR_PREFIX), "only the module goes into WSE's lib: " + p);
 		}
+	}
+
+	@Test
+	void a1xInstallStopsInstallWithExit9BeforeAnythingIsDownloadedOrWritten() throws Exception
+	{
+		Map<String, String> before = tree();
+		Path leftover = Files.createDirectories(tmp.resolve("sys-1x"));
+		LegacyInstallCheck.testMachine = new LegacyInstallCheck.Machine(List.of(leftover), cmd -> null);
+		assertEquals(9, run("Install", "--appName", "live", "--yes"));
+		assertTrue(output.contains("1.x is installed (found: " + leftover + ")"), output);
+		assertEquals(0, zipRequests.get(), "nothing is downloaded for a run that cannot finish");
+		assertEquals(before, tree());
+		assertEquals(0, run("Uninstall", "--yes"), "uninstall does not run the check: " + output);
 	}
 
 	@Test

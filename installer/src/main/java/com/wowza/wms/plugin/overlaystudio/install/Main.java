@@ -58,7 +58,7 @@ public final class Main
 			"",
 			"Exit codes: 0 done or nothing to do, 1 bad arguments, 2 WSE not found or ambiguous, 3 preflight failed (cannot write,",
 			"or WSE is running), 4 WSE older than 4.11.1, 5 failed and rolled back, 6 failed and rollback incomplete,",
-			"7 failed before anything was changed.");
+			"7 failed before anything was changed, 9 an earlier, incompatible version is installed (README, Before you install).");
 
 	/** Parsed command line. */
 	static final class Options
