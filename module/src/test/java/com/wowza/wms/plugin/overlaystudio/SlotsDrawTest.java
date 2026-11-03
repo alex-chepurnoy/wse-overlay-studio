@@ -179,42 +179,6 @@ class SlotsDrawTest
 		assertEquals(List.of(), src.calls, "and the fill only once");
 	}
 
-	// a publisher reconnecting before WSE has ended its old session: two transcoder sessions of one stream for a while
-	@Test
-	void aNewSessionOfAStreamStillLiveGetsEverySlot() throws Exception
-	{
-		OverlayStudioModule m = module(false);
-		OverlayStudioModule.OverlayTranscoderVideoDecoderNotifier old = m.new OverlayTranscoderVideoDecoderNotifier("cam1", 640, 360);
-		Encode oldHd = new Encode();
-		old.addEncoder("720p", "cam1_720p", new TranscoderSessionVideoEncode("720p"), oldHd, 640, 360);
-		OverlayStudioModule.OverlayTranscoderVideoDecoderNotifier now = m.new OverlayTranscoderVideoDecoderNotifier("cam1", 640, 360);
-		Encode hd = new Encode();
-		now.addEncoder("720p", "cam1_720p", new TranscoderSessionVideoEncode("720p"), hd, 640, 360);
-		m.setOverlayImage("cam1", 2, image("720p"));
-		old.onBeforeScaleFrame(null, new Source(), 1);
-		now.onBeforeScaleFrame(null, new Source(), 1);
-		assertEquals(List.of("add 17"), oldHd.calls);
-		assertEquals(List.of("add 17"), hd.calls, "what the old session was sent is not taken as sent to the new one");
-	}
-
-	@Test
-	void theOldSessionEndingLeavesTheNewOneDrawing() throws Exception
-	{
-		OverlayStudioModule m = module(false);
-		OverlayStudioModule.OverlayTranscoderVideoDecoderNotifier old = m.new OverlayTranscoderVideoDecoderNotifier("cam1", 640, 360);
-		OverlayStudioModule.OverlayTranscoderVideoDecoderNotifier now = m.new OverlayTranscoderVideoDecoderNotifier("cam1", 640, 360);
-		m.setOverlayImage("cam1", 1, image());
-		old.shutdown();
-		assertNotNull(m.getOverlayImage("cam1", 1), "the stream's overlay is the new session's now");
-		Source src = new Source();
-		now.onBeforeScaleFrame(null, src, 1);
-		assertEquals(List.of("add 16"), src.calls);
-		now.shutdown();
-		Source late = new Source();
-		now.onBeforeScaleFrame(null, late, 2);
-		assertEquals(List.of(), late.calls, "the last session ending still ends the stream's drawing");
-	}
-
 	@Test
 	@SuppressWarnings("unchecked")
 	void statusListsEverySlotAndWhichEncodesCarryEach() throws Exception

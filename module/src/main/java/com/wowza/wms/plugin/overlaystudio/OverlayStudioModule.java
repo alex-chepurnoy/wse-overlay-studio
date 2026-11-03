@@ -244,20 +244,12 @@ public class OverlayStudioModule extends ModuleBase
 		private volatile boolean queueDrawings = false;
 		private OverlayImage lastQueuedOverlayImage = null;
 		private final ArrayList<IOverlayListener> overlayListeners = new ArrayList<>();
-		// the transcoder session that started last; a reconnecting publisher can overlap its old session for a while,
-		// and only this one's end ends the stream's overlays
-		private volatile Object session = null;
 	}
 
-	/** What one slot of a stream shows, under the StreamInfo lock. */
+	/** What one slot of a stream shows and where it last put it; image under the StreamInfo lock, the rest on the transcoder thread. */
 	static class SlotState
 	{
 		private OverlayImage image = null;
-	}
-
-	/** Where one transcoder session last put one slot; on that session's transcoder thread only. */
-	static class Delivery
-	{
 		private UUID lastImageUuid = new UUID(0L,0L);
 		// the content each target last got: SOURCE_TARGET, or ENCODE_TARGET + the encode's name
 		private final HashMap<String, UUID> sent = new HashMap<>();
@@ -1336,13 +1328,10 @@ public class OverlayStudioModule extends ModuleBase
 		private final String streamName;
 		private int srcWidth;
 		private int srcHeight;
-		// this session's own record of what each slot sent where: another session of the stream has other encodes
-		private final Delivery[] delivered = { new Delivery(), new Delivery(), new Delivery(), new Delivery() };
 
 		public OverlayTranscoderVideoDecoderNotifier(String streamName, int srcWidth, int srcHeight)
 		{
 			getLogger().info(logPrefix+"OverlayTranscoderVideoDecoderNotify:"+srcWidth+"x"+srcHeight+ "<"+streamName+">");
-			getStreamInfo(streamName).session = this;
 			this.srcHeight = srcHeight;
 			this.srcWidth = srcWidth;
 			transcoderStates.put(streamName, "running");
@@ -1400,14 +1389,6 @@ public class OverlayStudioModule extends ModuleBase
 		public void shutdown()
 		{
 			getLogger().info(logPrefix+"OverlayTranscoderVideoDecoderNotify:Shutdown");
-			StreamInfo current = findStreamInfo(streamName);
-			if(current != null && current.session != this)
-			{
-				// a newer session of the stream is running: its overlays, encodes and state stay as they are
-				logger.info(logPrefix + "stream " + streamName + ": an earlier transcoder session ended; the newer one keeps its overlays");
-				encodersByStream.remove(streamName, encoderInfoList);
-				return;
-			}
 			transcoderStates.put(streamName, "stopped");
 			encodersByStream.remove(streamName);
 			synchronized(lock)
@@ -1489,7 +1470,7 @@ public class OverlayStudioModule extends ModuleBase
 		// caller holds lock
 		private void drawSlot(StreamInfo streamInfo, int n, TranscoderStreamSourceVideo sourceVideo, long frameCount)
 		{
-			Delivery slot = delivered[n - 1];
+			SlotState slot = streamInfo.slots[n - 1];
 			int overlayIndex = overlayIndex(n);
 			double scalingFactor = 1.0;
 			OverlayImage overlayImage;
@@ -1510,7 +1491,7 @@ public class OverlayStudioModule extends ModuleBase
 			}
 			else
 			{
-				overlayImage = streamInfo.slots[n - 1].image;
+				overlayImage = slot.image;
 			}
 			// the transparent fill, once per slot: slot 1 on the first frame as before, any slot when it is first used, so
 			// an overlay added to a running stream gets it too
