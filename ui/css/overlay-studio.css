@@ -199,6 +199,7 @@
 .ovs-plugin .banner { display: flex; gap: var(--s-2); align-items: flex-start; border-radius: var(--r-md); padding: var(--s-2) var(--s-3); border: 1px solid var(--border); background: var(--surface); margin-bottom: var(--s-2); font-size: 13px; }
 .ovs-plugin .banner > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ovs-plugin .banner.bad { border-color: var(--red-line); background: var(--red-bg); }
+.ovs-plugin .banner.on { border-color: var(--green-line); background: var(--green-bg); }
 .ovs-plugin .banner.slow { border-color: var(--amber-line); background: var(--amber-bg); }
 .ovs-plugin .banner .x { background: none; border: 0; color: var(--text-2); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
 
@@ -604,6 +605,17 @@
 .ovs-plugin .ly-f { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
 .ovs-plugin .ly-outs { display: flex; gap: 10px; flex-wrap: wrap; }
 .ovs-plugin .ly-acts { display: flex; flex-direction: column; gap: 2px; }
+/* the Templates overlay picker (plan 4.5): saved overlays with thumbnails, then presets */
+.ovs-plugin .ovpick { display: flex; flex-direction: column; gap: var(--s-2); }
+.ovs-plugin .ovkinds { gap: 4px; min-width: 0; }
+.ovs-plugin .ovkinds svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; }
+.ovs-plugin .ovp-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
+.ovs-plugin .ovp { display: flex; align-items: center; gap: var(--s-2); padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ovs-plugin .ovp:disabled { cursor: default; opacity: .65; }
+.ovs-plugin .ovp .pre-t { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ovs-plugin .ovp .bdg { align-self: flex-start; }
+.ovs-plugin .kinds { display: inline-flex; gap: 2px; margin-right: 4px; vertical-align: -2px; color: var(--text-2); }
+.ovs-plugin .kinds svg { width: 12px; height: 12px; }
 .ovs-plugin .ly-picker { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--s-3); margin-top: var(--s-2); background: var(--surface-2); }
 .ovs-plugin .ly-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; max-height: 320px; overflow: auto; }
 .ovs-plugin .ly-pick { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer; background: var(--surface); }
