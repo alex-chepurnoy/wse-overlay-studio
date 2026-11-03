@@ -81,6 +81,19 @@
     return ctx;
   }
   function width(c, s) { return s ? c.measureText(s).width : 0; }
+  // a font's ascent and descent as fractions of its size, read at 1000 px: the canvas rounds them to whole pixels, so
+  // at 51 px Fira Sans Condensed reads 48 + 14 where Java's LineMetrics has 47.7 + 13.5, and two lines that fit a box on
+  // the server overflowed it here and were shrunk by autoFit (found by the server check, PR 10b). Read again when a
+  // font arrives, since until then the fallback's are measured.
+  var vmetrics = {};
+  function vertical(e) {
+    var key = cssFont(e, 1000), v = vmetrics[key];
+    if (v) return v;
+    var m = measurer(key).measureText('Hgjy');
+    v = { asc: m.fontBoundingBoxAscent ? m.fontBoundingBoxAscent / 1000 : 0.935, desc: m.fontBoundingBoxDescent ? m.fontBoundingBoxDescent / 1000 : 0.265 };
+    if (document.fonts && document.fonts.check && document.fonts.check(key)) vmetrics[key] = v;
+    return v;
+  }
   // greedy word wrap at w; a word wider than the line breaks between characters (TextDraw.wrap)
   function wrap(c, para, w, out) {
     if (!para) { out.push(''); return; }
@@ -97,10 +110,9 @@
     out.push(line);
   }
   function layout(e, text, size, wrapW, lh) {
-    var c = measurer(cssFont(e, size)), lines = [];
+    var v = vertical(e), c = measurer(cssFont(e, size)), lines = [];
     text.split('\n').forEach(function (p) { if (wrapW > 0) wrap(c, p, wrapW, lines); else lines.push(p); });
-    var m = c.measureText('Hgjy');
-    var asc = m.fontBoundingBoxAscent || size * 0.935, desc = m.fontBoundingBoxDescent || size * 0.265;
+    var asc = v.asc * size, desc = v.desc * size;
     var widths = lines.map(function (l) { return width(c, l); });
     var maxW = widths.reduce(function (a, b) { return Math.max(a, b); }, 0);
     return { size: size, lines: lines, widths: widths, step: size * lh, ascent: asc, descent: desc, maxWidth: maxW,
@@ -135,7 +147,7 @@
   /* ---------- images ---------- */
   var images = {};
   var waiting = [];
-  function changed() { waiting.forEach(function (fn) { fn(); }); }
+  function changed() { vmetrics = {}; waiting.forEach(function (fn) { fn(); }); }
   /** Calls fn whenever an image or font this module asked for arrives, so the canvas can draw with it. */
   D.onLoad = function (fn) { waiting.push(fn); };
   /** The library image an image layer names, or null while it loads; {width, height, data} or {error}. */

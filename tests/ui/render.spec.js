@@ -100,3 +100,19 @@ test('text is measured and drawn without kerning, as the server draws it', async
   expect(w.page).toBeCloseTo(w.plain, 1);
   await expect(page.locator('.pg[data-id="score"] text').first()).toHaveAttribute('style', /font-kerning:\s*none/);
 });
+
+test('a font\'s ascent and descent are exact, as the server reads them, so autoFit shrinks only what overflows', async ({ page, studio }) => {
+  await openOverlay(page, studio, 'Mixed');
+  const l = await page.evaluate(async () => {
+    await document.fonts.load('700 51px "Fira Sans Condensed"');
+    await document.fonts.load('700 1000px "Fira Sans Condensed"');
+    const U = window.OverlayStudio;
+    // the Lower third preset on a 1080p frame: two lines at 51 px with line height 1.2 need 122.4 px, inside 151 - 2 x 14
+    const e = { type: 'string', box: true, autoFit: true, x: 96, y: 810, w: 960, h: 151, padding: 14, lineHeight: 1.2, font: 'Fira Sans Condensed', fontStyle: 'bold', fontSize: 51 };
+    const r = U.draw.text(e, 'Name\nRole');
+    return { size: r.size, ascent: r.ascent, height: r.height };
+  });
+  expect(l.size, 'not shrunk: it fits').toBe(51);
+  expect(l.ascent).toBeCloseTo(47.685, 2);
+  expect(l.height).toBeCloseTo(122.4, 2);
+});
