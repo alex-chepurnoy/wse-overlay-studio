@@ -393,7 +393,8 @@
     var items = JSON.parse(b.getAttribute('data-rowitems') || '[]'), target = b.getAttribute('data-rowfor');
     l.setAttribute('data-for', target);
     l.innerHTML = items.map(function (i) {
-      return i === '-' ? '<hr>' : '<button type="button" role="menuitem" data-rowact="' + esc(i[0]) + '"' + (i[2] ? ' class="danger"' : '') + (i[3] ? ' disabled' : '') + '>' + esc(i[1]) + '</button>';
+      // an item is [action, label, danger, disabled, icon]
+      return i === '-' ? '<hr>' : '<button type="button" role="menuitem" data-rowact="' + esc(i[0]) + '"' + (i[2] ? ' class="danger"' : '') + (i[3] ? ' disabled' : '') + '>' + (i[4] ? U.icon(i[4]) : '') + esc(i[1]) + '</button>';
     }).join('');
     l.hidden = false;
     b.setAttribute('aria-expanded', 'true');
@@ -481,6 +482,14 @@
   };
   var ICONS = {
     plus: '<path d="M12 5v14M5 12h14"/>',
+    // one per shape, for the Add layer menu
+    rect: '<rect x="3.5" y="6.5" width="17" height="11"/>',
+    rounded: '<rect x="3.5" y="6.5" width="17" height="11" rx="3.5"/>',
+    square: '<rect x="5.5" y="5.5" width="13" height="13"/>',
+    ellipse: '<ellipse cx="12" cy="12" rx="8.5" ry="5.5"/>',
+    circle: '<circle cx="12" cy="12" r="7"/>',
+    line: '<path d="M5 19L19 5"/>',
+    triangle: '<path d="M12 5l8 14H4z"/>',
     close: '<path d="M6 6l12 12M18 6L6 18"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',

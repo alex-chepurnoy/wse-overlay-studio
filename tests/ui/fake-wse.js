@@ -177,6 +177,15 @@ class FakeWse {
         return { success: true, cleared: had ? body.clear : null, updatedStreams: [] };
       }
     }
+    // the dry run of giving a stream its own copy of a template, as TemplateAssignConfig.doGet answers it
+    if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/templates\/assign$/.exec(r)) && method === 'GET') {
+      const tpl = q.get('template'), stream = q.get('stream'), app = this.apps.find((x) => x.name === decodeURIComponent(m[1])) || this.apps[0];
+      const s = this.streams.find((x) => x.name === stream);
+      return { scope: q.get('scope'), template: tpl, stream, writeFile: stream + '.xml', copyFrom: tpl + '.xml', templatesBefore: app.templates, templatesAfter: app.templates,
+        replacedFallback: null, liveStreamTranscoderBefore: app.liveStreamTranscoder, liveStreamTranscoderAfter: app.liveStreamTranscoder, restartRequired: false,
+        validation: { usable: true, problems: [] }, currentTemplate: s && s.template, currentIsVif: false, transcoderTurnsOn: false,
+        overlays: [], overlay: (this.templates[tpl] || {}).overlay || null, dryRun: true, publishing: this.streams.filter((x) => x.publishing).map((x) => x.name) };
+    }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/templates\/order$/.exec(r))) {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
       return { templates: this.apps[0].templates.split(',') };

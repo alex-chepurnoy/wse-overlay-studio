@@ -7,11 +7,17 @@
 'use strict';
 const { test, expect } = require('./harness');
 
+// the Add layer menu under the layer list, the one way to add (plan 4.1, as changed 2026-11-03)
+async function addLayer(page, kind) {
+  await page.locator('[data-rowfor="add:list"]').click();
+  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+}
+
 async function openOverlay(page, studio, name) {
   await studio.open();
   await page.locator('[data-tab=overlays]').click();
   await page.locator('[data-list]').getByText(name, { exact: true }).first().click();
-  await expect(page.locator('[data-addbar]')).toBeVisible();
+  await expect(page.locator('[data-rowfor="add:list"]')).toBeVisible();
 }
 const frame = (page) => page.locator('[data-frame]');
 const bar = (page) => page.getByRole('region', { name: 'Unsaved changes' });
@@ -30,7 +36,7 @@ async function saved(page, wse, name) {
 
 test('a click places text at the click point at its usual size', async ({ page, studio, wse }) => {
   await openOverlay(page, studio, 'Scoreboard');
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Text' }).click();
+  await addLayer(page, 'Text');
   await expect(page.locator('[data-placehint]')).toContainText('Click to place the text');
   await expect(frame(page)).toBeFocused();
   const p = await at(page, 400, 300);
@@ -54,10 +60,9 @@ test('on a smaller stream a new layer starts at a size scaled to it, where it wa
   wse.streamStatus = function (s) { const r = orig.call(this, s); if (r.transcoder.state === 'running') Object.assign(r.transcoder, { decoderWidth: 512, decoderHeight: 288 }); return r; };
   await openOverlay(page, studio, 'Scoreboard');
   const f = await frame(page).boundingBox(), pt = (x, y) => ({ x: f.x + x * f.width / 512, y: f.y + y * f.height / 288 });
-  const add = page.getByRole('toolbar', { name: 'Add a layer' });
-  await add.getByRole('button', { name: 'Text' }).click();
+  await addLayer(page, 'Text');
   let p = pt(100, 60); await page.mouse.click(p.x, p.y);
-  await add.getByRole('button', { name: 'Image' }).click();
+  await addLayer(page, 'Image');
   await expect(page.locator('[data-placehint]')).toBeVisible();
   p = pt(400, 100); await page.mouse.click(p.x, p.y);
   const objs = (await saved(page, wse, 'Scoreboard')).objects, text = objs.find((x) => x.id === 'text-1'), img = objs.find((x) => x.id === 'image-1');
@@ -71,7 +76,7 @@ test('on a smaller stream a new layer starts at a size scaled to it, where it wa
 
 test('a drag draws a shape at the dragged size; Escape cancels placing', async ({ page, studio, wse }) => {
   await openOverlay(page, studio, 'Scoreboard');
-  const shape = page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Add a shape' });
+  const shape = page.locator('[data-rowfor="add:list"]');
   await shape.click();
   await page.getByRole('menuitem', { name: 'Rectangle', exact: true }).click();
   const a = await at(page, 200, 500), b = await at(page, 700, 700);
@@ -93,7 +98,7 @@ test('a drag draws a shape at the dragged size; Escape cancels placing', async (
 
 test('Enter places in the center; Date and time holds a clock token', async ({ page, studio, wse }) => {
   await openOverlay(page, studio, 'Scoreboard');
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Date and time' }).click();
+  await addLayer(page, 'Date and time');
   await page.keyboard.press('Enter');
   await expect(page.locator('.pg[data-id="clock-1"] text')).toHaveText(/^HH:mm:ss #\d+$/);
   const o = (await saved(page, wse, 'Scoreboard')).objects.find((x) => x.id === 'clock-1');
@@ -120,7 +125,7 @@ test('the list menu adds lines, arrows and triangles by their points', async ({ 
 
 test('Web page opens its address form; the empty inspector has the same menu', async ({ page, studio }) => {
   await openOverlay(page, studio, 'Scoreboard');
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Web page' }).click();
+  await addLayer(page, 'Web page');
   await expect(page.locator('#ovs-purl')).toBeFocused();
   await page.locator('[data-addcancel]').click();
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
@@ -168,7 +173,7 @@ test('the id is edited in the panel header, checked, and a saved layer is rename
 
 test('a layer added and renamed before its first save carries no rename', async ({ page, studio, wse }) => {
   await openOverlay(page, studio, 'Scoreboard');
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Text' }).click();
+  await addLayer(page, 'Text');
   await page.keyboard.press('Enter');
   const id = page.getByRole('textbox', { name: 'Layer id' });
   await id.fill('title'); await id.press('Enter');
@@ -185,7 +190,6 @@ test.describe('read-only', () => {
     await page.locator('[data-list]').getByText('Scoreboard', { exact: true }).first().click();
     await expect(page.locator('.pg[data-id="score"]')).toBeVisible();
     // write controls are hidden for a read-only user, as every other one is ([data-write])
-    await expect(page.getByRole('toolbar', { name: 'Add a layer' })).toBeHidden();
     await expect(page.locator('[data-rowfor="add:list"]')).toBeHidden();
     await expect(page.getByRole('textbox', { name: 'Layer id' })).toHaveCount(0);
   });
@@ -195,7 +199,7 @@ test('the readout under the canvas is not a live region; the placing hint is sai
   await openOverlay(page, studio, 'Scoreboard');
   // a ticking clock rewrites the readout every second; a screen reader should not hear it each time
   await expect(page.locator('[data-coords]')).toHaveAttribute('aria-live', 'off');
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Text' }).click();
+  await addLayer(page, 'Text');
   await expect(page.locator('[data-say]')).toHaveText(/Click to place the text/);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-say]')).toHaveText('');
