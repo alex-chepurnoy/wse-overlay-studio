@@ -29,6 +29,18 @@ function read(name) {
 const SIGN_IN = ['<!--Redirect to Login-->', '<!--Leave above comment for UI to redirect properly -->', '<!DOCTYPE html>',
   '<html><head><title>Wowza Streaming Engine Manager</title></head><body>Sign In</body></html>'].join('\n');
 
+// what an overlay holds, as OverlayStore.kinds reports it
+const SHAPES = ['rectangle', 'ellipse', 'line', 'triangle'];
+function kindsOf(ov) {
+  const found = new Set();
+  for (const o of ov.objects || []) {
+    if (o.type === 'string') { found.add('text'); if (/\{(time|countdown|streamtime|stream\+)/.test(o.text || '')) found.add('datetime'); }
+    else if (SHAPES.includes(o.type)) found.add('shape');
+    else if (o.type === 'webPage' || o.type === 'image') found.add(o.type);
+  }
+  return ['webPage', 'text', 'datetime', 'shape', 'image'].filter((k) => found.has(k));
+}
+
 class FakeWse {
   constructor(opts = {}) {
     this.opts = Object.assign({ bridge: true, write: true, serviceRunning: true }, opts);
@@ -43,6 +55,9 @@ class FakeWse {
     this.formats = [];
     // the draft renders the page asked for, and what a test sets them to answer
     this.renders = [];
+    // the thumbnails asked for, by overlay name, and how many to refuse first
+    this.thumbs = [];
+    this.thumbFail = 0;
     // the template writes the page made, in order
     this.templateWrites = [];
     this.textBoxes = {};
@@ -169,6 +184,14 @@ class FakeWse {
     // the draft render (NamedOverlayRenderConfig): a picture and where each layer draws at source scale. The fake
     // measures no text: a text's box comes from textBoxes[id] when a test sets one. renderShift[id] moves a box;
     // renderFail answers that many renders with its status (429 by default)
+    // the thumbnail (NamedOverlayThumbnailConfig): thumbFail answers that many with 429 first
+    if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays\/([^/]+)\/thumbnail$/.exec(r)) && method === 'GET') {
+      const name = decodeURIComponent(m[2]);
+      this.thumbs.push(name);
+      if (this.thumbFail > 0) { this.thumbFail--; return { status: 429, json: { success: false, message: 'Too many thumbnails a second' } }; }
+      if (!this.overlays[name]) return { status: 404, json: { success: false, message: 'No overlay ' + name } };
+      return { name, width: 160, height: 90, png: PNG_16x9, cached: false };
+    }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays\/([^/]+)\/render$/.exec(r)) && method === 'POST') {
       this.renders.push(body);
       if (this.renderFail > 0) { this.renderFail--; return { status: this.renderFailStatus || 429, json: { success: false, message: 'Too many draft renders a second' } }; }
@@ -310,7 +333,7 @@ class FakeWse {
       return row;
     });
     const overlays = Object.keys(this.overlays).sort().map((n) => ({
-      name: n, pages: (this.overlays[n].objects || []).length, modified: this.modified[n],
+      name: n, pages: (this.overlays[n].objects || []).length, modified: this.modified[n], kinds: kindsOf(this.overlays[n]),
       templates: Object.keys(this.templates).filter((t) => this.templates[t].overlay === n),
       showingOn: this.streams.filter((s) => s.publishing && this.overlayOf(s) === n).map((s) => s.name)
     }));

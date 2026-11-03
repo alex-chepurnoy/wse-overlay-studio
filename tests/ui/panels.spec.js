@@ -268,7 +268,8 @@ test('Templates choose a transcoder image from the same picker', async ({ page, 
   await studio.open();
   await page.locator('[data-tab=templates]').click();
   await page.locator('[data-list]').getByText('scoreboard-cpu', { exact: true }).first().click();
-  await page.locator('[data-screen=template] [data-addimg]').first().click();
+  await page.locator('[data-rowfor="tpladd:input"]').click();
+  await page.getByRole('menuitem', { name: 'Image (fixed)' }).click();
   const pick = page.locator('[data-screen=template] .ly-picker');
   await expect(pick.locator('input[name=ovs-img]')).toHaveCount(2);
   await pick.locator('input[value="house.png"]').check();

@@ -470,9 +470,9 @@
     var same = d.overlays.filter(function (y) { return ovStage(d, y) === stage; }), k = same.indexOf(x);
     var other = stage === 'input' ? 'outputs' : 'input', canMove = vids.length > 1 || stage === 'outputs';
     var missing = x.name && !(U.overlays || []).some(function (o) { return o.name === x.name; });
-    return '<div class="lyc lyr lyu" data-ov="' + i + '"><div class="lyc-top"><div class="ly-thumb">' + U.icon('overlay') + '</div>' +
+    return '<div class="lyc lyr lyu" data-ov="' + i + '"><div class="lyc-top">' + thumbHtml(x.name) +
       '<div class="ly-main"><select data-ovname="' + i + '" aria-label="Overlay ' + (i + 1) + '">' + overlayOptions(x.name, x.name ? null : 'Pick an overlay', d.overlays, x.name) + '</select>' +
-      '<span class="small muted">Overlay' + (same.length > 1 ? ', ' + (k === 0 ? 'drawn under the others here' : k === same.length - 1 ? 'drawn on top here' : 'drawn ' + ordinal(k + 1) + ' here') : '') + '</span></div>' +
+      '<span class="small muted">' + kindIcons(x.name) + 'Overlay' + (same.length > 1 ? ', ' + (k === 0 ? 'drawn under the others here' : k === same.length - 1 ? 'drawn on top here' : 'drawn ' + ordinal(k + 1) + ' here') : '') + '</span></div>' +
       '<div class="ly-acts">' + (k > 0 ? '<button class="btn sm icon ghost" type="button" data-ovup="' + i + '" aria-label="Move ' + U.esc(x.name || 'overlay') + ' down the stack" title="Draw it under the one before">' + U.icon('up') + '</button>' : '') +
       (canMove ? '<button class="btn sm ghost" type="button" data-ovmove="' + i + '" title="' + (other === 'input' ? 'Draw it on the input, so every video output shows it' : 'Draw it on chosen outputs only') + '">' + U.icon(other === 'input' ? 'input' : 'outputs') + (other === 'input' ? 'To Decode' : 'To outputs') + '</button>' : '') +
       '<button class="btn sm icon ghost" type="button" data-ovrm="' + i + '" aria-label="Remove overlay ' + U.esc(x.name || (i + 1)) + '">' + U.icon('close') + '</button></div></div>' +
@@ -506,12 +506,12 @@
     // nothing to draw on: what is there can still be removed
     if (!vids.length) return '<div class="hrow ly-add"><span class="small faint">No video output to draw on</span></div>' + items;
     // an overlay is on outputs only when some of two or more carry it; with one, it is the input
-    var add = stage === 'outputs' && vids.length < 2 ? '<span class="small faint">With one video output, overlays go in Decode</span>'
-      : !(U.overlays || []).length ? '<button class="btn sm ghost" type="button" data-write data-go="new-overlay:">' + U.icon('plus') + 'Overlay</button>'
-      : '<button class="btn sm ghost" type="button" data-addov="' + stage + '"' + (ovFull ? ' disabled title="At most ' + MAX_OVERLAYS + ' overlays in a template. Combine several layers in one overlay in the Overlays tab."' : '') + '>' + U.icon('plus') + 'Overlay</button>';
+    var one = stage === 'outputs' && vids.length < 2;
     var hw = cards && d.hardware !== 'cpu' ? '<p class="hint">On ' + U.esc((HW.filter(function (x) { return x[0] === d.hardware; })[0] || HW[0])[1]) + ', each frame is copied off the card to draw an overlay, which costs more than without one.</p>' : '';
-    return '<div class="hrow ly-add">' + add + '<button class="btn sm ghost" type="button" data-addimg="' + stage + '"' + (full ? ' disabled title="At most ' + MAX_IMAGES + ' images in a template"' : '') + ' aria-expanded="' + (S.pick === stage) + '">' + U.icon('plus') + 'Image</button>' +
-      (items || S.pick === stage ? '' : '<span class="small faint">None</span>') + '</div>' + (S.pick === stage ? pickerHtml() : '') + items + hw;
+    return '<div class="hrow ly-add">' + addMenuHtml(stage, one || ovFull, full) +
+      (one ? '<span class="small faint">With one video output, overlays go in Decode</span>' : ovFull ? '<span class="small faint">' + U.esc(FULL_TEXT) + '</span>' : '') +
+      (items || S.pick === stage || S.ovPick ? '' : '<span class="small faint">None</span>') + '</div>' + (S.pick === stage ? pickerHtml() : '') +
+      (S.ovPick && S.ovPick.stage === stage ? ovPickerHtml(d.overlays.map(function (x) { return x.name; })) : '') + items + hw;
   }
   // what is drawn where, as badges: the input row of the ladder, and each output row
   function layerBadges(d, o) {
@@ -538,10 +538,131 @@
     d.overlays.push(x);
     d.overlays = inStageOrder(d.overlays);
   }
-  // the first overlay of the application the template does not carry yet
-  function nextOverlay(d) {
-    var have = d.overlays.map(function (x) { return x.name; });
-    return ((U.overlays || []).filter(function (o) { return have.indexOf(o.name) < 0; })[0] || {}).name || '';
+  /* ---------- the Add menu and the overlay picker (plan 4.5) ---------- */
+  // the kinds the module reports for an overlay (OverlaysConfig "kinds"), as the menu names them
+  var KINDS = [['webPage', 'Web page', 'web'], ['text', 'Text', 'text'], ['datetime', 'Date and time', 'clock'], ['shape', 'Shape', 'rect'], ['image', 'Image in an overlay', 'image']];
+  var KIND_WORDS = { webPage: 'web page', text: 'text', datetime: 'date and time', shape: 'shape', image: 'image' };
+  var PRESET_GROUP = { text: 'Badges and bars', datetime: 'Date and time', shape: 'Shapes', image: 'Corner bug' };
+  var FULL_TEXT = 'A template carries at most ' + MAX_OVERLAYS + ' overlays. Combine several layers in one overlay in the Overlays tab.';
+  function kindsOf(name) { var o = U.overlayEntry(name); return (o && o.kinds) || []; }
+  function kindIcons(name) {
+    var k = kindsOf(name);
+    return k.length ? '<span class="kinds" title="' + U.esc(k.map(function (x) { return KIND_WORDS[x]; }).join(', ')) + '">' + KINDS.filter(function (x) { return k.indexOf(x[0]) >= 0; }).map(function (x) { return U.icon(x[2]); }).join('') + '</span>' : '';
+  }
+  // stage: input or outputs in the builder, form for a template switched on in place; images only in the builder
+  function addMenuHtml(stage, ovOff, imgOff) {
+    var items = KINDS.map(function (k) { return [k[0], k[1], false, ovOff, k[2]]; });
+    if (stage !== 'form') items = items.concat(['-', ['fixed', 'Image (fixed)', false, imgOff, 'grid']]);
+    items = items.concat(['-', ['all', 'All overlays', false, ovOff, 'overlay']]);
+    return U.rowMenuHtml('tpladd:' + stage, 'Add to ' + (stage === 'outputs' ? 'the outputs' : stage === 'input' ? 'the input' : 'this template'), items,
+      { html: U.icon('plus') + 'Add', cls: 'tpl-add' });
+  }
+  U.rowActions.tpladd = function (stage, act) {
+    S.pick = false; S.ovPick = null;
+    if (act === 'fixed') {
+      var d = S.draft;
+      S.pick = stage; rerender();
+      library(true).then(function () { if (S.draft === d) rerender(); }, function (e) { S.pick = false; rerender(); U.toast('The image list could not be read: ' + e.message, { level: 'bad' }); });
+      return;
+    }
+    S.ovPick = { stage: stage, kind: act === 'all' ? null : act };
+    redraw();
+    var f = el.body.querySelector('[data-ovpick] button:not(:disabled)'); if (f) f.focus();
+  };
+  // the builder or the in-place form, whichever is open
+  function redraw() { if (S.draft) rerender(); else if (S.form) { renderOverlayOnly(findAny(S.sel)); renderBar(); U.changed(); } }
+  // the picker: the application's saved overlays that hold the kind, with thumbnails, then presets of that kind
+  function ovPickerHtml(carried) {
+    var k = S.ovPick.kind, list = (U.overlays || []).filter(function (o) { return !k || (o.kinds || []).indexOf(k) >= 0; });
+    var presets = k && PRESET_GROUP[k] ? (U.presets.groups().filter(function (g) { return g.group === PRESET_GROUP[k]; })[0] || { items: [] }).items : [];
+    var word = k ? KINDS.filter(function (x) { return x[0] === k; })[0][1] : 'All overlays';
+    // the kinds as pills that wrap, so the picker fits the narrow Decode column
+    return '<div class="ly-picker ovpick" data-ovpick><div class="hrow"><div class="hrow ovkinds" role="group" aria-label="Show overlays with">' +
+      KINDS.map(function (x) { return '<button type="button" class="pill" data-ovkind="' + x[0] + '" aria-pressed="' + (k === x[0]) + '">' + U.icon(x[2]) + x[1].replace(' in an overlay', '') + '</button>'; }).join('') +
+      '<button type="button" class="pill" data-ovkind="" aria-pressed="' + !k + '">All</button></div><span class="spacer"></span><button type="button" class="btn sm ghost" data-ovpclose>Cancel</button></div>' +
+      '<div class="sec-h">' + U.esc(word) + ': saved overlays in ' + U.esc(U.app) + '</div>' +
+      (list.length ? '<div class="ovp-items">' + list.map(function (o) {
+        var have = carried.indexOf(o.name) >= 0;
+        return '<button type="button" class="ovp" data-ovpname="' + U.esc(o.name) + '"' + (have ? ' disabled' : '') + '>' + thumbHtml(o.name) +
+          '<span class="pre-t"><span class="pre-n">' + U.esc(o.name) + '</span><span class="faint">' + U.esc(contents(o)) + '</span>' +
+          (have ? '<span class="bdg">Already in this template</span>' : '') + '</span></button>';
+      }).join('') + '</div>' : '<p class="small faint">' + (k ? 'No overlay in ' + U.esc(U.app) + ' has a ' + U.esc(KIND_WORDS[k]) + ' layer yet.' : 'No overlay in ' + U.esc(U.app) + ' yet.') + '</p>') +
+      (k === 'webPage' ? '<div class="sec-h">New</div><div class="pre-items"><button type="button" class="pre" data-ovpnew="page">' + U.icon('web') + '<span class="pre-t"><span class="pre-n">New web page overlay</span><span class="faint">one page, tested before it is created</span></span></button></div>' : '') +
+      (presets.length ? '<div class="sec-h">New from a preset</div><div class="pre-items">' + presets.map(function (x) {
+        return '<button type="button" class="pre" data-ovpnew="preset:' + U.esc(x.id) + '">' + U.icon(x.icon) + '<span class="pre-t"><span class="pre-n">' + U.esc(x.name) + '</span>' + (x.note ? '<span class="faint">' + U.esc(x.note) + '</span>' : '') + '</span></button>';
+      }).join('') + '</div>' : '') +
+      (k === 'image' ? '<p class="hint">Image in an overlay: placed, sized and timed in the overlay editor, and drawn over the fixed images. Image (fixed): a file WSE draws itself, with no timing, under the overlays. On an output, anything there draws over everything on the input.</p>' : '') +
+      '<p class="hint">Combine several layers in one overlay in the Overlays tab: a template carries up to ' + MAX_OVERLAYS + ' overlays, and one overlay holds up to 64 layers.</p></div>';
+  }
+  function contents(o) {
+    var k = o.kinds || [];
+    var w = KINDS.filter(function (x) { return k.indexOf(x[0]) >= 0; }).map(function (x) { return KIND_WORDS[x[0]]; });
+    if (!o.pages) return 'No layers yet';
+    return (w.length ? w.join(', ') : 'other layers') + ' (' + o.pages + ' layer' + (o.pages === 1 ? '' : 's') + ')';
+  }
+  function bindOvPicker() {
+    var p = el.body.querySelector('[data-ovpick]');
+    if (!p) return;
+    p.querySelectorAll('[data-ovkind]').forEach(function (b) { b.onclick = function () { S.ovPick.kind = b.getAttribute('data-ovkind') || null; redraw(); }; });
+    p.querySelector('[data-ovpclose]').onclick = function () { S.ovPick = null; redraw(); };
+    p.querySelectorAll('[data-ovpname]').forEach(function (b) {
+      b.onclick = function () { var st = S.ovPick.stage; S.ovPick = null; addPicked(b.getAttribute('data-ovpname'), st); };
+    });
+    p.querySelectorAll('[data-ovpnew]').forEach(function (b) {
+      b.onclick = function () {
+        var what = b.getAttribute('data-ovpnew');
+        // New overlay, then the editor, carry the way back here (plan 4.5); this draft is kept meanwhile
+        U.addingTo = { key: S.kind === 'new' ? '' : S.sel, stage: S.ovPick.stage, overlay: null };
+        S.ovPick = null;
+        if (what === 'page') U.newOverlayPage(); else U.newOverlayPreset(what.slice(7));
+      };
+    });
+    loadThumbs();
+  }
+  // an overlay chosen in the picker, or brought back from the editor, added to the open template
+  function addPicked(name, stage) {
+    if (S.draft) {
+      if (S.draft.overlays.length >= MAX_OVERLAYS || S.draft.overlays.some(function (x) { return x.name === name; })) { rerender(); return; }
+      var x = { name: name, stage: 'input', outputs: [] };
+      placeOverlay(S.draft, x, stage === 'outputs' && videoOutputs(S.draft).length > 1 ? 'outputs' : 'input');
+      rerender();
+      var s = el.body.querySelector('[data-ovname="' + S.draft.overlays.indexOf(x) + '"]'); if (s) s.focus({ preventScroll: true });
+    } else if (S.form) {
+      var t = findAny(S.sel);
+      if (S.form.overlays.length < MAX_OVERLAYS && !S.form.overlays.some(function (y) { return y.name === name; })) {
+        S.form.overlays.push({ name: name, on: carriers(t).map(function (e) { return e.name; }).sort() });
+      }
+      redraw();
+    }
+  }
+  U.templateAddingLabel = function (a) { return a && a.key ? 'template ' + a.key : 'the new template'; };
+
+  // thumbnails (GET .../thumbnail): one at a time, a 429 waits and tries again; kept per overlay until it is saved again
+  var thumbs = {}, thumbBusy = false;
+  function thumbKey(name) { var o = U.overlayEntry(name); return name + '@' + (o ? o.modified : ''); }
+  function thumbHtml(name) {
+    var t = name && thumbs[thumbKey(name)], k = kindsOf(name);
+    var icon = U.icon(k.length === 1 ? KINDS.filter(function (x) { return x[0] === k[0]; })[0][2] : 'overlay');
+    return '<div class="ly-thumb" data-thumb="' + U.esc(name || '') + '">' + (t && t.png ? '<img alt="" src="data:image/png;base64,' + t.png + '">' : icon) + '</div>';
+  }
+  function loadThumbs() {
+    if (thumbBusy) return;
+    var want = Array.prototype.map.call(el.body.querySelectorAll('[data-thumb]'), function (x) { return x.getAttribute('data-thumb'); })
+      .filter(function (n) { return n && U.overlayEntry(n) && !thumbs[thumbKey(n)]; })[0];
+    if (!want) return;
+    thumbBusy = true;
+    var key = thumbKey(want), tries = 0;
+    (function get() {
+      U.api.get(U.appPath() + '/overlays/' + U.enc(want) + '/thumbnail?width=160').then(function (r) {
+        thumbs[key] = { png: r && r.png };
+        el.body.querySelectorAll('[data-thumb="' + CSS.escape(want) + '"]').forEach(function (x) { if (r && r.png) x.innerHTML = '<img alt="" src="data:image/png;base64,' + r.png + '">'; });
+        thumbBusy = false; loadThumbs();
+      }, function (e) {
+        if (e && e.status === 429 && ++tries < 5) { setTimeout(get, 1000); return; }
+        thumbs[key] = { png: null };
+        thumbBusy = false; loadThumbs();
+      });
+    })();
   }
   function bindPicker(d) {
     var stage = S.pick;
@@ -558,16 +679,6 @@
     });
   }
   function bindLayers(d) {
-    el.body.querySelectorAll('[data-addov]').forEach(function (b) {
-      b.onclick = function () {
-        if (d.overlays.length >= MAX_OVERLAYS) return;
-        var x = { name: nextOverlay(d), stage: 'input', outputs: [] };
-        placeOverlay(d, x, b.getAttribute('data-addov'));
-        rerender();
-        var s = el.body.querySelector('[data-ovname="' + d.overlays.indexOf(x) + '"]');
-        if (s) s.focus({ preventScroll: true });
-      };
-    });
     el.body.querySelectorAll('[data-ovname]').forEach(function (s) { s.onchange = function () { d.overlays[+s.getAttribute('data-ovname')].name = s.value; rerender(); }; });
     el.body.querySelectorAll('[data-ovmove]').forEach(function (b) {
       b.onclick = function () { var x = d.overlays[+b.getAttribute('data-ovmove')]; placeOverlay(d, x, ovStage(d, x) === 'input' ? 'outputs' : 'input'); rerender(); };
@@ -614,14 +725,8 @@
         var t = d.images[i]; d.images[i] = d.images[j]; d.images[j] = t; rerender();
       };
     });
-    el.body.querySelectorAll('[data-addimg]').forEach(function (add) {
-      add.onclick = function () {
-        var st = add.getAttribute('data-addimg');
-        S.pick = S.pick === st ? false : st; rerender();
-        if (S.pick) library(true).then(function () { if (S.draft === d) rerender(); }, function (e) { S.pick = false; rerender(); U.toast('The image list could not be read: ' + e.message, { level: 'bad' }); });
-      };
-    });
     bindPicker(d);
+    bindOvPicker();
   }
 
   // pixels encoded per second over the enabled video outputs, for an assumed 1080p 30 fps source, in 720p 30 fps units
@@ -673,6 +778,7 @@
       playback(d) + '</section>';
     el.body.innerHTML = '<div class="tb">' + top + decode + encode + '</div>';
     bindBuilder();
+    loadThumbs();
     if (!S.lib && !S.libLoading && (d.images || []).length) { S.libLoading = true; library().then(function () { S.libLoading = false; if (S.draft === d) rerender(); }, function () { S.libLoading = false; }); }
   }
 
@@ -1001,7 +1107,7 @@
     el.body.innerHTML = '<div class="sec-h">Overlays drawn by this template' + U.tip('Up to ' + MAX_OVERLAYS + '; a later one draws over an earlier one on the same output. Live on save for streams that load this file.') + '</div>' +
       '<div class="stack io-list">' + f.overlays.map(function (x, i) {
         var was = b.overlays[i], changed = !was || was.name !== x.name;
-        return '<div class="lyc lyr lyu" data-io="' + i + '"><div class="lyc-top"><div class="ly-thumb">' + U.icon('overlay') + '</div>' +
+        return '<div class="lyc lyr lyu" data-io="' + i + '"><div class="lyc-top">' + thumbHtml(x.name) +
           '<div class="ly-main"><select data-io-ov="' + i + '" aria-label="Overlay ' + (i + 1) + '"' + (changed ? ' class="is-draft"' : '') + '>' + overlayOptions(x.name, x.name ? null : 'Pick an overlay', f.overlays, x.name) + '</select>' +
           '<span class="small muted">' + (changed && was ? 'Saved: ' + U.esc(was.name) : 'Overlay') + '</span></div>' +
           '<div class="ly-acts">' + (i > 0 ? '<button class="btn sm icon ghost" type="button" data-io-up="' + i + '" aria-label="Move ' + U.esc(x.name || 'overlay') + ' down the stack">' + U.icon('up') + '</button>' : '') +
@@ -1011,9 +1117,9 @@
             return '<label class="pilltog' + (on ? ' on' : '') + '"><input type="checkbox" data-io-enc="' + i + '" value="' + U.esc(e.name) + '"' + (on ? ' checked' : '') + '>' + U.esc(e.name) + '</label>'; }).join('') + '</div></div>' +
           (!x.on.length ? '<span class="bdg warn">Pick at least one output</span>' : '') + '</div>';
       }).join('') + '</div>' +
-      '<div class="hrow ly-add">' + ((U.overlays || []).length ? '<button class="btn sm ghost" type="button" data-io-add' + (full ? ' disabled title="At most ' + MAX_OVERLAYS + ' overlays in a template. Combine several layers in one overlay in the Overlays tab."' : '') + '>' + U.icon('plus') + 'Overlay</button>'
-        : '<button class="btn sm ghost" type="button" data-write data-go="new-overlay:">' + U.icon('plus') + 'Overlay</button>') +
-      (f.overlays.length ? '' : '<span class="small faint">None</span>') + '</div>' +
+      '<div class="hrow ly-add">' + addMenuHtml('form', full, true) + (full ? '<span class="small faint">' + U.esc(FULL_TEXT) + '</span>' : '') +
+      (f.overlays.length || S.ovPick ? '' : '<span class="small faint">None</span>') + '</div>' +
+      (S.ovPick && S.ovPick.stage === 'form' ? ovPickerHtml(f.overlays.map(function (x) { return x.name; })) : '') +
       '<p class="small muted">Its outputs are changed where it was written, for example in WSE Manager. To build on it here, use New template from this one in the menu.</p>';
     function changed() { S.savedNote = null; renderOverlayOnly(t); renderBar(); U.changed(); }
     el.body.querySelectorAll('[data-io-ov]').forEach(function (s) { s.onchange = function () { f.overlays[+s.getAttribute('data-io-ov')].name = s.value; changed(); }; });
@@ -1029,12 +1135,8 @@
     el.body.querySelectorAll('[data-io-up]').forEach(function (x) {
       x.onclick = function () { var i = +x.getAttribute('data-io-up'), a = f.overlays[i]; f.overlays[i] = f.overlays[i - 1]; f.overlays[i - 1] = a; changed(); };
     });
-    var add = el.body.querySelector('[data-io-add]');
-    if (add) add.onclick = function () {
-      var have = f.overlays.map(function (x) { return x.name; });
-      f.overlays.push({ name: ((U.overlays || []).filter(function (o) { return have.indexOf(o.name) < 0; })[0] || {}).name || '', on: c.map(function (e) { return e.name; }).sort() });
-      changed();
-    };
+    bindOvPicker();
+    loadThumbs();
   }
   // why the in-place form cannot be saved, or null
   function formProblem(f) {
@@ -1239,9 +1341,16 @@
       if (name && !findAny(name)) { U.stayIn('templates'); return; }
       if (name !== S.sel || (name == null && S.kind !== 'new') || !S.kind) select(name || null);
       renderHead(); renderBody(); renderUsedBy(); renderBar();
+      // back from the editor with an overlay made for this template: it goes in where it was picked from, unsaved
+      var back = U.addingBack;
+      if (back && back.key === (S.kind === 'new' ? '' : S.sel)) {
+        U.addingBack = null;
+        addPicked(back.overlay, back.stage);
+        U.toast('Added ' + back.overlay + ' to ' + (back.key ? back.key : 'the new template') + '. Save the template to use it.');
+      }
       if (S.kind === 'new') { var n = el.body.querySelector('[data-d=name]'); if (n && !n.value) n.focus(); }
     },
-    hide: function () { stash(); S.pick = false; },
+    hide: function () { stash(); S.pick = false; S.ovPick = null; },
     state: function () { if (U.current() === 'template') onState(); },
     app: function () { mem = {}; S.sel = null; S.kind = null; S.draft = null; S.form = null; S.base = null; S.conflict = false; S.lib = null; S.savedNote = null; },
     access: function () { if (U.current() === 'template') { renderHead(); renderBody(); renderUsedBy(); renderBar(); } },
