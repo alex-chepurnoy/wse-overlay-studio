@@ -29,6 +29,13 @@
     return 'rgba(' + v[0] + ',' + v[1] + ',' + v[2] + ',' + Math.round(v[3] / 255 * 1000) / 1000 + ')';
   };
 
+  /** Whether the module takes c as a color (ObjectConfig.isColor): rgb(r,g,b) or rgb(r,g,b,a), each 0 to 255, or a name. */
+  D.isColor = function (c) {
+    var s = String(c == null ? '' : c).trim().toLowerCase(), m = /^rgb *\( *(\d{1,3}) *, *(\d{1,3}) *, *(\d{1,3}) *(?:, *(\d{1,3}) *)?\)$/.exec(s);
+    if (m) return [m[1], m[2], m[3], m[4] === undefined ? '0' : m[4]].every(function (v) { return +v <= 255; });
+    return Object.prototype.hasOwnProperty.call(NAMED, s);
+  };
+
   /** The values a layer draws with: its own, else the overlay's defaults, else the module's (applyDefaults). */
   D.effective = function (o, ov) {
     ov = ov || {};

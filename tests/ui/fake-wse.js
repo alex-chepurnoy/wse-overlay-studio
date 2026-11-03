@@ -98,11 +98,20 @@ class FakeWse {
       return this.captureLimit;
     }
     if (r === VH + '/applications' && method === 'GET') return { applications: this.apps };
+    // as Fonts.list (plan 3.7)
+    if (r === '/fonts' && method === 'GET') {
+      return { available: true, problem: null, default: 'Fira Sans',
+        bundled: ['Fira Sans', 'Fira Sans Condensed', 'Fira Mono', 'PT Serif'].map((family) => ({ family, styles: ['plain', 'bold', 'italic', 'bolditalic'], files: ['plain', 'bold'], shadowedBy: null })),
+        logical: ['Serif', 'SansSerif', 'Monospaced', 'Dialog', 'DialogInput'], system: ['DejaVu Sans'] };
+    }
     if (r === VH + '/images') {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
       // one image whole, as ImageLibrary.data answers: a 1 x 1 PNG standing for a 200 x 100 picture
       if (q.get('file')) return { file: q.get('file'), width: 200, height: 100, data: 'data:image/png;base64,' + PIXEL };
-      return { images: [] };
+      // as ImageLibrary.list: one upload of this module's, one picture put in content/ by hand
+      return { images: [
+        { file: 'overlaystudio/logo.png', width: 200, height: 100, uploaded: true, preview: 'data:image/png;base64,' + PIXEL },
+        { file: 'house.png', width: 50, height: 50, uploaded: false, preview: 'data:image/png;base64,' + PIXEL }] };
     }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/state$/.exec(r)) && method === 'GET') {
       return this.state(q.get('rev'));
@@ -194,13 +203,15 @@ class FakeWse {
   streamStatus(s) {
     if (!s || !s.publishing) return { stream: s ? s.name : null, configured: false, state: 'stopped' };
     const tpl = s.template && this.templates[s.template.replace(/\.xml$/, '')];
-    if (!tpl) return { stream: s.name, configured: false, state: 'running', transcoder: false };
+    // the shape of OverlayStudioModule.streamStatus
+    if (!tpl) return { stream: s.name, configured: false, overlayIndex: null, transcoder: { state: 'not-started', decoderWidth: null, decoderHeight: null, encodes: [] }, template: null, overlayFrom: { source: null, name: null, missing: false }, draw: null };
+    const pass = (e) => e.codec === 'PassThru';
     return {
-      stream: s.name, configured: true, overlayIndex: 16, state: 'running', decoderWidth: 1280, decoderHeight: 720,
-      encodes: (tpl.encodes || []).map((e) => ({ name: e.name, outputStream: e.streamName.replace('${SourceStreamName}', s.name), width: 1280, height: 720, passThrough: e.codec === 'PassThru', overlay: true })),
-      transcoder: true, outputsChanged: false, template: s.template,
-      source: tpl.overlay ? { name: tpl.overlay, missing: !this.overlays[tpl.overlay] } : null,
-      overlayFrom: tpl.overlay ? 'template' : null,
+      stream: s.name, configured: true, overlayIndex: 16,
+      transcoder: { state: 'running', decoderWidth: 1920, decoderHeight: 1080,
+        encodes: (tpl.encodes || []).map((e) => ({ name: e.name, outputStream: e.streamName.replace('${SourceStreamName}', s.name), width: 1280, height: 720, passThrough: pass(e), overlay: !pass(e), slots: pass(e) ? [] : [1] })) },
+      template: { loaded: s.template, own: s.template === s.name + '.xml', list: '${SourceStreamName}.xml,transrate.xml', outputsChanged: false },
+      overlayFrom: { source: tpl.overlay ? 'template' : 'stream', name: tpl.overlay || null, missing: !!tpl.overlay && !this.overlays[tpl.overlay] },
       draw: []
     };
   }

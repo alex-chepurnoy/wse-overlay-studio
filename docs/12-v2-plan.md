@@ -159,7 +159,7 @@ every layer; there is no format marker:
 | Field | Meaning |
 |---|---|
 | `font`, `fontSize`, `fontStyle` | Family, pixels at source size (1 to 1,000), style (plain, bold, italic, bolditalic). `fontStyle` alone sets the style; the font name is only a family (the style-from-name parsing at `ObjectConfig.java:337`, `:640-649` is removed) |
-| `box` | `true` makes `x`,`y`,`w`,`h` a text box: wraps at `w`, clips at `h`. Without it, `x`,`y` is the text's baseline start, as drawn today (`ObjectConfig.java:868-905`) |
+| `box` | `true` makes `x`,`y`,`w`,`h` a text box: wraps at `w`, clips at `h`. Without it, `x`,`y` is the text's baseline start, as drawn today (`ObjectConfig.java:868-905`). The page shows and takes a free text's Y as the top of its first line and stores the baseline, so saved overlays and the REST API keep their meaning |
 | `align` | left, center, right inside the box |
 | `lineHeight` | Multiple of the font size, default 1.2 |
 | `background`, `padding`, `radius` | Box behind the text, for a badge or lower third in one layer. With `box`, the background fills `w`,`h` and `padding` insets the text inside it; without `box`, the background is the text's extent plus `padding` on each side |

@@ -409,7 +409,7 @@
   // the image library (GET images), with previews; read once per page and after an upload
   function library(force) {
     if (S.lib && !force) return Promise.resolve(S.lib);
-    return U.api.get(vh() + '/images').then(function (r) { S.lib = (r && r.images) || []; return S.lib; });
+    return U.images.library(force).then(function (l) { S.lib = l; return l; });
   }
   function libEntry(file) { return (S.lib || []).filter(function (x) { return x.file === file; })[0] || null; }
   function videoOutputs(d) { return d.outputs.filter(function (o) { return o.kind === 'video' && o.enabled; }); }
@@ -478,18 +478,8 @@
     (d.images || []).forEach(function (l) { if (o ? l.where === 'outputs' && l.outputs.indexOf(o.name) >= 0 : l.where !== 'outputs') b.push(l.file); });
     return b.map(function (n) { return '<span class="lbadge">' + U.icon('overlay') + U.esc(n) + '</span>'; }).join('');
   }
-  // the picker: images already on the server, an upload, and removing an upload; inline, under the Layers title
-  function pickerHtml() {
-    var lib = S.lib;
-    if (!lib) return '<div class="ly-picker"><div class="skel"></div></div>';
-    return '<div class="ly-picker">' + (lib.length ? '<div class="ly-grid" role="radiogroup" aria-label="Images on the server">' + lib.map(function (x, i) {
-        return '<label class="ly-pick"><input type="radio" name="ovs-img" value="' + U.esc(x.file) + '"' + (i ? '' : ' checked') + '>' + (x.preview ? '<img src="' + U.esc(x.preview) + '" alt="">' : '<span class="ly-noimg">?</span>') + '<span>' + U.esc(x.file) +
-          '<small>' + U.esc(x.width) + ' x ' + U.esc(x.height) + '</small></span>' + (x.uploaded ? '<button class="btn sm icon ghost" type="button" data-imgdel="' + U.esc(x.file) + '" aria-label="Delete ' + U.esc(x.file) + ' from the server">' + U.icon('close') + '</button>' : '') + '</label>'; }).join('') + '</div>'
-        : '<p class="muted small">No image in the content folder yet. Upload one.</p>') +
-      '<div class="fld" style="margin-top:12px"><label class="f" for="ovs-img-up">Upload an image (PNG, JPEG, GIF or BMP, up to 2 MB)</label><input id="ovs-img-up" type="file" accept=".png,.jpg,.jpeg,.gif,.bmp">' +
-      '<div class="hint">Uploads go to the server\'s <code>content/overlaystudio/</code> folder.</div></div>' +
-      '<div class="hrow end" style="margin-top:8px"><button type="button" class="btn sm" data-pickcancel>Cancel</button><button type="button" class="btn sm primary" data-pickok' + (lib.length ? '' : ' disabled') + '>Add image</button></div></div>';
-  }
+  // the picker (ovs-images.js), inline under the Layers title
+  function pickerHtml() { return U.images.pickerHtml({ okLabel: 'Add image' }); }
   function addImage(d, file, stage) {
     d.images = d.images || [];
     var outs = stage === 'outputs';
@@ -503,38 +493,18 @@
     v.forEach(function (o, k) { o.overlay = stage === 'input' || k === 0; });
   }
   function bindPicker(d) {
-    var box = el.body.querySelector('.ly-picker');
-    if (!box) return;
-    var cancel = box.querySelector('[data-pickcancel]'), ok = box.querySelector('[data-pickok]');
-    if (cancel) cancel.onclick = function () { S.pick = false; rerender(); };
-    if (ok) ok.onclick = function () { var r = box.querySelector('input[name=ovs-img]:checked'); if (!r) return; addImage(d, r.value, S.pick); S.pick = false; rerender(); };
-    box.querySelectorAll('[data-imgdel]').forEach(function (b) {
-      b.onclick = function (e) {
-        e.preventDefault();
-        var f = b.getAttribute('data-imgdel');
-        if ((d.images || []).some(function (l) { return l.file === f; })) { U.toast(f + ' is a layer in this template; remove the layer first.', { level: 'bad' }); return; }
-        U.api.post(vh() + '/images', { 'delete': f }).then(function () { U.toast('Deleted ' + f + ' from the server.'); return library(true).then(function () { rerender(); }); },
-          function (er) { U.toast(er.message, { level: 'bad' }); });
-      };
+    var stage = S.pick;
+    U.images.bind(el.body.querySelector('.ly-picker'), {
+      onCancel: function () { S.pick = false; rerender(); },
+      onPick: function (file, uploaded) {
+        S.lib = U.images.cached();
+        addImage(d, file, stage); S.pick = false;
+        if (uploaded) U.toast('Uploaded ' + file + ' and added it as a layer.');
+        rerender();
+      },
+      inUse: function (f) { return (d.images || []).some(function (l) { return l.file === f; }) ? f + ' is a layer in this template; remove the layer first.' : null; },
+      onChange: function () { S.lib = U.images.cached(); rerender(); }
     });
-    var up = box.querySelector('#ovs-img-up');
-    if (up) up.onchange = function () {
-      var f = up.files && up.files[0], stage = S.pick;
-      if (!f) return;
-      if (f.size > 2 * 1024 * 1024) { U.toast('An image is at most 2 MB.', { level: 'bad' }); return; }
-      var rd = new FileReader();
-      rd.onload = function () {
-        var name = f.name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '');
-        U.api.post(vh() + '/images', { name: name, data: rd.result }).then(function (r) {
-          return library(true).then(function () {
-            addImage(d, r.file, stage); S.pick = false;
-            U.toast('Uploaded ' + r.file + ' and added it as a layer.');
-            rerender();
-          });
-        }, function (er) { U.toast('Not uploaded: ' + er.message, { level: 'bad' }); });
-      };
-      rd.readAsDataURL(f);
-    };
   }
   function bindLayers(d) {
     el.body.querySelectorAll('[data-addurl]').forEach(function (b) {

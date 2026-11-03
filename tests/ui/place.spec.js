@@ -41,8 +41,32 @@ test('a click places text at the click point at its usual size', async ({ page, 
   const o = (await saved(page, wse, 'Scoreboard')).objects.find((x) => x.id === 'text-1');
   expect(o).toMatchObject({ type: 'string', text: 'Text', font: 'Fira Sans', fontSize: 48 });
   expect(Math.abs(o.x - 400)).toBeLessThanOrEqual(2);
-  expect(Math.abs(o.y - 348), 'the first baseline a font size below the click').toBeLessThanOrEqual(2);
+  await page.getByRole('tab', { name: 'Place' }).click();
+  await expect(page.locator('[data-insp] [data-f=y]'), 'its top is at the click').toHaveValue(/^(29[89]|30[0-2])$/);
+  expect(o.y - 300, 'saved as the first baseline, an ascent below the click').toBeGreaterThan(30);
+  expect(o.y - 300).toBeLessThan(48);
   expect(o.zOrder, 'on top of the page').toBe(2);
+});
+
+test('on a smaller stream a new layer starts at a size scaled to it, where it was clicked', async ({ page, studio, wse }) => {
+  // layers are in the stream's own pixels; the usual sizes are for 1080p, so a 512 x 288 stream gets them at 288/1080
+  const orig = wse.streamStatus;
+  wse.streamStatus = function (s) { const r = orig.call(this, s); if (r.transcoder.state === 'running') Object.assign(r.transcoder, { decoderWidth: 512, decoderHeight: 288 }); return r; };
+  await openOverlay(page, studio, 'Scoreboard');
+  const f = await frame(page).boundingBox(), pt = (x, y) => ({ x: f.x + x * f.width / 512, y: f.y + y * f.height / 288 });
+  const add = page.getByRole('toolbar', { name: 'Add a layer' });
+  await add.getByRole('button', { name: 'Text' }).click();
+  let p = pt(100, 60); await page.mouse.click(p.x, p.y);
+  await add.getByRole('button', { name: 'Image' }).click();
+  await expect(page.locator('[data-placehint]')).toBeVisible();
+  p = pt(400, 100); await page.mouse.click(p.x, p.y);
+  const objs = (await saved(page, wse, 'Scoreboard')).objects, text = objs.find((x) => x.id === 'text-1'), img = objs.find((x) => x.id === 'image-1');
+  expect(text.fontSize).toBe(13);
+  expect(text.y - 60, 'its top at the click, its baseline an ascent below').toBeGreaterThan(8);
+  expect(text.y - 60).toBeLessThan(14);
+  expect(Math.abs(img.w - 85)).toBeLessThanOrEqual(2);
+  expect(Math.abs(img.h - 48)).toBeLessThanOrEqual(2);
+  expect(Math.abs(img.x - 400), 'the click point, not pushed left to fit a 1080p size').toBeLessThanOrEqual(2);
 });
 
 test('a drag draws a shape at the dragged size; Escape cancels placing', async ({ page, studio, wse }) => {

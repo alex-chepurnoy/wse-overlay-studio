@@ -115,7 +115,9 @@
 .ovs-plugin .drawer .key { display: inline; }
 .ovs-plugin .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2) var(--s-3); }
 .ovs-plugin .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-1); }
-.ovs-plugin .swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-strong); vertical-align: middle; margin-left: 4px; }
+.ovs-plugin .cfield { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.ovs-plugin .cfield input[type="color"] { flex: none; width: 34px; height: 30px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); cursor: pointer; }
+.ovs-plugin .cfield input[type="text"] { flex: 1; min-width: 0; }
 .ovs-plugin .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r-md); overflow: hidden; flex: none; }
 .ovs-plugin .seg button { height: 30px; padding: 0 var(--s-3); border: 0; background: var(--surface); font-size: 13px; cursor: pointer; color: var(--text); }
 .ovs-plugin .seg button + button { border-left: 1px solid var(--border-strong); }
