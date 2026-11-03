@@ -544,11 +544,26 @@
       return;
     }
     var s = src(), o = S.layer && byId(S.layer), z = o ? size(o) : null;
+    // a text's size is measured in its font, so it is shown in whole pixels
     el.coords.innerHTML = '<span class="bdg" title="Source picture">' + s.w + ' x ' + s.h + (s.known ? '' : ', assumed') + '</span>' +
-      (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + (o.y || 0) + ' &middot; ' + z.w + ' x ' + z.h + '</span>' : '');
-    var outside = o && s.known && ((o.x || 0) >= s.w || (o.y || 0) >= s.h);
+      (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + (o.y || 0) + ' &middot; ' + Math.round(z.w) + ' x ' + Math.round(z.h) + '</span>' : '');
+    var outside = o && s.known && frameFit(o, s) === 'outside';
     el.outside.hidden = !outside;
-    if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' starts at ' + (o.x || 0) + ', ' + (o.y || 0) + ', outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '). Move it under Place.';
+    if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' is outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '): nothing of it shows. Move it under Place.';
+  }
+  var FIT = { outside: 'Outside the frame', past: 'Past title safe', inside: 'Inside title safe' };
+  // the Place tab's chip follows the layer as it moves, without rebuilding the panel
+  function updateFit() {
+    var c = el.insp && el.insp.querySelector('[data-fit]'), o = S.layer && byId(S.layer);
+    if (!c || !o) return;
+    var f = frameFit(o, src());
+    c.textContent = FIT[f]; c.className = 'bdg' + (f === 'inside' ? '' : ' warn');
+  }
+  // where a layer's drawn area sits on the frame: wholly outside it, past the title safe area (5% in from each edge), or inside
+  function frameFit(o, s) {
+    var a = area(o);
+    if (a.x >= s.w || a.y >= s.h || a.x + a.w <= 0 || a.y + a.h <= 0) return 'outside';
+    return a.x < s.w * 0.05 || a.y < s.h * 0.05 || a.x + a.w > s.w * 0.95 || a.y + a.h > s.h * 0.95 ? 'past' : 'inside';
   }
 
   function frameEl() { return el.stage.querySelector('[data-frame]'); }
@@ -991,10 +1006,10 @@
     var h = '';
     if (!o) {
       h = '<div class="pnl-h"><div><h3>No layer selected</h3><span class="small faint">' + U.esc(S.name) + '</span></div></div>' +
-        '<section><p class="small muted">Select a layer in the list or on the canvas' + (ro() ? '.' : ', or add the page with the clock and score.') + '</p>' +
+        '<section><p class="small muted">Select a layer in the list or on the canvas' + (ro() ? '.' : ', or add one.') + '</p>' +
         (ro() ? '' : '<p style="margin-top:12px">' + addMenuHtml('insp', 'btn-add') + '</p>') + '</section>';
     } else {
-      var web = o.type === 'webPage', z = size(o), s = src(), past = (o.x || 0) + z.w > s.w * 0.95 || (o.y || 0) + z.h > s.h * 0.95;
+      var web = o.type === 'webPage', z = size(o), s = src(), fit = frameFit(o, s);
       // the id is editable: live values (plan 3.6) address a layer by it
       var idHtml = ro() ? '<h3>' + U.esc(o.id) + '</h3>' : '<input class="lid" data-lid value="' + U.esc(o.id) + '" aria-label="Layer id" title="Layer id: what a live value feed writes to" spellcheck="false" autocomplete="off"><div class="err" data-liderr></div>';
       h = '<div class="pnl-h"><div>' + idHtml + (web ? '<span class="capchip ' + pageDot(o.id) + '" data-capline title="' + U.esc(capLine(o.id).replace(/<[^>]+>/g, '')) + '"><span class="dot ' + pageDot(o.id) + '"></span>' + U.esc(capShort(o.id)) + '</span>' : '') +
@@ -1013,12 +1028,12 @@
       else if (S.inspTab === 'fx') body = '<div class="grid2">' + of(o, sv, 'shadowColor') + of(o, sv, 'shadowOffset') + '</div>' + opacityHtml(o, sv);
       else if (S.inspTab === 'image') body = imageTabHtml(o);
       else if (S.inspTab === 'place') body = '<div class="grid2">' +
-        fieldHtml('x', o.x || 0, { noHelp: true, saved: sv.x || 0 }) + fieldHtml('y', o.y || 0, { noHelp: true, saved: sv.y || 0 }) +
+        fieldHtml('x', o.x || 0, { noHelp: true, saved: sv.id ? sv.x || 0 : undefined }) + fieldHtml('y', o.y || 0, { noHelp: true, saved: sv.id ? sv.y || 0 : undefined }) +
         // a line, a triangle and a free text are sized by their points and their font, not a box
         (resizable(o) ? fieldHtml('w', z.w, { noHelp: true, saved: sv.id ? size(sv).w : undefined }) + fieldHtml('h', z.h, { noHelp: true, saved: sv.id ? size(sv).h : undefined }) : '') + '</div>' +
         (web ? '' : of(o, sv, 'rotation')) + (o.type === 'image' ? fieldHtml('lockAspect', o.lockAspect !== false, { saved: sv.id ? sv.lockAspect !== false : undefined }) : '') +
         (TABS.shape === tabs ? '' : opacityHtml(o, sv)) +
-        '<div class="hrow chips">' + (past ? '<span class="bdg warn">Past title safe</span>' : '<span class="bdg">Inside title safe</span>') +
+        '<div class="hrow chips"><span class="bdg' + (fit === 'inside' ? '' : ' warn') + '" data-fit>' + FIT[fit] + '</span>' +
         '<span class="bdg">Source ' + s.w + ' x ' + s.h + '</span>' + (ro() ? '' : U.tip('Drag the layer on the canvas; its corners resize it and the round handle above turns it. It snaps to the frame, the title safe area and other layers; hold Ctrl to place it freely. Arrow keys move 1 px, Shift 10 px. Positions are in source pixels.')) + '</div>' + (ro() ? U.roNote() : '');
       else if (S.inspTab === 'look') body = keyHtml(o, sv);
       else if (S.inspTab === 'time') body = (web ? '<div class="grid2">' + fieldHtml('pageDelay', o.pageDelay, { saved: sv.pageDelay }) + fieldHtml('reloadRate', o.reloadRate, { saved: sv.reloadRate }) + '</div>' : '') +
@@ -1295,6 +1310,7 @@
     }
     // the dashed draft mark follows the field without rebuilding the inspector, which would take its focus
     e.target.classList.add('is-draft');
+    if (f.scope === 'object') { updateFit(); renderCoords(); }
     markEdited(); renderBar(); renderCaption(); U.changed();
   }
   // a time a layer shows or hides at, as the module takes it (ObjectConfig.timingProblem)
@@ -1309,6 +1325,7 @@
   }
   function syncPlacement() {
     var o = byId(S.layer);
+    updateFit();
     ['x', 'y', 'w', 'h'].forEach(function (k) { var i = el.insp.querySelector('[data-f=' + k + ']'); if (i) { i.value = o[k]; i.classList.add('is-draft'); } });
   }
   // the raw capture is a data URL, so the canvas is not tainted

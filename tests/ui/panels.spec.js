@@ -188,6 +188,47 @@ test('Timing takes a stream time or a date with its offset, and fades and blinks
   expect(o.fadeOut).toBeUndefined();
 });
 
+// the stream's decoded size as the module reports it, under transcoder (OverlayStudioModule.streamStatus)
+function streamSize(wse, w, h) {
+  const orig = wse.streamStatus;
+  wse.streamStatus = function (s) { const r = orig.call(this, s); if (r.transcoder === true) r.transcoder = { state: 'running', decoderWidth: w, decoderHeight: h, encodes: r.encodes }; return r; };
+}
+
+test('the frame checks use the layer\'s drawn area, not its first point', async ({ page, studio, wse }) => {
+  // the triangle's first point (1000, 700) is on this frame's bottom edge; the triangle itself is inside
+  streamSize(wse, 1200, 700);
+  await openOverlay(page, studio, 'Mixed');
+  await expect(page.locator('[data-coords]')).toContainText('1200 x 700');
+  await row(page, 'Triangle').click();
+  await page.getByRole('tab', { name: 'Place' }).click();
+  await expect(page.locator('[data-outside]')).toBeHidden();
+  await expect(page.locator('[data-fit]')).toHaveText('Past title safe');
+  await row(page, 'HOME 2 - 1').click();
+  await expect(page.locator('[data-fit]')).toHaveText('Inside title safe');
+  await expect(page.locator('[data-coords]'), 'a text\'s size in whole pixels').toHaveText(/score at 100, 200 · \d+ x \d+$/);
+  await field(page, 'x').fill('1250');
+  await expect(page.locator('[data-fit]')).toHaveText('Outside the frame');
+  await expect(page.locator('[data-outside]')).toContainText('score is outside cam1 (1200 x 700): nothing of it shows');
+});
+
+test('a layer never saved shows no saved values; the empty panel offers to add one', async ({ page, studio }) => {
+  await openOverlay(page, studio, 'Mixed');
+  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Text' }).click();
+  await page.keyboard.press('Enter');
+  await page.getByRole('tab', { name: 'Place' }).click();
+  await expect(page.locator('[data-insp] .hint').filter({ hasText: 'Saved:' })).toHaveCount(0);
+  await row(page, 'HOME 2 - 1').click();
+  await field(page, 'x').fill('120');
+  // the saved value shows from the panel's next drawing on, as for every field
+  await row(page, 'HOME 2 - 1').click();
+  await expect(page.locator('[data-insp] .hint').filter({ hasText: 'Saved: 100' }), 'a saved layer still shows its saved value').toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-frame]').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-insp]')).toContainText('Select a layer in the list or on the canvas, or add one.');
+  await expect(page.locator('[data-insp]')).not.toContainText('clock and score');
+});
+
 test('Templates choose a transcoder image from the same picker', async ({ page, studio }) => {
   await studio.open();
   await page.locator('[data-tab=templates]').click();
