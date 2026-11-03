@@ -110,6 +110,14 @@ class FakeWse {
     }
     if (r === VH + '/applications' && method === 'GET') return { applications: this.apps };
     // as Fonts.list (plan 3.7)
+    // as Fonts.check: the family Java draws with (Dialog for a font not installed) and the characters it cannot draw;
+    // here a bundled family draws Latin only, and PT Serif Cyrillic too
+    if (r === '/fonts/check' && method === 'GET') {
+      const font = q.get('font'), chars = q.get('chars') || '';
+      const known = this.fontNames().includes(font), uses = known ? font : 'Dialog';
+      const missing = known && font !== 'Dialog' ? [...new Set(Array.from(chars))].filter((c) => { const cp = c.codePointAt(0); return cp > 0x2ff && !(font === 'PT Serif' && cp >= 0x400 && cp <= 0x4ff); }).sort() : [];
+      return { font, available: true, uses, missing };
+    }
     if (r === '/fonts' && method === 'GET') {
       return { available: true, problem: null, default: 'Fira Sans',
         bundled: ['Fira Sans', 'Fira Sans Condensed', 'Fira Mono', 'PT Serif'].map((family) => ({ family, styles: ['plain', 'bold', 'italic', 'bolditalic'], files: ['plain', 'bold'], shadowedBy: null })),
@@ -119,6 +127,8 @@ class FakeWse {
     if (r === VH + '/images') {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
       // one image whole, as ImageLibrary.data answers: a 1 x 1 PNG standing for a 200 x 100 picture
+      // a file deleted from content/ answers 404, as ImageLibrary.data does
+      if (q.get('file') && this.goneImages && this.goneImages.includes(q.get('file'))) return { status: 404, json: { success: false, message: 'No image ' + q.get('file') } };
       if (q.get('file')) return { file: q.get('file'), width: 200, height: 100, data: 'data:image/png;base64,' + PIXEL };
       // as ImageLibrary.list: one upload of this module's, one picture put in content/ by hand
       return { images: [
@@ -138,7 +148,10 @@ class FakeWse {
         this.overlays[name] = body;
         this.modified[name] = Date.now();
         this.revision++;
-        return Object.assign({ success: true, name }, body, { updatedStreams: this.streams.filter((s) => s.publishing && this.overlayOf(s) === name).map((s) => s.name) });
+        // as OverlayStore.warnings: a text's font not installed here is saved, with a warning
+        const warnings = (body.objects || []).filter((o) => o.type === 'string' && o.font && !this.fontNames().includes(o.font))
+          .map((o) => ({ id: o.id, field: 'font', message: "Font '" + o.font + "' is not installed on this server; the text draws in Fira Sans until it is" }));
+        return Object.assign({ success: true, name }, body, { updatedStreams: this.streams.filter((s) => s.publishing && this.overlayOf(s) === name).map((s) => s.name), warnings });
       }
       if (method === 'DELETE') {
         delete this.overlays[name];
@@ -216,6 +229,9 @@ class FakeWse {
     out.next = at;
     return out;
   }
+
+  // every family the fake's /fonts lists
+  fontNames() { return ['Fira Sans', 'Fira Sans Condensed', 'Fira Mono', 'PT Serif', 'Serif', 'SansSerif', 'Monospaced', 'Dialog', 'DialogInput', 'DejaVu Sans']; }
 
   overlayOf(s) {
     const t = s.template && this.templates[s.template.replace(/\.xml$/, '')];

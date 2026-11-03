@@ -412,6 +412,8 @@
 .ovs-plugin .pre .pre-t { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ovs-plugin .pre .pre-s { font-size: 12px; color: var(--text-2); }
 .ovs-plugin .pre .pre-s:empty { display: none; }
+.ovs-plugin [data-prob] { margin-top: 2px; }
+.ovs-plugin .rowprobs { display: contents; }
 .ovs-plugin .tstyles { display: flex; flex-wrap: wrap; gap: 4px; }
 .ovs-plugin .placebanner { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: var(--s-2);
   max-width: calc(100% - 20px); padding: 6px 6px 6px 12px; border-radius: var(--r-md); background: rgba(17, 24, 39, .88); color: #fff; font-size: 13px; cursor: default; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }

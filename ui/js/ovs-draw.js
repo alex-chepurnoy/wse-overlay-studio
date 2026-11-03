@@ -120,6 +120,8 @@
     if (box) { area = { x: e.x, y: e.y, w: e.w, h: e.h }; base = e.y + pad + l.ascent; left = e.x + pad; }
     else { innerW = l.maxWidth; area = { x: e.x - pad, y: e.y - l.ascent - pad, w: innerW + 2 * pad, h: l.height + 2 * pad }; base = e.y; left = e.x; }
     l.box = box; l.area = area;
+    // a box's text that does not fit, even at the auto-fit floor of half its size, is cut at the box's edge (plan 4.2a)
+    l.cut = box && (l.height > innerH + 0.5 || l.maxWidth > innerW + 0.5);
     l.rows = l.lines.map(function (s, i) {
       var lx = e.align === 'center' ? left + (innerW - l.widths[i]) / 2 : e.align === 'right' ? left + innerW - l.widths[i] : left;
       return { text: s, x: lx, base: base + i * l.step, w: l.widths[i] };
