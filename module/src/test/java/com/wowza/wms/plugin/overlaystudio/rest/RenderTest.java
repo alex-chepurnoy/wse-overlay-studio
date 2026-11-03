@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -112,6 +113,26 @@ class RenderTest
 		assertTrue(alpha(r.image(), 150, 150) > 200, "the shape is drawn");
 		assertEquals(0, alpha(r.image(), 300, 50), "the page is left out");
 		assertFalse(r.pages());
+	}
+
+	@Test
+	void eachDrawnLayerSaysWhereItDrawsAtSourceScale()
+	{
+		Map<String, Object> text = Map.of("id", "score", "type", "string", "x", 40, "y", 300, "text", "HOME 2 - 1", "fontSize", 48, "color", "white", "opacity", 100);
+		Map<String, Object> later = Map.of("id", "later", "type", "rectangle", "x", 0, "y", 0, "w", 10, "h", 10, "showFrom", "stream+60", "opacity", 100);
+		// drawn at a third of the source's width: the boxes are still in source pixels
+		OverlayRender.Result r = OverlayRender.draw(overlay(page(), bar(), text, later), null, 1920, 1080, 640, NOW, NOW, false);
+		List<String> ids = r.boxes().stream().map(b -> (String)b.get("id")).toList();
+		assertEquals(List.of("bar", "score"), ids.stream().sorted().toList(), "no page, and no layer outside its show window");
+		Map<String, Object> bar = r.boxes().stream().filter(b -> "bar".equals(b.get("id"))).findFirst().orElseThrow();
+		assertEquals(List.of(100.0, 100.0, 200.0, 100.0), List.of(bar.get("x"), bar.get("y"), bar.get("w"), bar.get("h")));
+		assertNull(bar.get("advance"));
+		Map<String, Object> score = r.boxes().stream().filter(b -> "score".equals(b.get("id"))).findFirst().orElseThrow();
+		double adv = (Double)score.get("advance"), top = (Double)score.get("y");
+		assertEquals(40.0, (Double)score.get("x"), 0.01, "a free text starts at its x");
+		assertTrue(adv > 150 && adv < 400, "a 48 px line of ten characters: " + adv);
+		assertEquals(adv, (Double)score.get("w"), 0.01, "no padding");
+		assertTrue(top < 300 && top > 300 - 48, "the first baseline is an ascent below its top: " + top);
 	}
 
 	@Test

@@ -17,7 +17,8 @@ import com.wowza.wms.rest.WMSConfig;
 
 /**
  * The draft render (plan 3.8): POST {"overlay": {...}, "width", "now", "streamStart"} with the unsaved overlay, and
- * the answer is a PNG (base64, as the other image answers are) of its text, shapes and images at width, at most the
+ * the answer is a PNG (base64, as the other image answers are), with "boxes", where each layer inside its show window
+ * draws at source scale ({id, x, y, w, h}, and "advance", a text's widest line, for the page's check, 4.4), of its text, shapes and images at width, at most the
  * source width (1920 when no stream shows the overlay), drawn by the stream's own layer code at the frozen now and
  * streamStart (epoch milliseconds; now by default). Page layers are left out and no capture is opened; live values are
  * not applied; nothing is written. Checked as a save is. 4 renders a second per user.
@@ -60,6 +61,7 @@ public class NamedOverlayRenderConfig extends VHostResourceBase
 		m.put("sourceHeight", ch);
 		m.put("pagesLeftOut", pages);
 		m.put("png", CaptureConfig.toBase64Png(r.image()));
+		m.put("boxes", r.boxes());
 		return m;
 	}
 }

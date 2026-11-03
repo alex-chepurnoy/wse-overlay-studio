@@ -1386,6 +1386,50 @@ public class ObjectConfig extends JsonApplicationConfigBase
 		return AffineTransform.getRotateInstance(Math.toRadians(rotation), c[0], c[1]).createTransformedShape(r).getBounds();
 	}
 
+	/**
+	 * Where the layer draws, unrotated and unpadded, for the draft render's check (plan 4.4): {x, y, w, h} in canvas
+	 * pixels, and for text its widest line as a fifth number; null for a page, or an image or text that draws nothing.
+	 */
+	public double[] checkBox(double scaled, long now, long streamStart)
+	{
+		if(type == null)
+		{
+			return null;
+		}
+		switch(type)
+		{
+			case "rectangle", "ellipse" -> {
+				return new double[] { getX(scaled), getY(scaled), Math.max(0, getW(scaled)), Math.max(0, getH(scaled)) };
+			}
+			case "line", "triangle" -> {
+				java.awt.Rectangle r = "line".equals(type) ? span(new int[] { getX(scaled), getX2(scaled) }, new int[] { getY(scaled), getY2(scaled) })
+						: span(new int[] { getX(scaled), getX2(scaled), getX3(scaled) }, new int[] { getY(scaled), getY2(scaled), getY3(scaled) });
+				return new double[] { r.x, r.y, r.width, r.height };
+			}
+			case "string" -> {
+				return TextDraw.checkBox(this, scaled, now, streamStart);
+			}
+			case "image" -> {
+				BufferedImage image = image();
+				if(image == null)
+				{
+					return null;
+				}
+				int[] d = imageRect(image.getWidth(), image.getHeight(), scaled);
+				return new double[] { d[0], d[1], d[2], d[3] };
+			}
+			default -> {
+				return null;
+			}
+		}
+	}
+
+	/** Whether now is inside the layer's show window (showFrom to hideAt); blink and fades do not count. */
+	public boolean inShowWindow(long now, long streamStart)
+	{
+		return now >= timeOf(showFrom, streamStart, Long.MIN_VALUE) && now < timeOf(hideAt, streamStart, Long.MAX_VALUE);
+	}
+
 	/** drawBounds before rotation. */
 	java.awt.Rectangle unrotatedBounds(double scaled)
 	{

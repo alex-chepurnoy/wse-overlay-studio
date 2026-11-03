@@ -190,6 +190,21 @@
     return { x: e.x, y: e.y, w: Math.max(1, e.w), h: Math.max(1, e.h) };
   };
 
+  /**
+   * Where a layer draws, unrotated and unpadded, as ObjectConfig.checkBox works it out, for the server check (plan
+   * 4.4): {x, y, w, h}, and for text its widest line as advance; null for a page or a picture not here yet. A text
+   * draws text, given (a token's sample at the checked moment).
+   */
+  D.checkBox = function (o, ov, text) {
+    var e = D.effective(o, ov);
+    if (o.type === 'rectangle' || o.type === 'ellipse') return { x: e.x, y: e.y, w: Math.max(0, e.w), h: Math.max(0, e.h) };
+    if (o.type === 'line') return span([e.x, e.x2], [e.y, e.y2]);
+    if (o.type === 'triangle') return span([e.x, e.x2, e.x3], [e.y, e.y2, e.y3]);
+    if (o.type === 'string') { var l = D.text(e, text), a = l.area; return { x: a.x, y: a.y, w: a.w, h: a.h, advance: l.maxWidth }; }
+    if (o.type === 'image') { var im = D.image(e.imageFile); return im && im.width ? imageRect(e, im.width, im.height) : null; }
+    return null;
+  };
+
   /** What a text layer shows here now: its tokens by the server's samples (U.format.render), as written until they come. */
   D.shown = function (o) { return U.format ? U.format.render(o) : o.text == null ? '' : String(o.text); };
 
