@@ -142,7 +142,7 @@ test('the overlay row menu adds any kind, opening the overlay first', async ({ p
   await openOverlay(page, studio, 'Scoreboard');
   const row = page.locator('[data-list] [data-rowfor="overlay:LowerThird"]');
   await row.click();
-  await expect(page.getByRole('menuitem')).toHaveText(['Add web page', 'Add text', 'Add date and time', 'Add shape...', 'Add image', 'Duplicate...', 'Delete overlay...']);
+  await expect(page.getByRole('menuitem')).toHaveText(['Add web page', 'Add text', 'Add date and time', 'Add shape...', 'Add image', 'Add from a preset...', 'Duplicate...', 'Delete overlay...']);
   await page.getByRole('menuitem', { name: 'Add text' }).click();
   await expect(page.locator('h2[data-title]:visible')).toContainText('LowerThird');
   await expect(page.locator('[data-placehint]')).toContainText('Click to place the text');

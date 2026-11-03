@@ -55,7 +55,8 @@ test('one Add layer menu shows each kind with its icon, and placing shows a bann
   await expect(page.locator('[data-addbar]'), 'no second set of Add buttons over the canvas').toHaveCount(0);
   await page.locator('[data-rowfor="add:list"]').click();
   const items = page.getByRole('menuitem');
-  await expect(items).toHaveCount(12);
+  // the twelve kinds, then From a preset...
+  await expect(items).toHaveCount(13);
   expect(await items.evaluateAll((xs) => xs.every((x) => x.querySelector('svg')))).toBe(true);
   await page.getByRole('menuitem', { name: 'Ellipse', exact: true }).click();
   const banner = page.locator('[data-frame] [data-placehint]');
