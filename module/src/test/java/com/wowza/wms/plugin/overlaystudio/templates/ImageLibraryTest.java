@@ -53,6 +53,25 @@ class ImageLibraryTest
 		assertTrue(Files.exists(vhost.resolve("content/house.png")));
 	}
 
+	@Test
+	void anImageThatAnOverlayOrATemplateDrawsIsNotDeleted() throws Exception
+	{
+		ImageLibrary.save(vhost, "logo.png", png(20, 10));
+		// an overlay in another application, then a transcoder template, draws it
+		OverlayStore.write(ModuleFiles.appDir(vhost, "live2"), "Lower", Map.of("objects", List.of(Map.of("id", "bug", "type", "image", "imageFile", "overlaystudio/logo.png"))), u -> null);
+		TemplateFiles.Refused r = assertThrows(TemplateFiles.Refused.class, () -> ImageLibrary.delete(vhost, "overlaystudio/logo.png"));
+		assertEquals(409, r.status());
+		assertTrue(r.getMessage().contains("overlay live2/Lower"), r.getMessage());
+		OverlayStore.write(ModuleFiles.appDir(vhost, "live2"), "Lower", Map.of("objects", List.of()), u -> null);
+		Files.createDirectories(vhost.resolve("transcoder/templates"));
+		Files.writeString(vhost.resolve("transcoder/templates/master.xml"), "<Overlay><ImagePath>${com.wowza.wms.context.VHostConfigHome}/content/overlaystudio/logo.png</ImagePath></Overlay>");
+		assertEquals(List.of("template master.xml"), ImageLibrary.users(vhost, "overlaystudio/logo.png"));
+		assertThrows(TemplateFiles.Refused.class, () -> ImageLibrary.delete(vhost, "overlaystudio/logo.png"));
+		Files.delete(vhost.resolve("transcoder/templates/master.xml"));
+		ImageLibrary.delete(vhost, "overlaystudio/logo.png");
+		assertFalse(Files.exists(vhost.resolve("content/overlaystudio/logo.png")), "deleted once nothing draws it");
+	}
+
 	// the editor's canvas draws an image layer from this (plan 4.4)
 	@Test
 	void oneImageIsGivenWholeWithItsSize() throws Exception

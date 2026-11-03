@@ -190,3 +190,13 @@ test.describe('read-only', () => {
     await expect(page.getByRole('textbox', { name: 'Layer id' })).toHaveCount(0);
   });
 });
+
+test('the readout under the canvas is not a live region; the placing hint is said once', async ({ page, studio }) => {
+  await openOverlay(page, studio, 'Scoreboard');
+  // a ticking clock rewrites the readout every second; a screen reader should not hear it each time
+  await expect(page.locator('[data-coords]')).toHaveAttribute('aria-live', 'off');
+  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Text' }).click();
+  await expect(page.locator('[data-say]')).toHaveText(/Click to place the text/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-say]')).toHaveText('');
+});

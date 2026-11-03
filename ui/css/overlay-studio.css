@@ -908,3 +908,5 @@ html.ovs-host #ovs-root { border-radius: 0; }
 .ovs-plugin .tb > .tb-box:nth-child(2) .lyr .lyc-row > .f { width: 64px; }
 .ovs-plugin .tb > .tb-box:nth-child(2) .lyr .ly-outs, .ovs-plugin .tb > .tb-box:nth-child(2) .lyr .lyc-more { padding-left: calc(64px + var(--s-3)); }
 @media (max-width: 1300px) { .ovs-plugin .tb { grid-template-columns: minmax(0, 1fr); } }
+/* heard by a screen reader, not seen */
+.ovs-plugin .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

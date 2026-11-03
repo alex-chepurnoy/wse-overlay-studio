@@ -104,7 +104,8 @@
       return r.text().then(function (text) {
         var data = null;
         if (text) { try { data = JSON.parse(text); } catch (e) { data = text; } }
-        if (isSignIn(text)) { signedOut(); throw new ApiError(401, 'You are signed out of WSE Manager.', null); }
+        // only an answer that is not JSON can be the sign-in page; data that happens to hold its marker is data
+        if (typeof data === 'string' && isSignIn(text)) { signedOut(); throw new ApiError(401, 'You are signed out of WSE Manager.', null); }
         // anything else that is not JSON is not an answer from the module
         if (r.ok && typeof data === 'string') throw new ApiError(502, 'WSE Manager answered with a page instead of data.', null);
         if (!r.ok) {
