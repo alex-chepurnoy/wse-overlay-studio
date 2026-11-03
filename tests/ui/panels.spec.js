@@ -240,9 +240,11 @@ test('a layer never saved shows no saved values; the empty panel offers to add o
   await expect(page.locator('[data-insp] .hint').filter({ hasText: 'Saved:' })).toHaveCount(0);
   await row(page, 'HOME 2 - 1').click();
   await field(page, 'x').fill('120');
-  // the saved value shows from the panel's next drawing on, as for every field
-  await row(page, 'HOME 2 - 1').click();
-  await expect(page.locator('[data-insp] .hint').filter({ hasText: 'Saved: 100' }), 'a saved layer still shows its saved value').toHaveCount(1);
+  // the saved value shows from the panel's next drawing on, as for every field; a click that a toast or a redraw
+  // takes before it lands is clicked again
+  const hint = page.locator('[data-insp] .hint').filter({ hasText: 'Saved: 100' });
+  await expect(async () => { await row(page, 'HOME 2 - 1').click(); await expect(hint).toHaveCount(1, { timeout: 1000 }); },
+    'a saved layer still shows its saved value').toPass({ timeout: 8000 });
   await page.keyboard.press('Escape');
   await page.locator('[data-frame]').focus();
   await page.keyboard.press('Escape');

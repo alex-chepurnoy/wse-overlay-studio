@@ -23,10 +23,12 @@
   var NO_BRIDGE = 'The Overlay Studio bridge is not loaded in WSE Manager.';
   // once the Manager's session ends (it restarted, or timed out) it answers every call with its sign-in page, as a 200
   function isSignIn(text) { return /<!--\s*Redirect to Login\s*-->/i.test(String(text || '').slice(0, 200)); }
+  // one banner whichever check notices first: a call answered by the sign-in page, or the page-file poll below
   function signedOut() {
-    U.banner('auth', 'bad', 'You are signed out of WSE Manager.', 'Its session ended, so nothing here can be read or saved. Unsaved changes stay on this page while you sign in from another tab.',
+    U.banner('signedout', 'bad', 'You are signed out of WSE Manager.', 'WSE Manager was restarted or signed you out, so nothing here can be read or saved. Unsaved changes stay on this page while you sign in from another tab.',
       { label: 'Sign in again', run: function () { window.open('/enginemanager/login.htm', '_blank'); } });
   }
+  U.signedOut = signedOut;
   // whether the bridge answers, and its version; null when it is missing (404, or the Manager's sign-in page)
   U.discover = function () { return discovering || (discovering = discover()); };
   function discover() {
@@ -112,7 +114,7 @@
         }
         if (data && typeof data === 'object' && data.success === false) throw new ApiError(r.status, data.message || 'Request failed', data);
         // WSE answered, so an earlier "could not be reached" or "signed out" no longer holds
-        U.clearBanner('network'); U.clearBanner('auth');
+        U.clearBanner('network'); U.clearBanner('auth'); U.clearBanner('signedout');
         return data;
       });
     }, function (e) {
@@ -627,9 +629,7 @@
         return r.text().then(function (html) {
           var m = /ovs-core\.js\?v=([^"'&]+)/.exec(html);
           if (m) { U.clearBanner('signedout'); U.staleCheck(m[1]); return; }
-          if (U.root.querySelector('[data-banner=signedout]')) return;
-          U.banner('signedout', 'bad', 'The Manager session ended.', 'WSE Manager was restarted or signed you out, so this page cannot reach WSE. Sign in again, then open Overlay Studio.',
-            { label: 'Sign in', run: function () { window.location.reload(); } });
+          U.signedOut();
         });
       }, function () { /* the Manager itself is down; the REST banners say so */ });
     });
