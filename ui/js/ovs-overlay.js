@@ -168,7 +168,8 @@
       S.saved = kept.saved; S.draft = kept.draft; S.undo = kept.undo; S.redo = kept.redo; S.known = kept.known; S.layer = kept.layer;
       // the file changed while the draft waited: the draft stays, and Save is held until the producer picks
       if (e && kept.known != null && e.modified !== kept.known) { S.conflict = true; S.theirs = e.modified; }
-      renderAll(); startCaptures();
+      S.live = {}; ticked = {};
+      renderAll(); startCaptures(); loadLive();
       return Promise.resolve();
     }
     S.undo = []; S.redo = []; S.layer = null; S.saved = S.draft = null;
@@ -179,8 +180,10 @@
       if (S.name !== name) return;
       S.saved = normalize(o); S.draft = clone(S.saved); S.renamed = {}; S.placing = null;
       var top = sorted()[0]; S.layer = top ? top.id : null;
+      U.format.start(); S.live = {}; ticked = {};
       renderAll();
       startCaptures();
+      loadLive();
     }, function (err) { U.banner('ov', 'bad', 'Overlay ' + name + ' could not be read.', err.message); });
   }
   // the editor's draft for another screen's link, or null; never saved or discarded from there
@@ -524,14 +527,14 @@
   }
 
   function position(b, o, s) {
-    var z = area(o);
+    var d = drawn(o), z = area(d);
     b.style.left = (100 * z.x / s.w) + '%';
     b.style.top = (100 * z.y / s.h) + '%';
     b.style.width = (100 * z.w / s.w) + '%';
     b.style.height = (100 * z.h / s.h) + '%';
     // text, shapes and images draw as they change, a page keeps its capture
-    if (o.type === 'webPage') return;
-    var g = b.querySelector('.lyr-svg'); if (g) g.outerHTML = U.draw.svg(o, S.draft, 'ovs-' + o.id, { unrotated: true, hidden: true });
+    if (o.type === 'webPage') { paintTime(b, o); return; }
+    var g = b.querySelector('.lyr-svg'); if (g) g.outerHTML = U.draw.svg(d, S.draft, 'ovs-' + o.id, { unrotated: true, hidden: true });
     // the box turns about the module's pivot, so its outline and grips turn with the drawing
     var r = rotationOf(o);
     if (r) { var p = U.draw.pivot(o, S.draft); b.style.transformOrigin = (100 * (p.x - z.x) / z.w) + '% ' + (100 * (p.y - z.y) / z.h) + '%'; b.style.transform = 'rotate(' + r + 'deg)'; }
@@ -540,6 +543,101 @@
       var p = pointOf(o, h.getAttribute('data-g'));
       h.style.left = (100 * (p.x - z.x) / z.w) + '%'; h.style.top = (100 * (p.y - z.y) / z.h) + '%';
     });
+    paintTime(b, o);
+  }
+
+  /* ---------- the live canvas (plan 4.4): samples tick, timing plays, live values show ---------- */
+  // the values a feed set on air (3.6), or null
+  function liveOf(o) { var v = o && S.live && S.live[o.id]; return v && Object.keys(v).length ? v : null; }
+  // what the canvas draws for a layer: its live values on top, except while it is selected for editing
+  function drawn(o) {
+    var v = liveOf(o);
+    if (!v || o.id === S.layer) return o;
+    var c = {}, k;
+    for (k in o) c[k] = o[k];
+    ['text', 'color', 'background', 'opacity'].forEach(function (f) { if (v[f] !== undefined && v[f] !== null) c[f] = v[f]; });
+    return c;
+  }
+  // how much of a layer shows now, and the tag that says why it is faint
+  function timeState(o) {
+    var t = U.format.timing(o, U.format.now()), v = liveOf(o), sel = o.id === S.layer;
+    if (t.state !== 'on') return { alpha: 0.25, tag: (t.state === 'before' ? 'Hidden now, shows at ' : 'Hidden since ') + U.format.when(o, t.at, t.spec) };
+    if (v && v.hidden === true && !sel) return { alpha: 0.25, tag: 'Hidden by a live value' };
+    if (t.blinkOff) return { alpha: sel ? 0.25 : 0, tag: null };
+    if (U.format.noTarget(o)) return { alpha: Math.min(t.alpha, 0.5), tag: 'No target set' };
+    return { alpha: t.alpha, tag: null };
+  }
+  function paintTime(b, o) {
+    var st = timeState(o), g = b.querySelector(o.type === 'webPage' ? 'img' : '.lyr-svg');
+    if (g) g.style.opacity = o.type === 'webPage' ? String((o.opacity != null && o.opacity >= 0 ? o.opacity / 100 : 1) * st.alpha) : st.alpha === 1 ? '' : String(st.alpha);
+    var tag = b.querySelector('[data-ttag]');
+    if (!st.tag) { if (tag) tag.remove(); return; }
+    if (!tag) { tag = document.createElement('span'); tag.className = 'pg-tag'; tag.setAttribute('data-ttag', ''); tag.setAttribute('aria-hidden', 'true'); b.appendChild(tag); }
+    if (tag.textContent !== st.tag) tag.textContent = st.tag;
+  }
+  var ticked = {};
+  // four times a second: what changed by the clock is drawn again, layer by layer, without rebuilding the canvas
+  function tick() {
+    if (U.current() !== 'overlay' || !S.draft || !el.stage) return;
+    var frame = el.stage.querySelector('[data-frame]');
+    if (!frame) return;
+    var s = src();
+    objects().forEach(function (o) {
+      if (!U.format.moves(o)) return;
+      var b = frame.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]');
+      if (!b) return;
+      var st = timeState(o), text = o.type === 'string' ? U.draw.shown(drawn(o)) : '', k = [text, st.alpha.toFixed(2), st.tag];
+      var was = ticked[o.id];
+      if (was && was[0] === k[0] && was[1] === k[1] && was[2] === k[2]) return;
+      ticked[o.id] = k;
+      var moved = !was || was[0] !== text;
+      if (moved && o.type !== 'webPage') { position(b, o, s); b.setAttribute('aria-label', boxLabel(o)); } else paintTime(b, o);
+      // a text's size follows its sample; only the readout's text changes, so a focused Freeze keeps its focus
+      var lc = moved && o.id === S.layer && el.coords.querySelector('[data-lcoords]');
+      if (lc) lc.textContent = layerCoords(o);
+      var nm = moved && el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] .lname');
+      if (nm) nm.textContent = U.draw.name(drawn(o));
+    });
+    refreshFormat();
+  }
+  // the Format tab's samples and its pattern check follow the clock and the server's answers
+  function refreshFormat() {
+    var o = S.layer && byId(S.layer);
+    if (!o || !el.insp || S.inspTab !== 'format') return;
+    el.insp.querySelectorAll('[data-fsample]').forEach(function (x) {
+      var a = x.getAttribute('data-fsample').split('|'), v = U.format.sample({ kind: a[0], pattern: a.slice(1).join('|') }, o, U.format.now());
+      var shown = v == null ? '' : v === '' ? '(blank)' : v;
+      if (x.textContent !== shown) x.textContent = shown;
+    });
+    var err = el.insp.querySelector('[data-ferr]'), why = S.fErr || U.format.problem(o) || '';
+    if (err && err.textContent !== why) { err.textContent = why; var pi = el.insp.querySelector('[data-fpattern]'); if (pi) pi.classList.toggle('invalid', !!why); }
+  }
+  // the layers' live values, read when the overlay opens and every few seconds while it is shown
+  function loadLive() {
+    var name = S.name;
+    if (!name || !entry()) return Promise.resolve();
+    return U.api.get(ovPath(name) + '/live').then(function (r) {
+      if (S.name !== name) return;
+      var was = JSON.stringify(S.live || {}), now = JSON.stringify(r || {});
+      S.live = r || {};
+      if (was === now) return;
+      ticked = {};
+      renderLayers(); placeBoxes();
+      if (!el.insp.contains(document.activeElement)) renderInspector();
+    }, function () { /* the canvas keeps the values it had */ });
+  }
+  function clearLive(id) {
+    if (ro()) return;
+    U.api.post(ovPath() + '/live', { clear: id }).then(function () {
+      if (S.live) delete S.live[id];
+      ticked = {}; renderLayers(); placeBoxes(); renderInspector();
+      U.toast('Cleared the live value of ' + id + '. The video shows its saved values again.');
+    }, function (er) { U.toast('The live value of ' + id + ' could not be cleared: ' + er.message, { level: 'bad' }); });
+  }
+  // which fields a feed set, in words: "text and color"
+  function liveWords(v) {
+    var f = ['text', 'color', 'background', 'opacity', 'hidden'].filter(function (k) { return v[k] !== undefined && v[k] !== null; });
+    return f.length > 1 ? f.slice(0, -1).join(', ') + ' and ' + f[f.length - 1] : f[0] || 'value';
   }
 
   function renderCoords() {
@@ -552,11 +650,16 @@
     var s = src(), o = S.layer && byId(S.layer), z = o ? size(o) : null;
     // a text's size is measured in its font, so it is shown in whole pixels
     el.coords.innerHTML = '<span class="bdg" title="Source picture">' + s.w + ' x ' + s.h + (s.known ? '' : ', assumed') + '</span>' +
-      (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + shownY(o) + ' &middot; ' + Math.round(z.w) + ' x ' + Math.round(z.h) + '</span>' : '');
+      (o ? '<span class="bdg" data-lcoords title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(layerCoords(o)) + '</span>' : '');
+    // Freeze stops time on the canvas for editing a layer that ticks, blinks or fades
+    if (objects().some(U.format.moves)) el.coords.innerHTML += '<button type="button" class="btn sm ghost" data-freeze aria-pressed="' + U.format.frozen() + '" title="Stop the clock on the canvas while you edit. The video keeps time.">' +
+      (U.format.frozen() ? 'Frozen, resume time' : 'Freeze time') + '</button>';
     var outside = o && s.known && frameFit(o, s) === 'outside';
     el.outside.hidden = !outside;
     if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' is outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '): nothing of it shows. Move it under Place.';
   }
+  // where the selected layer is and how big it draws, for the readout under the canvas
+  function layerCoords(o) { var z = size(drawn(o)); return o.id + ' at ' + (o.x || 0) + ', ' + shownY(o) + ' · ' + Math.round(z.w) + ' x ' + Math.round(z.h); }
   var FIT = { outside: 'Outside the frame', past: 'Past title safe', inside: 'Inside title safe' };
   // the Place tab's chip follows the layer as it moves, without rebuilding the panel
   function updateFit() {
@@ -832,7 +935,10 @@
       return '<div class="prow" data-id="' + U.esc(o.id) + '"' + (ro() ? '' : ' draggable="true"') + ' tabindex="0" role="button" aria-selected="' + (o.id === S.layer) + '" title="' + (ro() ? '' : 'Drag to reorder; the top layer draws on top') + '">' +
         (web ? '<div class="thumb"><img alt="" hidden></div>' : '<div class="thumb kind" title="' + U.esc(kind) + '">' + U.icon(U.draw.icon(o)) + '</div>') +
         '<div style="min-width:0"><div class="nm">' + (web ? '<span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) : '<span class="lname">' + U.esc(U.draw.name(o)) + '</span>') +
-        (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + (hidden(o.id) ? '<span class="bdg" data-hiddenmark title="Hidden on this canvas only. Viewers still see it.">Hidden here</span>' : '') + (web ? pageTag(o.id) : '') + '</div>' +
+        (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + (hidden(o.id) ? '<span class="bdg" data-hiddenmark title="Hidden on this canvas only. Viewers still see it.">Hidden here</span>' : '') + (web ? pageTag(o.id) : '') +
+        (U.format.noTarget(o) ? '<span class="bdg warn" data-notarget>No target set</span>' : '') +
+        (liveOf(o) ? '<span class="bdg live" data-livebadge title="A feed set its ' + U.esc(liveWords(liveOf(o))) + ' on air">Live' + (liveOf(o).text != null ? ': ' + U.esc(String(liveOf(o).text).split('\n')[0].slice(0, 24)) : '') + '</span>' +
+          (ro() ? '' : '<button type="button" class="btn sm ghost" data-liveclear="' + U.esc(o.id) + '" aria-label="Clear the live value of ' + U.esc(o.id) + '">Clear</button>') : '') + '</div>' +
         '<div class="sub">' + U.esc(web ? host(o.url) : kind.charAt(0).toUpperCase() + kind.slice(1) + ', ' + o.id) + '</div></div>' +
         U.rowMenuHtml('page:' + o.id, 'Actions for ' + (web ? 'page ' : 'layer ') + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1],
           ['front', 'Bring to front', false, !i], ['back', 'Send to back', false, i === list.length - 1], '-', ['dup', 'Duplicate'], ['hide', hidden(o.id) ? 'Show on canvas' : 'Hide on canvas'],
@@ -841,7 +947,7 @@
     var dragId = null;
     el.layers.querySelectorAll('.prow').forEach(function (l) {
       var id = l.getAttribute('data-id');
-      l.onclick = function (e) { if (e.target.closest('[data-rowfor]')) return; select(id); };
+      l.onclick = function (e) { if (e.target.closest('[data-rowfor]')) return; if (e.target.closest('[data-liveclear]')) { clearLive(id); return; } select(id); };
       l.onkeydown = function (e) { if (e.target === l && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(id); } };
       if (ro()) return;
       l.addEventListener('dragstart', function (e) { dragId = id; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', id); } catch (x) { /* old browsers */ } });
@@ -984,7 +1090,7 @@
     var type = f.type === 'int' || f.type === 'num' ? 'number' : 'text';
     var attrs = (f.min !== undefined ? ' min="' + f.min + '"' : '') + (f.max !== undefined ? ' max="' + f.max + '"' : '') + (f.type === 'num' ? ' step="any"' : '');
     var input = '<input type="' + type + '" id="' + id + '" data-f="' + name + '" value="' + U.esc(v) + '"' + attrs + title +
-      (opts.placeholder ? ' placeholder="' + U.esc(opts.placeholder) + '"' : '') + ' class="' + (type === 'number' ? 'num' : '') + draftCls + '">';
+      (opts.placeholder ? ' placeholder="' + U.esc(opts.placeholder) + '"' : '') + (opts.list ? ' list="' + opts.list + '"' : '') + ' class="' + (type === 'number' ? 'num' : '') + draftCls + '">';
     // a color has the browser's picker beside it; the text stays, for transparency and for names such as white
     if (f.type === 'color') input = '<span class="cfield"><input type="color" data-cpick="' + name + '" value="' + hexOf(v || opts.placeholder) + '" aria-label="Pick the ' + U.esc(f.label.toLowerCase()) + '" title="Pick a color">' + input + '</span>';
     return '<div class="fld"><label class="f" for="' + id + '">' + label + (f.help && !opts.noHelp ? U.tip(f.help + ' WSE setting ' + f.key + '.') : '') + '</label>' + input +
@@ -1022,6 +1128,7 @@
         '</div><span class="spacer"></span>' + (web && savedById(o.id) && !ro() ? '<button type="button" class="btn sm ghost" data-reloadpage title="Load ' + U.esc(host(o.url)) + ' again in the browser on the server, for a capture that shows the wrong thing">' + U.icon('refresh') + 'Reload page</button>' : '') +
         '<button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
       var tabs = TABS[web ? 'webPage' : o.type === 'string' || o.type === 'image' ? o.type : 'shape'];
+      if (o.type === 'string' && U.draw.hasToken(o.text)) tabs = [['format', 'Format']].concat(tabs);
       if (!tabs.some(function (t) { return t[0] === S.inspTab; })) S.inspTab = tabs[0][0];
       h += '<div class="itabs" role="tablist" aria-label="' + (web ? 'Page' : 'Layer') + ' settings">' + tabs.map(function (t) {
         return '<button type="button" role="tab" data-itab="' + t[0] + '" aria-selected="' + (S.inspTab === t[0]) + '" tabindex="' + (S.inspTab === t[0] ? 0 : -1) + '">' + t[1] + '</button>'; }).join('') + '</div>';
@@ -1029,6 +1136,7 @@
       if (S.inspTab === 'page') body = fieldHtml('url', o.url, { saved: sv.url }) +
         '<div class="grid2">' + fieldHtml('viewportWidth', o.viewportWidth, { placeholder: String(z.w), fromPicture: true, saved: sv.viewportWidth }) + fieldHtml('viewportHeight', o.viewportHeight, { placeholder: String(z.h), fromPicture: true, noHelp: true, saved: sv.viewportHeight }) + '</div>' +
         overlaySettings(d) + U.roNote();
+      else if (S.inspTab === 'format') body = formatTabHtml(o, sv);
       else if (S.inspTab === 'text') body = textTabHtml(o, sv);
       else if (S.inspTab === 'shape') body = shapeTabHtml(o, sv);
       else if (S.inspTab === 'fx') body = '<div class="grid2">' + of(o, sv, 'shadowColor') + of(o, sv, 'shadowOffset') + '</div>' + opacityHtml(o, sv);
@@ -1045,7 +1153,10 @@
       else if (S.inspTab === 'time') body = (web ? '<div class="grid2">' + fieldHtml('pageDelay', o.pageDelay, { saved: sv.pageDelay }) + fieldHtml('reloadRate', o.reloadRate, { saved: sv.reloadRate }) + '</div>' : '') +
         of(o, sv, 'showFrom', { placeholder: 'stream+30' }) + of(o, sv, 'hideAt', { placeholder: '2027-01-01T18:00:00-05:00' }) +
         '<div class="grid2">' + of(o, sv, 'fadeIn') + of(o, sv, 'fadeOut') + '</div>' + of(o, sv, 'blinkSeconds', { placeholder: 'Steady' }) +
-        (ro() ? '' : '<p class="hint">The canvas shows every layer whatever its timing; the video follows it.</p>');
+        '<p class="hint">The canvas plays this timing: outside its show window a layer is drawn faint, with when it shows. Freeze time, under the canvas, stops the clock while you edit.</p>';
+      var lv = liveOf(o);
+      if (lv) h += '<section><div class="note" data-livenote><div>Live ' + U.esc(liveWords(lv)) + (/ and /.test(liveWords(lv)) ? ' are' : ' is') + ' on air instead of these.' +
+        (lv.text != null ? ' Live text: <b>' + U.esc(String(lv.text)) + '</b>' : '') + '</div>' + (ro() ? '' : '<button type="button" class="btn sm" data-liveclear="' + U.esc(o.id) + '">Clear</button>') + '</div></section>';
       if (web && capNote(o.id) === 'bad') h += '<section><div class="note bad" data-capnote><span class="dot bad"></span><div>' + capLine(o.id) + '</div></div></section>';
       if (body) h += '<section>' + body + '</section>';
     }
@@ -1072,6 +1183,8 @@
     }
     var kd = el.insp.querySelector('[data-kind]');
     if (kd && o) kd.onchange = function () { changeKind(o.id, kd.value); };
+    el.insp.querySelectorAll('[data-liveclear]').forEach(function (b) { b.onclick = function () { clearLive(b.getAttribute('data-liveclear')); }; });
+    if (o && S.inspTab === 'format') bindFormat(o);
     var bx = el.insp.querySelector('details[data-boxadv]');
     if (bx) bx.addEventListener('toggle', function () { S.boxOpen = bx.open; });
     var ch = el.insp.querySelector('[data-imgchoose]');
@@ -1111,6 +1224,80 @@
     return fieldHtml(name, v, opts);
   }
   function opacityHtml(o) { return fieldHtml('opacity', o.opacity == null || o.opacity < 0 ? 100 : o.opacity, { noHelp: true }); }
+  // the Format tab (plan 4.2): what the text's first token shows, the formats with samples, its pattern, zone and language
+  var KIND_NAMES = { time: 'The date and time now', countdown: 'A countdown to a target', countup: 'A count-up from a target', streamtime: 'Time since the stream started' };
+  var PRESETS = { time: ['HH:mm:ss', 'h:mm:ss a', 'HH:mm', 'yyyy-MM-dd', 'EEE, MMM d', 'MMMM d, yyyy', 'yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd HH:mm:ss z'],
+    countdown: ['H:mm:ss', "d'd' HH:mm:ss", 'mm:ss'], countup: ['H:mm:ss', 'mm:ss'], streamtime: ['H:mm:ss', 'mm:ss'] };
+  var PATTERN_HELP = {
+    time: 'Java date and time letters: yyyy year, MMM or MM month, d day, EEE weekday, HH hours (h with a for AM and PM), mm minutes, ss seconds, z zone. Text in single quotes shows as written.',
+    duration: 'd days, H hours, m minutes, s seconds, S tenths. A doubled letter pads to two digits, and the largest unit is a total: 90 minutes in mm:ss is 90:00. Text in single quotes shows as written.' };
+  function formatTabHtml(o, sv) {
+    var r = U.format.parse(o.text), toks = r.parts.filter(function (x) { return x.kind; }), p = toks[0];
+    if (!p) return '<div class="note warn"><div data-ferr>' + U.esc(r.error || 'This text has no date or time token.') + '</div></div>';
+    var kind = p.kind, def = U.format.defaults(), dis = ro() ? ' disabled' : '';
+    var h = (toks.length > 1 ? '<p class="hint">This text has ' + toks.length + ' tokens; these settings change the first, ' + U.esc(U.format.token(p.kind, p.pattern)) + '. Edit the others in the Text tab.</p>' : '') +
+      '<div class="fld"><label class="f" for="ovs-fkind">What it shows</label><select id="ovs-fkind" data-fkind' + dis + '>' +
+      U.format.KINDS.map(function (k) { return '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + KIND_NAMES[k] + '</option>'; }).join('') + '</select></div>' +
+      '<div class="fld"><span class="f">Formats</span><div class="fpresets" role="group" aria-label="Formats">' +
+      PRESETS[kind].map(function (pat) {
+        return '<button type="button" class="fpreset" data-fpreset="' + U.esc(pat) + '" aria-pressed="' + (pat === p.pattern) + '"' + dis + '><span class="fs" data-fsample="' + U.esc(kind + '|' + pat) + '"></span><code>' + U.esc(pat) + '</code></button>';
+      }).join('') + '</div></div>' +
+      '<div class="fld"><label class="f" for="ovs-fpattern">Pattern' + U.tip(PATTERN_HELP[kind === 'time' ? 'time' : 'duration']) + '</label><input type="text" id="ovs-fpattern" data-fpattern value="' + U.esc(p.pattern) + '" spellcheck="false" autocomplete="off"' + (ro() ? ' readonly' : '') + '>' +
+      '<div class="err" data-ferr></div><div class="hint">Now: <b data-fnow data-fsample="' + U.esc(kind + '|' + p.pattern) + '"></b>' + (kind === 'streamtime' ? '. Stream time is simulated here, from when you opened this overlay.' : '') + '</div></div>';
+    if (U.format.needsTarget(kind)) h += of(o, sv, 'target', { placeholder: '2027-01-01T18:00:00-05:00' }) +
+      (o.target ? '' : '<div class="note warn" data-notargetnote><div>No target set. The canvas counts to an hour from when you opened this overlay, faded; the video shows the text at zero.</div></div>') +
+      (kind === 'countdown' ? of(o, sv, 'endText', { placeholder: 'Nothing' }) : '');
+    return h + '<div class="grid2">' + of(o, sv, 'timeZone', { placeholder: def ? def.zone : 'The server\'s zone', list: 'ovs-zones' }) + of(o, sv, 'locale', { placeholder: def ? def.locale : 'en-US' }) + '</div>' +
+      '<p class="hint">Samples come from the server, in its zone ' + (def ? U.esc(def.zone) : '') + ' unless the layer names one.</p>' + zoneList();
+  }
+  function zoneList() {
+    var z = [];
+    try { z = Intl.supportedValuesOf('timeZone'); } catch (e) { /* the field still takes a typed zone */ }
+    return '<datalist id="ovs-zones">' + ['UTC'].concat(z).map(function (x) { return '<option value="' + U.esc(x) + '">'; }).join('') + '</datalist>';
+  }
+  // the first token of the text, rewritten; the reason when the text would not parse
+  function setToken(o, kind, pattern) {
+    var p = U.format.tokens(o.text)[0];
+    if (!p) return 'This text has no date or time token.';
+    var next = o.text.slice(0, p.at) + U.format.token(kind, pattern) + o.text.slice(p.end), r = U.format.parse(next);
+    if (r.error) return r.error;
+    snapshot('field:text');
+    o.text = next;
+    ticked = {};
+    renderLayers(); placeBoxes(); markEdited(); renderBar(); renderCaption(); U.changed();
+    return null;
+  }
+  function bindFormat(o) {
+    S.fErr = null;
+    refreshFormat();
+    if (ro()) return;
+    var k = el.insp.querySelector('[data-fkind]'), pi = el.insp.querySelector('[data-fpattern]');
+    if (k) k.onchange = function () {
+      var p = U.format.tokens(o.text)[0], nk = k.value;
+      // a pattern moves between the duration kinds; the date and time kind has letters of its own
+      setToken(o, nk, (p.kind === 'time') === (nk === 'time') ? p.pattern : PRESETS[nk][0]);
+      renderInspector();
+      var x = el.insp.querySelector('[data-fkind]'); if (x) x.focus();
+    };
+    el.insp.querySelectorAll('[data-fpreset]').forEach(function (b) {
+      b.onclick = function () {
+        var pat = b.getAttribute('data-fpreset');
+        setToken(o, U.format.tokens(o.text)[0].kind, pat);
+        renderInspector();
+        var x = el.insp.querySelector('[data-fpreset="' + CSS.escape(pat) + '"]'); if (x) x.focus();
+      };
+    });
+    if (pi) pi.addEventListener('input', function () {
+      var p = U.format.tokens(o.text)[0];
+      S.fErr = !pi.value ? 'A pattern is needed, such as ' + PRESETS[p.kind][0] + '.' : setToken(o, p.kind, pi.value);
+      if (!S.fErr) {
+        var now = el.insp.querySelector('[data-fnow]'); if (now) now.setAttribute('data-fsample', p.kind + '|' + pi.value);
+        el.insp.querySelectorAll('[data-fpreset]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-fpreset') === pi.value)); });
+        pi.classList.add('is-draft');
+      }
+      refreshFormat();
+    });
+  }
   function textTabHtml(o, sv) {
     loadFonts();
     return of(o, sv, 'text') + '<div class="grid2">' + of(o, sv, 'font') + of(o, sv, 'fontSize') + of(o, sv, 'fontStyle') + of(o, sv, 'align') + '</div>' + of(o, sv, 'textColor') +
@@ -1281,15 +1468,18 @@
       if (bad) return;
     } else v = e.target.value;
     // a blank color or time is no value: the layer draws without it
-    if ((f.type === 'color' || f.type === 'when') && f.scope === 'object' && !String(v).trim()) v = null;
+    if ((f.type === 'color' || f.type === 'when' || f.type === 'zone' || f.type === 'target' || name === 'locale' || name === 'endText') && f.scope === 'object' && !String(v).trim()) v = null;
     var why = v === null ? null : f.type === 'color' && f.scope === 'object' && !U.draw.isColor(v) ? 'Use rgb(r,g,b), rgb(r,g,b,a) or a color name such as white.' :
       f.type === 'when' && !WHEN.test(String(v).trim()) ? 'Use stream+N for seconds after the stream starts, or a date and time with its offset such as 2027-01-01T18:00:00-05:00.' :
-      name === 'text' && v.length > 2000 ? 'At most 2,000 characters (' + v.length + ' now).' : null;
-    if (f.type === 'color' || f.type === 'when' || name === 'text') {
+      name === 'text' && v.length > 2000 ? 'At most 2,000 characters (' + v.length + ' now).' :
+      f.type === 'zone' && !zoneOk(String(v).trim()) ? 'Use a zone such as America/New_York or UTC.' :
+      f.type === 'target' && !TARGET.test(String(v).trim()) ? 'Use a date and time with its offset, such as 2027-01-01T18:00:00-05:00.' :
+      name === 'locale' && !/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(String(v).trim()) ? 'Use a language tag such as en-US or fr-FR.' : null;
+    if (f.type === 'color' || f.type === 'when' || f.type === 'zone' || f.type === 'target' || name === 'locale' || name === 'text') {
       e.target.classList.toggle('invalid', !!why);
       if (err) err.textContent = why || '';
       if (why) return;
-      if (f.type === 'when') v = String(v).trim();
+      if (v !== null && f.type !== 'color' && name !== 'text') v = String(v).trim();
     }
     if (name === 'url') { var p = urlProblem(v); e.target.classList.toggle('invalid', !!p); if (err) err.textContent = p || ''; }
     // the picker follows a color typed in
@@ -1310,6 +1500,8 @@
       if (o.type !== 'webPage') { var nm = el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] .lname'); if (nm) nm.textContent = U.draw.name(o); }
       // the Shape select follows a field that changes which shape it is
       if (name === 'arrowHead' || name === 'arcWidth') { var kd = el.insp.querySelector('[data-kind]'), sk = shapeKind(o); if (kd && sk) kd.value = sk; }
+      // a target set or cleared: the row's "No target set" and the Format tab's note follow
+      if (name === 'target') { renderLayers(); var nn = el.insp.querySelector('[data-notargetnote]'); if (nn) nn.hidden = v !== null; }
       if (name === 'url') { var sub = el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] .sub'); if (sub) sub.textContent = host(v); }
       if (CAPTURE_KEYS.indexOf(f.key) >= 0 && o.type === 'webPage') captureSoon(o.id);
       if (['cropX', 'cropY', 'cropW', 'cropH'].indexOf(name) >= 0) {
@@ -1325,6 +1517,9 @@
   }
   // the text fields that change a free text's ascent
   var TOP_KEYS = ['font', 'fontSize', 'fontStyle'];
+  // a countdown's target, as the module takes it (ObjectConfig.target): a date and time with its offset
+  var TARGET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+  function zoneOk(z) { try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch (e) { return false; } }
   // a time a layer shows or hides at, as the module takes it (ObjectConfig.timingProblem)
   var WHEN = /^(stream\+\d{1,9}(\.\d{1,3})?|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))$/;
   // a text's box on or off, keeping the text where it is: a box starts at the text's extent, a free text at its first line
@@ -1508,7 +1703,9 @@
     snapshot();
     S.draft.objects.push(o);
     S.placing = null;
-    S.layer = o.id; renderEditor();
+    S.layer = o.id;
+    if (kind === 'datetime') S.inspTab = 'format';
+    renderEditor();
     focusCanvas();
     U.toast('Added ' + KIND_LABEL[kind].toLowerCase() + ' ' + o.id + ' to the draft. Viewers see it after Save.');
   }
@@ -1666,6 +1863,14 @@
         var g = el.stage.querySelector('[data-safe]'); if (g) g.hidden = !S.guides;
       };
       U.listen(window, 'resize', function () { if (U.current() === 'overlay') placeBoxes(); });
+      U.every(250, tick);
+      U.every(5000, function () { if (U.current() === 'overlay' && S.draft) return loadLive(); });
+      U.format.onChange(function () { if (U.current() === 'overlay' && S.draft) { ticked = {}; tick(); } });
+      el.coords.addEventListener('click', function (e) {
+        if (!e.target.closest('[data-freeze]')) return;
+        U.format.freeze(!U.format.frozen()); renderCoords();
+        var b = el.coords.querySelector('[data-freeze]'); if (b) b.focus();
+      });
       U.onShutdown(function () { if (S.player) S.player.stop(); });
     },
     show: function (name) {

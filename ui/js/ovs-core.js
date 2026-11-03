@@ -19,16 +19,27 @@
   // There is no way around the bridge, on purpose: the page never calls WSE REST itself. An SSH tunnel to the
   // Manager's port (8088) already reaches the bridge, and the Manager reaches REST locally, so a fallback that sends
   // REST credentials from the browser would add exposure and no reach.
-  var bridge = null, token = null, discovering = null;
+  var bridge = null, token = null, discovering = null, out = false;
   var NO_BRIDGE = 'The Overlay Studio bridge is not loaded in WSE Manager.';
+  // once the Manager's session ends (it restarted, or timed out) it answers every call with its sign-in page, as a 200
+  function isSignIn(text) { return /<!--\s*Redirect to Login\s*-->/i.test(String(text || '').slice(0, 200)); }
+  // one banner whichever check notices first: a call answered by the sign-in page, or the page-file poll below
+  function signedOut() {
+    U.banner('signedout', 'bad', 'You are signed out of WSE Manager.', 'WSE Manager was restarted or signed you out, so nothing here can be read or saved. Unsaved changes stay on this page while you sign in from another tab.',
+      { label: 'Sign in again', run: function () { window.open('/enginemanager/login.htm', '_blank'); } });
+  }
+  U.signedOut = signedOut;
   // whether the bridge answers, and its version; null when it is missing (404, or the Manager's sign-in page)
   U.discover = function () { return discovering || (discovering = discover()); };
   function discover() {
+    out = false;
     return fetch(API + '/status', { cache: 'no-store', credentials: 'same-origin' }).then(function (r) {
-      return r.ok ? r.json().catch(function () { return null; }) : null;
+      return !r.ok ? null : r.text().then(function (t) { if (isSignIn(t)) { out = true; return null; } try { return JSON.parse(t); } catch (e) { return null; } });
     }, function () { return null; }).then(function (st) {
       bridge = st && st.bridge === 'overlaystudio' ? st : null;
       U.via = 'the Manager';
+      // signed out is not a missing bridge: ask again once the user has signed in
+      if (out) { discovering = null; signedOut(); return; }
       if (!bridge) {
         U.banner('nobridge', 'bad', NO_BRIDGE,
           'Run the Overlay Studio installer again, then restart WSE Manager. If the installer said this WSE Manager version is not supported, this page cannot be used with it.');
@@ -79,6 +90,7 @@
       return Promise.reject(new ApiError(403, U.readOnly, null));
     }
     return U.discover().then(function () {
+      if (out) throw new ApiError(401, 'You are signed out of WSE Manager.', null);
       return send(method, path, body, false).then(function (r) {
         // the Manager renews its token with the session: fetch it again and try once more
         if (bridge && method !== 'GET' && r.status === 403) {
@@ -92,14 +104,17 @@
       return r.text().then(function (text) {
         var data = null;
         if (text) { try { data = JSON.parse(text); } catch (e) { data = text; } }
+        if (isSignIn(text)) { signedOut(); throw new ApiError(401, 'You are signed out of WSE Manager.', null); }
+        // anything else that is not JSON is not an answer from the module
+        if (r.ok && typeof data === 'string') throw new ApiError(502, 'WSE Manager answered with a page instead of data.', null);
         if (!r.ok) {
           var msg = (data && typeof data === 'object' && data.message) ? data.message : (r.statusText || ('HTTP ' + r.status));
           if (r.status === 401) U.banner('auth', 'bad', 'The Manager session has ended or has no WSE credentials (401).', 'Sign in to WSE Manager again.');
           throw new ApiError(r.status, msg, data);
         }
         if (data && typeof data === 'object' && data.success === false) throw new ApiError(r.status, data.message || 'Request failed', data);
-        // WSE answered, so an earlier "could not be reached" no longer holds (for example while WSE was restarting)
-        U.clearBanner('network');
+        // WSE answered, so an earlier "could not be reached" or "signed out" no longer holds
+        U.clearBanner('network'); U.clearBanner('auth'); U.clearBanner('signedout');
         return data;
       });
     }, function (e) {
@@ -614,9 +629,7 @@
         return r.text().then(function (html) {
           var m = /ovs-core\.js\?v=([^"'&]+)/.exec(html);
           if (m) { U.clearBanner('signedout'); U.staleCheck(m[1]); return; }
-          if (U.root.querySelector('[data-banner=signedout]')) return;
-          U.banner('signedout', 'bad', 'The Manager session ended.', 'WSE Manager was restarted or signed you out, so this page cannot reach WSE. Sign in again, then open Overlay Studio.',
-            { label: 'Sign in', run: function () { window.location.reload(); } });
+          U.signedOut();
         });
       }, function () { /* the Manager itself is down; the REST banners say so */ });
     });

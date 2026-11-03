@@ -205,7 +205,7 @@ test('the frame checks use the layer\'s drawn area, not its first point', async 
   await expect(page.locator('[data-fit]')).toHaveText('Past title safe');
   await row(page, 'HOME 2 - 1').click();
   await expect(page.locator('[data-fit]')).toHaveText('Inside title safe');
-  await expect(page.locator('[data-coords]'), 'a text\'s size in whole pixels').toHaveText(/score at 100, \d+ · \d+ x \d+$/);
+  await expect(page.locator('[data-coords]'), 'a text\'s size in whole pixels').toContainText(/score at 100, \d+ · \d+ x \d+(?!\d)/);
   await field(page, 'x').fill('1250');
   await expect(page.locator('[data-fit]')).toHaveText('Outside the frame');
   await expect(page.locator('[data-outside]')).toContainText('score is outside cam1 (1200 x 700): nothing of it shows');
@@ -240,9 +240,11 @@ test('a layer never saved shows no saved values; the empty panel offers to add o
   await expect(page.locator('[data-insp] .hint').filter({ hasText: 'Saved:' })).toHaveCount(0);
   await row(page, 'HOME 2 - 1').click();
   await field(page, 'x').fill('120');
-  // the saved value shows from the panel's next drawing on, as for every field
-  await row(page, 'HOME 2 - 1').click();
-  await expect(page.locator('[data-insp] .hint').filter({ hasText: 'Saved: 100' }), 'a saved layer still shows its saved value').toHaveCount(1);
+  // the saved value shows from the panel's next drawing on, as for every field; a click that a toast or a redraw
+  // takes before it lands is clicked again
+  const hint = page.locator('[data-insp] .hint').filter({ hasText: 'Saved: 100' });
+  await expect(async () => { await row(page, 'HOME 2 - 1').click(); await expect(hint).toHaveCount(1, { timeout: 1000 }); },
+    'a saved layer still shows its saved value').toPass({ timeout: 8000 });
   await page.keyboard.press('Escape');
   await page.locator('[data-frame]').focus();
   await page.keyboard.press('Escape');

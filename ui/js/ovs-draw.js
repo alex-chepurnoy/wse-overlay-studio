@@ -4,8 +4,8 @@
  */
 /* Overlay Studio canvas drawing (plan 4.4): text, shape and image layers as one small SVG each, in source pixels,
    following how the module draws them (ObjectConfig.draw, TextDraw.draw), so the editor shows what the video will.
-   Web page layers are not drawn here; their captures are. A token such as {time:HH:mm:ss} shows as written until the
-   page asks the server for samples (/format, PR 8). */
+   Web page layers are not drawn here; their captures are. A token such as {time:HH:mm:ss} draws the server's sample
+   for now (ovs-format.js), and shows as written until it comes. */
 (function () {
   'use strict';
   var U = window.OverlayStudio;
@@ -188,8 +188,8 @@
     return { x: e.x, y: e.y, w: Math.max(1, e.w), h: Math.max(1, e.h) };
   };
 
-  /** What a text layer shows here: its text as written, tokens and all, until samples come from the server. */
-  D.shown = function (o) { return o.text == null ? '' : String(o.text); };
+  /** What a text layer shows here now: its tokens by the server's samples (U.format.render), as written until they come. */
+  D.shown = function (o) { return U.format ? U.format.render(o) : o.text == null ? '' : String(o.text); };
 
   /* ---------- SVG ---------- */
   function grad(id, c1, c2, dir, x, y, x2, y2) {

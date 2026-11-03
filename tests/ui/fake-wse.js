@@ -25,6 +25,10 @@ function read(name) {
   return JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
 }
 
+// the start of what WSE Manager sends once its session has ended
+const SIGN_IN = ['<!--Redirect to Login-->', '<!--Leave above comment for UI to redirect properly -->', '<!DOCTYPE html>',
+  '<html><head><title>Wowza Streaming Engine Manager</title></head><body>Sign In</body></html>'].join('\n');
+
 class FakeWse {
   constructor(opts = {}) {
     this.opts = Object.assign({ bridge: true, write: true, serviceRunning: true }, opts);
@@ -34,6 +38,9 @@ class FakeWse {
     this.revision = 1;
     this.token = 'token-1';
     this.overlays = read('overlays.json');
+    // live values by overlay, then layer id, as LiveValues.get answers; the /format requests the page made
+    this.live = {};
+    this.formats = [];
     this.modified = {};
     Object.keys(this.overlays).forEach((n) => { this.modified[n] = 1767225600000; });
     const starters = read('templates.json');
@@ -71,6 +78,8 @@ class FakeWse {
       try { body = JSON.parse(req.postData()); } catch (e) { body = req.postData(); }
     }
     this.requests.push({ method, path: p + url.search, body });
+    // the Manager's session has ended: it answers every call with its sign-in page, as a 200
+    if (this.signedOut) return route.fulfill({ status: 200, contentType: 'text/html', body: SIGN_IN });
     if (req.method() === 'POST' && url.searchParams.get('wowzaSecurityToken') !== this.token) {
       return route.fulfill({ status: 403, contentType: 'text/plain', body: 'CSRF token missing or wrong' });
     }
@@ -104,6 +113,7 @@ class FakeWse {
         bundled: ['Fira Sans', 'Fira Sans Condensed', 'Fira Mono', 'PT Serif'].map((family) => ({ family, styles: ['plain', 'bold', 'italic', 'bolditalic'], files: ['plain', 'bold'], shadowedBy: null })),
         logical: ['Serif', 'SansSerif', 'Monospaced', 'Dialog', 'DialogInput'], system: ['DejaVu Sans'] };
     }
+    if (r === '/format' && method === 'GET') return this.format(q);
     if (r === VH + '/images') {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
       // one image whole, as ImageLibrary.data answers: a 1 x 1 PNG standing for a 200 x 100 picture
@@ -154,11 +164,36 @@ class FakeWse {
       const s = this.streams.find((x) => x.name === decodeURIComponent(m[2]));
       return m[3] === 'status' ? this.streamStatus(s) : this.preview(m[1], s);
     }
+    if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays\/([^/]+)\/live$/.exec(r))) {
+      const name = decodeURIComponent(m[2]);
+      if (!this.overlays[name]) return { status: 404, json: { success: false, message: 'No overlay ' + name } };
+      if (method === 'GET') return this.live[name] || {};
+      if (method === 'POST') {
+        this.posts.push({ path: r, body });
+        const had = !!(this.live[name] && this.live[name][body.clear]);
+        if (had) delete this.live[name][body.clear];
+        return { success: true, cleared: had ? body.clear : null, updatedStreams: [] };
+      }
+    }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/templates\/order$/.exec(r))) {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
       return { templates: this.apps[0].templates.split(',') };
     }
     return undefined;
+  }
+
+  // as FormatConfig: count samples one step apart from now, or the error; a pattern holding "bad" is refused. A sample
+  // is the pattern with the second it stands for, so a test can tell the samples apart and see them tick
+  format(q) {
+    const kind = q.get('kind') || 'time', pattern = q.get('pattern') || '', now = Number(q.get('now')), count = Math.min(120, Number(q.get('count') || 1));
+    this.formats.push({ kind, pattern, zone: q.get('zone'), locale: q.get('locale'), target: q.get('target'), now, streamStart: Number(q.get('streamStart')) });
+    const out = { defaultZone: 'America/New_York', defaultLocale: 'en-US', kind, pattern, samples: [], error: null };
+    if (/bad/.test(pattern)) { out.error = 'Unknown pattern letter: b'; return out; }
+    const plain = pattern.replace(/'[^']*'/g, '');
+    const unit = /S|s/.test(plain) ? 1000 : /m/.test(plain) ? 60000 : /[HhKkaB]/.test(plain) ? 3600000 : 86400000;
+    out.stepMs = Math.max(1000, unit);
+    for (let i = 0; i < count; i++) out.samples.push(pattern + ' #' + Math.floor((now + i * out.stepMs) / 1000));
+    return out;
   }
 
   overlayOf(s) {

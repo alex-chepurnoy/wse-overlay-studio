@@ -381,6 +381,14 @@
 .ovs-plugin .pg .pg-name { position: absolute; left: -2px; top: -22px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: var(--focus); color: #fff; white-space: nowrap; pointer-events: none; }
 .ovs-plugin .pg:not(.sel):not(.draft) .pg-name { display: none; }
 .ovs-plugin .pg.draft:not(.sel) .pg-name { background: var(--layer-sel); color: #3a2a00; }
+/* why a layer is faint on the live canvas: outside its show window, hidden live, or a countdown with no target */
+.ovs-plugin .pg .pg-tag { position: absolute; left: -2px; bottom: -22px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: var(--amber-bg); color: var(--amber); white-space: nowrap; pointer-events: none; }
+.ovs-plugin .bdg.live { background: var(--red-bg); color: var(--red); }
+.ovs-plugin .fpresets { display: flex; flex-direction: column; gap: 4px; }
+.ovs-plugin .fpreset { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-2); padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ovs-plugin .fpreset[aria-pressed="true"] { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+.ovs-plugin .fpreset .fs { font-weight: 600; min-height: 1em; }
+.ovs-plugin .fpreset code { color: var(--text-2); font-size: 12px; }
 .ovs-plugin .pg .h { position: absolute; width: 10px; height: 10px; background: #fff; border: 1px solid var(--focus); }
 .ovs-plugin .pg .h.nw { left: -7px; top: -7px; cursor: nwse-resize; } .ovs-plugin .pg .h.ne { right: -7px; top: -7px; cursor: nesw-resize; }
 .ovs-plugin .pg .h.sw { left: -7px; bottom: -7px; cursor: nesw-resize; } .ovs-plugin .pg .h.se { right: -7px; bottom: -7px; cursor: nwse-resize; }
@@ -413,7 +421,8 @@
 .ovs-plugin .pg .lyr-svg .img-wait { stroke: rgba(255, 255, 255, .7); stroke-dasharray: 6 4; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .ovs-plugin .thumb.kind { display: grid; place-items: center; background: var(--surface-2); color: var(--text-2); }
 .ovs-plugin .thumb.kind svg { width: 16px; height: 16px; }
-.ovs-plugin .prow .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* the name keeps some room; the chips after it wrap to a second line rather than squeeze it away */
+.ovs-plugin .prow .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: min(100%, 6em); }
 
 /* ---------- overlay editor ---------- */
 .ovs-plugin .ed-h { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; min-height: 48px; }
@@ -424,7 +433,7 @@
 .ovs-plugin .prow[aria-selected="true"] { background: var(--gray-100); box-shadow: inset 2px 0 0 var(--accent); }
 .ovs-plugin .prow.drop { box-shadow: inset 0 2px 0 var(--focus); }
 .ovs-plugin .prow .grip-h { color: var(--text-3); cursor: grab; font-size: 11px; letter-spacing: -2px; user-select: none; }
-.ovs-plugin .prow .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.ovs-plugin .prow .nm { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; overflow-wrap: anywhere; }
 .ovs-plugin .prow .sub { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ovs-plugin .prow .acts { display: flex; gap: 2px; }
 .ovs-plugin .thumb { width: 40px; height: 23px; border-radius: var(--r-sm); background: conic-gradient(#bbb 25%, #ddd 0 50%, #bbb 0 75%, #ddd 0) 0 0/8px 8px; overflow: hidden; }

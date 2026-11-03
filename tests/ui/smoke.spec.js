@@ -107,8 +107,14 @@ test('a save refused for an old token fetches a new one and goes through', async
   // the Manager renewed its token with the session
   wse.token = 'token-2';
   await save('https://scores.example.com/bug4');
-  const writes = wse.requests.filter((r) => r.method === 'POST' && r.path.includes('/overlays/Scoreboard?'));
-  expect(writes.map((r) => /wowzaSecurityToken=([^&]+)/.exec(r.path)[1])).toEqual(['token-1', 'token-1', 'token-2']);
+  // the refusal can meet the save or the draft page's preview, whichever posts first after the change; either way
+  // the old token was refused once, a new one was fetched, and the save went through with it
+  const posts = wse.requests.filter((r) => r.method === 'POST' && /wowzaSecurityToken=/.test(r.path)).map((r) => /wowzaSecurityToken=([^&]+)/.exec(r.path)[1]);
+  const writes = wse.requests.filter((r) => r.method === 'POST' && r.path.includes('/overlays/Scoreboard?')).map((r) => /wowzaSecurityToken=([^&]+)/.exec(r.path)[1]);
+  expect(writes[0]).toBe('token-1');
+  expect(writes[writes.length - 1], 'the second save went with the new token').toBe('token-2');
+  expect(posts.indexOf('token-2'), 'refused with the old token first').toBeGreaterThan(posts.indexOf('token-1'));
+  expect(posts.filter((x) => x === 'token-1').length, 'one refusal after the first save').toBeGreaterThanOrEqual(2);
   expect(wse.posts.filter((p) => p.path.endsWith('/overlays/Scoreboard')).map((p) => p.body.objects[0].url))
     .toEqual(['https://scores.example.com/bug3', 'https://scores.example.com/bug4']);
 });
@@ -180,4 +186,26 @@ test.describe('a phone-width window', () => {
     await expect(page.locator('[data-tab-select]')).toBeVisible();
     await expect(page.locator('.ltabs')).toBeHidden();
   });
+});
+
+test('a Manager session that ends says so, keeps what the page shows, and clears once signed in again', async ({ page, studio, wse }) => {
+  await studio.open();
+  await openTab(page, 'overlays');
+  await expect(page.locator('[data-list]')).toContainText('Scoreboard');
+  wse.signedOut = true;
+  const banner = page.locator('.banners [data-banner=signedout]');
+  await expect(banner, 'the next poll meets the Manager sign-in page').toContainText('You are signed out of WSE Manager.', { timeout: 6000 });
+  await expect(banner.getByRole('button', { name: 'Sign in again' })).toBeVisible();
+  await expect(page.locator('.banners [data-banner]').filter({ hasText: /signed out|session ended|sign in/i }), 'one banner says it, not one per check').toHaveCount(1);
+  await expect(page.locator('[data-list]'), 'the sign-in page is not read as an empty server').toContainText('Scoreboard');
+  await expect(page.locator('.banners')).not.toContainText('bridge is not loaded');
+  wse.signedOut = false;
+  await expect(banner, 'the next answer clears it').toHaveCount(0, { timeout: 6000 });
+});
+
+test('opened while the Manager session has ended, it says signed out, not that the bridge is missing', async ({ page, studio, wse }) => {
+  wse.signedOut = true;
+  await page.goto('http://wse.test/enginemanager/overlay-studio');
+  await expect(page.locator('.banners [data-banner=signedout]')).toContainText('You are signed out of WSE Manager.');
+  await expect(page.locator('.banners')).not.toContainText('bridge is not loaded');
 });
