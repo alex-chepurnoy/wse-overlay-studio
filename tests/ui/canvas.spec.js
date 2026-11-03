@@ -112,6 +112,7 @@ test('nothing selected reads as a layer', async ({ page, studio }) => {
 test('the Place tab shows an image layer at its picture size once it arrives', async ({ page, studio }) => {
   await openMixed(page, studio);
   await page.locator('[data-layers] .prow').filter({ hasText: 'logo.png' }).click();
+  await page.getByRole('tab', { name: 'Place' }).click();
   await expect(page.locator('#ovs-f-w')).toHaveValue('200');
   await expect(page.locator('#ovs-f-h')).toHaveValue('100');
 });

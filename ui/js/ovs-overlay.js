@@ -556,7 +556,7 @@
   // keepFocus: the canvas keeps (or takes) the focus, with the layer as its active descendant
   function select(id, keepFocus) {
     endEdit();
-    S.layer = id; S.adding = false;
+    S.layer = id; S.adding = false; S.imgPick = false;
     renderLayers(); renderInspector(); placeBoxes();
     if (keepFocus) focusCanvas();
   }
@@ -647,7 +647,7 @@
     endEdit();
     // a press on another layer selects it and drags it at once; its grips appear on release
     var fresh = S.layer !== id;
-    if (fresh) { S.layer = id; S.adding = false; grip = null; renderLayers(); renderInspector(); markSel(); }
+    if (fresh) { S.layer = id; S.adding = false; S.imgPick = false; grip = null; renderLayers(); renderInspector(); markSel(); }
     var frame = frameEl();
     var box = frame.querySelector('.pg[data-id="' + CSS.escape(id) + '"]');
     var o = byId(id), s = src(), scale = frame.clientWidth / s.w, z = area(o), rot = rotationOf(o);
@@ -937,15 +937,28 @@
     opts = opts || {};
     var label = U.esc(f.label) + (f.unit ? ' (' + U.esc(f.unit) + ')' : '');
     var title = ' title="WSE setting ' + U.esc(f.key) + '"';
+    var named = function (x) { var i = f.values ? f.values.indexOf(x) : -1; return i >= 0 && f.names ? f.names[i] : x; };
     if (ro()) {
-      var shown = f.type === 'bool' ? (value ? 'Yes' : 'No') : v === '' ? (opts.placeholder ? opts.placeholder + ', from the size on the picture' : 'Not set') : v;
+      var shown = f.type === 'bool' ? (value ? 'Yes' : 'No') : v === '' ? (opts.placeholder ? opts.placeholder + (opts.fromPicture ? ', from the size on the picture' : '') : 'Not set') : f.type === 'enum' ? named(v) : v;
       return '<div class="fld"><span class="f">' + label + '</span><div class="val">' + U.esc(shown) + '</div></div>';
     }
-    var savedV = opts.saved, draftCls = savedV !== undefined && JSON.stringify(savedV) !== JSON.stringify(value) ? ' is-draft' : '';
-    var savedLine = draftCls ? '<div class="hint">Saved: ' + U.esc(savedV === undefined || savedV === null || savedV === '' ? 'not set' : f.type === 'bool' ? (savedV ? 'on' : 'off') : savedV) + '</div>' : '';
+    // a saved value differs from savedV when it was set, or the field shows a default: undefined and the default are alike
+    var savedV = opts.saved, same = JSON.stringify(savedV) === JSON.stringify(value) || ((savedV === undefined || savedV === null) && (value === '' || value === f.def || value === opts.placeholder));
+    var draftCls = savedV !== undefined && !same || (savedV === undefined && opts.savedKnown && !same) ? ' is-draft' : '';
+    var savedLine = draftCls ? '<div class="hint">Saved: ' + U.esc(savedV === undefined || savedV === null || savedV === '' ? 'not set' : f.type === 'bool' ? (savedV ? 'on' : 'off') : named(savedV)) + '</div>' : '';
     if (f.type === 'bool') {
       return '<div class="fld"><label class="check"' + title + '><input type="checkbox" id="' + id + '" data-f="' + name + '"' + (value ? ' checked' : '') + '>' + label + '</label>' +
         (f.help ? U.tip(f.help + ' WSE setting ' + f.key + '.') : '') + savedLine + '</div>';
+    }
+    var head = '<label class="f" for="' + id + '">' + label + (f.help && !opts.noHelp ? U.tip(f.help + ' WSE setting ' + f.key + '.') : '') + '</label>';
+    if (f.type === 'enum' || f.type === 'font') {
+      var opt = function (x, text) { return '<option value="' + U.esc(x) + '"' + (x === v ? ' selected' : '') + '>' + U.esc(text) + '</option>'; };
+      return '<div class="fld">' + head + '<select id="' + id + '" data-f="' + name + '"' + title + ' class="' + draftCls + '">' +
+        (f.type === 'font' ? fontOptions(v, opt) : f.values.map(function (x) { return opt(x, named(x)); }).join('')) + '</select><div class="err" data-err-for="' + name + '"></div>' + savedLine + '</div>';
+    }
+    if (f.type === 'textarea') {
+      return '<div class="fld">' + head + '<textarea id="' + id + '" data-f="' + name + '" rows="3" spellcheck="false"' + title + ' class="' + draftCls + '">' + U.esc(v) + '</textarea>' +
+        '<div class="err" data-err-for="' + name + '"></div>' + savedLine + '</div>';
     }
     var type = f.type === 'int' || f.type === 'num' ? 'number' : 'text';
     var attrs = (f.min !== undefined ? ' min="' + f.min + '"' : '') + (f.max !== undefined ? ' max="' + f.max + '"' : '') + (f.type === 'num' ? ' step="any"' : '');
@@ -972,22 +985,31 @@
       h = '<div class="pnl-h"><div>' + idHtml + (web ? '<span class="capchip ' + pageDot(o.id) + '" data-capline title="' + U.esc(capLine(o.id).replace(/<[^>]+>/g, '')) + '"><span class="dot ' + pageDot(o.id) + '"></span>' + U.esc(capShort(o.id)) + '</span>' : '') +
         '</div><span class="spacer"></span>' + (web && savedById(o.id) && !ro() ? '<button type="button" class="btn sm ghost" data-reloadpage title="Load ' + U.esc(host(o.url)) + ' again in the browser on the server, for a capture that shows the wrong thing">' + U.icon('refresh') + 'Reload page</button>' : '') +
         '<button type="button" class="btn sm icon ghost only-1200" data-closeinsp aria-label="Close the inspector">' + U.icon('close') + '</button></div>';
-      var tabs = web ? [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']] : [['place', 'Place']];
+      var tabs = TABS[web ? 'webPage' : o.type === 'string' || o.type === 'image' ? o.type : 'shape'];
       if (!tabs.some(function (t) { return t[0] === S.inspTab; })) S.inspTab = tabs[0][0];
       h += '<div class="itabs" role="tablist" aria-label="' + (web ? 'Page' : 'Layer') + ' settings">' + tabs.map(function (t) {
         return '<button type="button" role="tab" data-itab="' + t[0] + '" aria-selected="' + (S.inspTab === t[0]) + '" tabindex="' + (S.inspTab === t[0] ? 0 : -1) + '">' + t[1] + '</button>'; }).join('') + '</div>';
       var body = '';
       if (S.inspTab === 'page') body = fieldHtml('url', o.url, { saved: sv.url }) +
-        '<div class="grid2">' + fieldHtml('viewportWidth', o.viewportWidth, { placeholder: String(z.w), saved: sv.viewportWidth }) + fieldHtml('viewportHeight', o.viewportHeight, { placeholder: String(z.h), noHelp: true, saved: sv.viewportHeight }) + '</div>' +
+        '<div class="grid2">' + fieldHtml('viewportWidth', o.viewportWidth, { placeholder: String(z.w), fromPicture: true, saved: sv.viewportWidth }) + fieldHtml('viewportHeight', o.viewportHeight, { placeholder: String(z.h), fromPicture: true, noHelp: true, saved: sv.viewportHeight }) + '</div>' +
         overlaySettings(d) + U.roNote();
-      else if (S.inspTab === 'place') body = kindHtml(o) + '<div class="grid2">' +
+      else if (S.inspTab === 'text') body = textTabHtml(o, sv);
+      else if (S.inspTab === 'shape') body = shapeTabHtml(o, sv);
+      else if (S.inspTab === 'fx') body = '<div class="grid2">' + of(o, sv, 'shadowColor') + of(o, sv, 'shadowOffset') + '</div>' + opacityHtml(o, sv);
+      else if (S.inspTab === 'image') body = imageTabHtml(o);
+      else if (S.inspTab === 'place') body = '<div class="grid2">' +
         fieldHtml('x', o.x || 0, { noHelp: true, saved: sv.x || 0 }) + fieldHtml('y', o.y || 0, { noHelp: true, saved: sv.y || 0 }) +
-        fieldHtml('w', z.w, { noHelp: true, saved: sv.id ? size(sv).w : undefined }) + fieldHtml('h', z.h, { noHelp: true, saved: sv.id ? size(sv).h : undefined }) + '</div>' +
-        fieldHtml('opacity', o.opacity == null || o.opacity < 0 ? 100 : o.opacity, { noHelp: true }) +
+        // a line, a triangle and a free text are sized by their points and their font, not a box
+        (resizable(o) ? fieldHtml('w', z.w, { noHelp: true, saved: sv.id ? size(sv).w : undefined }) + fieldHtml('h', z.h, { noHelp: true, saved: sv.id ? size(sv).h : undefined }) : '') + '</div>' +
+        (web ? '' : of(o, sv, 'rotation')) + (o.type === 'image' ? fieldHtml('lockAspect', o.lockAspect !== false, { saved: sv.id ? sv.lockAspect !== false : undefined }) : '') +
+        (TABS.shape === tabs ? '' : opacityHtml(o, sv)) +
         '<div class="hrow chips">' + (past ? '<span class="bdg warn">Past title safe</span>' : '<span class="bdg">Inside title safe</span>') +
         '<span class="bdg">Source ' + s.w + ' x ' + s.h + '</span>' + (ro() ? '' : U.tip('Drag the layer on the canvas; its corners resize it and the round handle above turns it. It snaps to the frame, the title safe area and other layers; hold Ctrl to place it freely. Arrow keys move 1 px, Shift 10 px. Positions are in source pixels.')) + '</div>' + (ro() ? U.roNote() : '');
       else if (S.inspTab === 'look') body = keyHtml(o, sv);
-      else if (S.inspTab === 'time') body = '<div class="grid2">' + fieldHtml('pageDelay', o.pageDelay, { saved: sv.pageDelay }) + fieldHtml('reloadRate', o.reloadRate, { saved: sv.reloadRate }) + '</div>';
+      else if (S.inspTab === 'time') body = (web ? '<div class="grid2">' + fieldHtml('pageDelay', o.pageDelay, { saved: sv.pageDelay }) + fieldHtml('reloadRate', o.reloadRate, { saved: sv.reloadRate }) + '</div>' : '') +
+        of(o, sv, 'showFrom', { placeholder: 'stream+30' }) + of(o, sv, 'hideAt', { placeholder: '2027-01-01T18:00:00-05:00' }) +
+        '<div class="grid2">' + of(o, sv, 'fadeIn') + of(o, sv, 'fadeOut') + '</div>' + of(o, sv, 'blinkSeconds', { placeholder: 'Steady' }) +
+        (ro() ? '' : '<p class="hint">The canvas shows every layer whatever its timing; the video follows it.</p>');
       if (web && capNote(o.id) === 'bad') h += '<section><div class="note bad" data-capnote><span class="dot bad"></span><div>' + capLine(o.id) + '</div></div></section>';
       if (body) h += '<section>' + body + '</section>';
     }
@@ -997,7 +1019,7 @@
     // a named speed fills in the exact value beside it, so the draft, Save and Revert treat it as that field
     U.bindSpeed(el.insp, 'data-ospeed', function (v) { var i = el.insp.querySelector('[data-f=refreshRate]'); if (i) { i.value = v; i.dispatchEvent(new Event('input')); } });
     el.insp.querySelectorAll('[data-itab]').forEach(function (b) {
-      b.onclick = function () { S.inspTab = b.getAttribute('data-itab'); renderInspector(); var t = el.insp.querySelector('[data-itab="' + S.inspTab + '"]'); if (t) t.focus(); if (S.inspTab === 'look' && o) captureSoon(o.id); };
+      b.onclick = function () { S.inspTab = b.getAttribute('data-itab'); S.imgPick = false; renderInspector(); var t = el.insp.querySelector('[data-itab="' + S.inspTab + '"]'); if (t) t.focus(); if (S.inspTab === 'look' && o) captureSoon(o.id); };
       b.onkeydown = function (e) {
         if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
         var all = Array.prototype.slice.call(el.insp.querySelectorAll('[data-itab]')), k = all.indexOf(b) + (e.key === 'ArrowRight' ? 1 : -1);
@@ -1013,6 +1035,19 @@
     }
     var kd = el.insp.querySelector('[data-kind]');
     if (kd && o) kd.onchange = function () { changeKind(o.id, kd.value); };
+    var bx = el.insp.querySelector('details[data-boxadv]');
+    if (bx) bx.addEventListener('toggle', function () { S.boxOpen = bx.open; });
+    var ch = el.insp.querySelector('[data-imgchoose]');
+    if (ch) ch.onclick = function () {
+      S.imgPick = true; renderInspector();
+      U.images.library().then(function () { if (S.imgPick) renderInspector(); }, function (er) { S.imgPick = false; renderInspector(); U.toast('The image list could not be read: ' + er.message, { level: 'bad' }); });
+    };
+    if (S.imgPick && o && o.type === 'image') U.images.bind(el.insp.querySelector('.ly-picker'), {
+      onCancel: function () { S.imgPick = false; renderInspector(); },
+      onPick: function (file, uploaded) { setImage(o.id, file); if (uploaded) U.toast('Uploaded ' + file + ' and chose it for ' + o.id + '.'); },
+      inUse: function (f) { var u = objects().filter(function (x) { return x.type === 'image' && x.imageFile === f; })[0]; return u ? 'Layer ' + u.id + ' in this overlay uses ' + f + '; choose another image for it first.' : null; },
+      onChange: renderInspector
+    });
     var rp = el.insp.querySelector('[data-reloadpage]');
     if (rp) rp.onclick = function () { reloadPage(o.id); };
     var ci = el.insp.querySelector('[data-closeinsp]');
@@ -1020,6 +1055,68 @@
     var raw = el.insp.querySelector('[data-raw]');
     if (raw && !ro()) raw.addEventListener('click', pickColor);
     if (o) bindCropper(o);
+  }
+
+  /* ---------- the panel for each kind (plan 4.2) ---------- */
+  var TABS = { webPage: [['page', 'Page'], ['place', 'Place'], ['look', 'Key, crop'], ['time', 'Timing']], string: [['text', 'Text'], ['place', 'Place'], ['time', 'Timing']],
+    image: [['image', 'Image'], ['place', 'Place'], ['time', 'Timing']], shape: [['shape', 'Shape'], ['fx', 'Effects'], ['place', 'Place'], ['time', 'Timing']] };
+  // one layer field: its own value, or blank with what it draws with as the placeholder (the overlay's or the module's default)
+  function of(o, sv, name, extra) {
+    var f = F[name], k = f.key, v = o[k], eff = U.draw.effective(o, S.draft)[k], opts = { saved: sv.id ? sv[k] : undefined, savedKnown: !!sv.id }, x;
+    for (x in extra || {}) opts[x] = extra[x];
+    if (f.type === 'enum' || f.type === 'font') v = v != null ? v : eff != null ? eff : f.def;
+    else if (f.type === 'bool') v = v == null ? !!f.def : v;
+    else if (v == null) {
+      v = '';
+      var p = eff != null && eff !== '' ? eff : f.def;
+      if (opts.placeholder === undefined && p != null) opts.placeholder = String(p);
+    }
+    return fieldHtml(name, v, opts);
+  }
+  function opacityHtml(o) { return fieldHtml('opacity', o.opacity == null || o.opacity < 0 ? 100 : o.opacity, { noHelp: true }); }
+  function textTabHtml(o, sv) {
+    loadFonts();
+    return of(o, sv, 'text') + '<div class="grid2">' + of(o, sv, 'font') + of(o, sv, 'fontSize') + of(o, sv, 'fontStyle') + of(o, sv, 'align') + '</div>' + of(o, sv, 'textColor') +
+      '<details class="adv" data-boxadv' + (S.boxOpen ? ' open' : '') + '><summary>Box and outline</summary>' + of(o, sv, 'box') +
+      '<div class="grid2">' + of(o, sv, 'background') + of(o, sv, 'padding') + of(o, sv, 'outlineColor') + of(o, sv, 'outlineWidth') + of(o, sv, 'radius') + of(o, sv, 'lineHeight') + '</div>' +
+      of(o, sv, 'autoFit') + '</details>';
+  }
+  function shapeTabHtml(o, sv) {
+    var line = o.type === 'line';
+    return kindHtml(o) + '<div class="grid2">' + (line ? '' : of(o, sv, 'fillColor')) + of(o, sv, 'lineColor') + of(o, sv, 'stroke') + of(o, sv, 'dash') +
+      (line ? of(o, sv, 'arrowHead') : '') + of(o, sv, 'gradientColor') + of(o, sv, 'gradientDirection') + '</div>' + (o.type === 'rectangle' ? of(o, sv, 'arcWidth') : '');
+  }
+  // the fonts the server can draw (GET /fonts), read once
+  var fonts = null, fontsAsked = false;
+  function loadFonts() {
+    if (fontsAsked) return;
+    fontsAsked = true;
+    U.api.get('/fonts').then(function (r) {
+      fonts = r || {};
+      if (U.current() === 'overlay' && el.insp && el.insp.querySelector('select[data-f=font]') && !el.insp.contains(document.activeElement)) renderInspector();
+    }, function () { /* the field offers the layer's own font until a later page load */ });
+  }
+  function fontOptions(v, opt) {
+    var groups = fonts ? [['Bundled with Overlay Studio', (fonts.bundled || []).map(function (b) { return b.family; })], ['Java', fonts.logical || []], ['On this server', fonts.system || []]] : [];
+    var all = [].concat.apply([], groups.map(function (g) { return g[1]; }));
+    return (all.indexOf(v) < 0 ? opt(v, v + (fonts ? ' (not on this server)' : '')) : '') + groups.filter(function (g) { return g[1].length; }).map(function (g) {
+      return '<optgroup label="' + U.esc(g[0]) + '">' + g[1].map(function (n) { return opt(n, n); }).join('') + '</optgroup>'; }).join('');
+  }
+  // the picture an image layer draws, and the library to choose another (ovs-images.js)
+  function imageTabHtml(o) {
+    var f = o.imageFile, im = f ? U.draw.image(f) : null;
+    var h = '<div class="fld"><span class="f">' + U.esc(F.imageFile.label) + U.tip(F.imageFile.help) + '</span><div class="val" data-imgname>' + (f ? U.esc(f) +
+      (im && im.width ? ' <span class="faint small">' + im.width + ' x ' + im.height + '</span>' : im && im.error ? ' <span class="warn-text small">' + U.esc(im.error) + '</span>' : '') : 'No image chosen') + '</div></div>';
+    if (ro()) return h;
+    return h + (S.imgPick ? U.images.pickerHtml({ selected: f, okLabel: 'Use image' }) :
+      '<div class="hrow"><button type="button" class="btn sm" data-imgchoose>' + U.icon('image') + (f ? 'Choose another image' : 'Choose an image') + '</button></div>');
+  }
+  function setImage(id, file) {
+    var o = byId(id);
+    if (!o) return;
+    snapshot();
+    o.imageFile = file; S.imgPick = false;
+    renderLayers(); renderInspector(); placeBoxes(); renderBar(); renderCaption(); U.changed();
   }
 
   /* ---------- a shape's kind, within its geometry (plan 4.1): the box kinds share x, y, w, h; line and arrow their ends ---------- */
@@ -1146,13 +1243,31 @@
       if (err) err.textContent = bad ? 'From ' + f.min + (f.max !== undefined ? ' to ' + f.max : ' up') + '.' : '';
       if (bad) return;
     } else v = e.target.value;
+    // a blank color or time is no value: the layer draws without it
+    if ((f.type === 'color' || f.type === 'when') && f.scope === 'object' && !String(v).trim()) v = null;
+    var why = v === null ? null : f.type === 'color' && f.scope === 'object' && !U.draw.isColor(v) ? 'Use rgb(r,g,b), rgb(r,g,b,a) or a color name such as white.' :
+      f.type === 'when' && !WHEN.test(String(v).trim()) ? 'Use stream+N for seconds after the stream starts, or a date and time with its offset such as 2027-01-01T18:00:00-05:00.' :
+      name === 'text' && v.length > 2000 ? 'At most 2,000 characters (' + v.length + ' now).' : null;
+    if (f.type === 'color' || f.type === 'when' || name === 'text') {
+      e.target.classList.toggle('invalid', !!why);
+      if (err) err.textContent = why || '';
+      if (why) return;
+      if (f.type === 'when') v = String(v).trim();
+    }
     if (name === 'url') { var p = urlProblem(v); e.target.classList.toggle('invalid', !!p); if (err) err.textContent = p || ''; }
     if (name === 'keyColor') { var sw = el.insp.querySelector('[data-swatch]'); if (sw) sw.style.background = v; }
     snapshot('field:' + name);
     if (f.scope === 'overlay') { S.draft[f.key] = v; if (name === 'evenCoords') renderCoords(); if (name === 'refreshRate') U.syncSpeed(el.insp, 'data-ospeed', v); }
+    else if (name === 'box') { setBox(o, v); return; }
     else {
       if (v === null) delete o[f.key]; else o[f.key] = v;
-      if (['x', 'y', 'w', 'h', 'opacity'].indexOf(name) >= 0) placeBoxes();
+      // the curve of a corner is as tall as it is wide
+      if (name === 'arcWidth') { if (v === null) delete o.arcHeight; else o.arcHeight = v; }
+      // text, shapes and images draw from every field; a page from its place
+      if (o.type !== 'webPage' || ['x', 'y', 'w', 'h', 'opacity'].indexOf(name) >= 0) placeBoxes();
+      if (o.type !== 'webPage') { var nm = el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] .lname'); if (nm) nm.textContent = U.draw.name(o); }
+      // the Shape select follows a field that changes which shape it is
+      if (name === 'arrowHead' || name === 'arcWidth') { var kd = el.insp.querySelector('[data-kind]'), sk = shapeKind(o); if (kd && sk) kd.value = sk; }
       if (name === 'url') { var sub = el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] .sub'); if (sub) sub.textContent = host(v); }
       if (CAPTURE_KEYS.indexOf(f.key) >= 0 && o.type === 'webPage') captureSoon(o.id);
       if (['cropX', 'cropY', 'cropW', 'cropH'].indexOf(name) >= 0) {
@@ -1164,6 +1279,16 @@
     // the dashed draft mark follows the field without rebuilding the inspector, which would take its focus
     e.target.classList.add('is-draft');
     markEdited(); renderBar(); renderCaption(); U.changed();
+  }
+  // a time a layer shows or hides at, as the module takes it (ObjectConfig.timingProblem)
+  var WHEN = /^(stream\+\d{1,9}(\.\d{1,3})?|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))$/;
+  // a text's box on or off, keeping the text where it is: a box starts at the text's extent, a free text at its first line
+  function setBox(o, on) {
+    var e = U.draw.effective(o, S.draft), l = U.draw.text(e, U.draw.shown(e)), pad = typeof o.padding === 'number' ? o.padding : 0;
+    if (on) { o.box = true; o.x = even(l.area.x); o.y = even(l.area.y); o.w = even(Math.max(l.area.w, 40)); o.h = even(Math.max(l.area.h, 40)); }
+    else { o.x = even(l.area.x + pad); o.y = even(l.rows.length ? l.rows[0].base : o.y + pad + l.ascent); delete o.box; delete o.w; delete o.h; }
+    renderEditor();
+    var c = el.insp.querySelector('[data-f=box]'); if (c) c.focus();
   }
   function syncPlacement() {
     var o = byId(S.layer);

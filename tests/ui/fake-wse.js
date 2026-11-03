@@ -98,11 +98,20 @@ class FakeWse {
       return this.captureLimit;
     }
     if (r === VH + '/applications' && method === 'GET') return { applications: this.apps };
+    // as Fonts.list (plan 3.7)
+    if (r === '/fonts' && method === 'GET') {
+      return { available: true, problem: null, default: 'Fira Sans',
+        bundled: ['Fira Sans', 'Fira Sans Condensed', 'Fira Mono', 'PT Serif'].map((family) => ({ family, styles: ['plain', 'bold', 'italic', 'bolditalic'], files: ['plain', 'bold'], shadowedBy: null })),
+        logical: ['Serif', 'SansSerif', 'Monospaced', 'Dialog', 'DialogInput'], system: ['DejaVu Sans'] };
+    }
     if (r === VH + '/images') {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
       // one image whole, as ImageLibrary.data answers: a 1 x 1 PNG standing for a 200 x 100 picture
       if (q.get('file')) return { file: q.get('file'), width: 200, height: 100, data: 'data:image/png;base64,' + PIXEL };
-      return { images: [] };
+      // as ImageLibrary.list: one upload of this module's, one picture put in content/ by hand
+      return { images: [
+        { file: 'overlaystudio/logo.png', width: 200, height: 100, uploaded: true, preview: 'data:image/png;base64,' + PIXEL },
+        { file: 'house.png', width: 50, height: 50, uploaded: false, preview: 'data:image/png;base64,' + PIXEL }] };
     }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/state$/.exec(r)) && method === 'GET') {
       return this.state(q.get('rev'));
