@@ -162,7 +162,7 @@
   function open(name) {
     if (S.name && S.name !== name) stash();
     S.name = name; S.captures = {}; S.raw = {}; S.capStatus = {}; S.drafted = {}; S.shown = {}; S.thumbAt = {};
-    S.conflict = false; S.theirs = null; S.adding = false; S.savedNote = null;
+    S.conflict = false; S.theirs = null; S.adding = false; S.savedNote = null; S.warnings = [];
     var e = entry(), kept = mem[name];
     if (kept) {
       S.saved = kept.saved; S.draft = kept.draft; S.undo = kept.undo; S.redo = kept.redo; S.known = kept.known; S.layer = kept.layer;
@@ -253,7 +253,8 @@
         var had = S.status && S.status.transcoder && S.status.transcoder.decoderWidth;
         S.status = st;
         if (!had && st.transcoder && st.transcoder.decoderWidth) {
-          placeBoxes();
+          // the rows say which layers fall outside this stream's frame
+          placeBoxes(); renderLayers();
           // the inspector quotes the source size and title safe; left alone while someone types in it
           if (!el.insp.contains(document.activeElement)) renderInspector();
         }
@@ -679,6 +680,7 @@
     el.insp.querySelector('[data-precancel]').onclick = function () { S.presetPick = false; renderInspector(); };
   }
   function addPreset(id) {
+    if (full()) return;
     var s = src(), o = U.presets.layer(id, { w: s.w, h: s.h }, function (x) { return !!byId(x); }), top = sorted()[0];
     if (!o) return;
     o.zOrder = top ? (top.zOrder || 0) + 1 : 1;
@@ -723,6 +725,80 @@
     return a.x < s.w * 0.05 || a.y < s.h * 0.05 || a.x + a.w > s.w * 0.95 || a.y + a.h > s.h * 0.95 ? 'past' : 'inside';
   }
 
+  /* ---------- problems the page shows (plan 4.2a) ---------- */
+  // GET /fonts/check, once per font, style and set of characters: the family Java draws with and what it cannot draw
+  var fontChecks = {};
+  function fontCheck(o) {
+    var e = U.draw.effective(o, S.draft), r = U.format.parse(o.text), lit = r.parts.filter(function (p) { return !p.kind; }).map(function (p) { return p.lit; }).join('');
+    // a token draws digits, letters and punctuation of its pattern
+    var chars = lit + (r.parts.some(function (p) { return p.kind; }) ? '0123456789:' + r.parts.filter(function (p) { return p.kind; }).map(function (p) { return p.pattern; }).join('') : '');
+    var seen = {}, distinct = Array.from(chars).filter(function (c) { if (seen[c] || /\s/.test(c)) return false; seen[c] = true; return true; }).slice(0, 512).join('');
+    var key = e.font + '\u0001' + (e.fontStyle || 'plain') + '\u0001' + distinct, c = fontChecks[key];
+    if (!c) {
+      fontChecks[key] = c = { pending: true };
+      U.api.get('/fonts/check?font=' + encodeURIComponent(e.font) + '&style=' + encodeURIComponent(e.fontStyle || 'plain') + '&chars=' + encodeURIComponent(distinct)).then(function (a) {
+        fontChecks[key] = a || {};
+        if (U.current() === 'overlay' && S.draft) { renderLayers(); showProblems(); }
+      }, function () { fontChecks[key] = {}; });
+    }
+    return { font: e.font, result: c };
+  }
+  /** What is wrong with a layer, each {text, field, row}: shown on its row (row) and under its field (field). */
+  function problemsOf(o) {
+    var out = [], s = src();
+    if (o.type === 'string') {
+      var fc = fontCheck(o), a = fc.result;
+      if (a.available && a.uses && a.uses !== fc.font) out.push({ row: 'Font', field: 'font', text: 'Drawn as ' + a.uses + ' on this server: ' + fc.font + ' is not installed here.' });
+      if (a.available && a.missing && a.missing.length) out.push({ row: 'Characters', field: 'text', text: 'These characters will not draw in ' + (a.uses || fc.font) + ': ' + a.missing.join(' ') });
+      var e = U.draw.effective(drawn(o), S.draft), l = U.draw.text(e, U.draw.shown(e));
+      if (l.cut) out.push({ field: 'text', text: 'Text is cut off at the box\'s edge' + (e.autoFit === true ? ', even at half its size' : '') + '. Make the box bigger or the text shorter' + (e.autoFit === true ? '.' : ', or turn on Shrink to fit the box.') });
+    }
+    if (o.type === 'image' && o.imageFile) {
+      var im = U.draw.image(o.imageFile);
+      if (im && im.error) out.push({ row: 'File missing', field: 'imageFile', text: 'File missing: ' + o.imageFile + '. The layer draws nothing until another image is chosen.' });
+    }
+    (S.warnings || []).forEach(function (w) { if (w.id === o.id) out.push({ row: 'Warning', field: w.field, text: w.message }); });
+    if (s.known) {
+      var z = area(o);
+      if (z.x < -0.5 || z.y < -0.5 || z.x + z.w > s.w + 0.5 || z.y + z.h > s.h + 0.5) out.push({ row: 'Outside the frame', outside: true, text: (frameFit(o, s) === 'outside' ? 'Wholly' : 'Partly') + ' outside the frame of ' + S.preview + ' (' + s.w + ' x ' + s.h + ').' });
+    }
+    return out;
+  }
+  // the stream is not 1920 x 1080, so layers placed for 1080p can be scaled to it
+  function canFit() { var s = src(); return s.known && (s.w !== 1920 || s.h !== 1080); }
+  /** Fit to this stream (4.2a): every layer's position and size scaled by the stream's size over 1920 x 1080. */
+  function fitToStream() {
+    var s = src();
+    if (ro() || !canFit()) return;
+    var kx = s.w / 1920, ky = s.h / 1080, r = function (v) { return even(v); };
+    snapshot();
+    objects().forEach(function (o) {
+      ['x', 'x2', 'x3'].forEach(function (k) { if (typeof o[k] === 'number') o[k] = r(o[k] * kx); });
+      ['y', 'y2', 'y3'].forEach(function (k) { if (typeof o[k] === 'number') o[k] = r(o[k] * ky); });
+      if (o.w > 0) o.w = Math.max(1, r(o.w * kx));
+      if (o.h > 0) o.h = Math.max(1, r(o.h * ky));
+      ['fontSize', 'stroke', 'padding', 'radius', 'arcWidth', 'arcHeight', 'shadowOffset', 'outlineWidth'].forEach(function (k) {
+        if (typeof o[k] === 'number' && o[k] > 0) o[k] = Math.max(1, Math.round(o[k] * ky));
+      });
+    });
+    ticked = {};
+    renderEditor();
+    U.toast('Scaled every layer of ' + S.name + ' from 1920 x 1080 to ' + s.w + ' x ' + s.h + '. Undo puts them back.');
+  }
+  // the notes under the fields of the selected layer; called after the panel is drawn and when a check answers
+  function showProblems() {
+    if (!el.insp) return;
+    el.insp.querySelectorAll('[data-prob]').forEach(function (x) { x.remove(); });
+    var o = S.layer && byId(S.layer);
+    if (!o || S.presetPick || S.adding) return;
+    problemsOf(o).forEach(function (p) {
+      var f = p.field && (el.insp.querySelector('#ovs-f-' + p.field) || (p.field === 'imageFile' ? el.insp.querySelector('[data-imgname]') : null));
+      var host = f && f.closest('.fld');
+      if (!host) return;
+      var n = document.createElement('div'); n.className = 'hint warn-text'; n.setAttribute('data-prob', p.field); n.textContent = p.text;
+      host.appendChild(n);
+    });
+  }
   function frameEl() { return el.stage.querySelector('[data-frame]'); }
   function focusCanvas() { var f = frameEl(); if (f && document.activeElement !== f) f.focus({ preventScroll: true }); }
   // keepFocus: the canvas keeps (or takes) the focus, with the layer as its active descendant
@@ -985,6 +1061,8 @@
         '<div style="min-width:0"><div class="nm">' + (web ? '<span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) : '<span class="lname">' + U.esc(U.draw.name(o)) + '</span>') +
         (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + (hidden(o.id) ? '<span class="bdg" data-hiddenmark title="Hidden on this canvas only. Viewers still see it.">Hidden here</span>' : '') + (web ? pageTag(o.id) : '') +
         (U.format.noTarget(o) ? '<span class="bdg warn" data-notarget>No target set</span>' : '') +
+        problemsOf(o).filter(function (p) { return p.row; }).map(function (p) { return '<span class="bdg warn" data-rowprob title="' + U.esc(p.text) + '">' + U.esc(p.row) + '</span>' +
+          (p.outside && canFit() && !ro() ? '<button type="button" class="btn sm ghost" data-fitstream title="Scale every layer from 1920 x 1080 to this stream">Fit to this stream</button>' : ''); }).join('') +
         (liveOf(o) ? '<span class="bdg live" data-livebadge title="A feed set its ' + U.esc(liveWords(liveOf(o))) + ' on air">Live' + (liveOf(o).text != null ? ': ' + U.esc(String(liveOf(o).text).split('\n')[0].slice(0, 24)) : '') + '</span>' +
           (ro() ? '' : '<button type="button" class="btn sm ghost" data-liveclear="' + U.esc(o.id) + '" aria-label="Clear the live value of ' + U.esc(o.id) + '">Clear</button>') : '') + '</div>' +
         '<div class="sub">' + U.esc(web ? host(o.url) : kind.charAt(0).toUpperCase() + kind.slice(1) + ', ' + o.id) + '</div></div>' +
@@ -995,7 +1073,12 @@
     var dragId = null;
     el.layers.querySelectorAll('.prow').forEach(function (l) {
       var id = l.getAttribute('data-id');
-      l.onclick = function (e) { if (e.target.closest('[data-rowfor]')) return; if (e.target.closest('[data-liveclear]')) { clearLive(id); return; } select(id); };
+      l.onclick = function (e) {
+        if (e.target.closest('[data-rowfor]')) return;
+        if (e.target.closest('[data-liveclear]')) { clearLive(id); return; }
+        if (e.target.closest('[data-fitstream]')) { fitToStream(); return; }
+        select(id);
+      };
       l.onkeydown = function (e) { if (e.target === l && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(id); } };
       if (ro()) return;
       l.addEventListener('dragstart', function (e) { dragId = id; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', id); } catch (x) { /* old browsers */ } });
@@ -1236,6 +1319,7 @@
     el.insp.querySelectorAll('[data-liveclear]').forEach(function (b) { b.onclick = function () { clearLive(b.getAttribute('data-liveclear')); }; });
     el.insp.querySelectorAll('[data-tstyle]').forEach(function (b) { b.onclick = function () { if (o) applyStyle(o, b.getAttribute('data-tstyle')); }; });
     if (o && S.inspTab === 'format') bindFormat(o);
+    showProblems();
     var bx = el.insp.querySelector('details[data-boxadv]');
     if (bx) bx.addEventListener('toggle', function () { S.boxOpen = bx.open; });
     var ch = el.insp.querySelector('[data-imgchoose]');
@@ -1604,8 +1688,14 @@
     }
     // the dashed draft mark follows the field without rebuilding the inspector, which would take its focus
     e.target.classList.add('is-draft');
-    if (f.scope === 'object') { updateFit(); renderCoords(); }
+    if (f.scope === 'object') { updateFit(); renderCoords(); problemsSoon(); }
     markEdited(); renderBar(); renderCaption(); U.changed();
+  }
+  // the problems follow an edit after a pause, so typing asks the server once (fonts/check)
+  var probTimer = null;
+  function problemsSoon() {
+    if (probTimer) clearTimeout(probTimer);
+    probTimer = setTimeout(function () { probTimer = null; if (U.current() === 'overlay' && S.draft) { renderLayers(); showProblems(); } }, 300);
   }
   // the text fields that change a free text's ascent
   var TOP_KEYS = ['font', 'fontSize', 'fontStyle'];
@@ -1699,7 +1789,15 @@
     if (kind !== 'shape') { addKind(kind); return; }
     if (el.pagesAdd) U.openRowMenu(el.pagesAdd);
   }
+  // an overlay holds at most 64 layers (OverlayStore.MAX_LAYERS)
+  var MAX_LAYERS = 64;
+  function full() {
+    if (!S.draft || objects().length < MAX_LAYERS) return false;
+    U.toast('An overlay holds at most ' + MAX_LAYERS + ' layers. Remove one to add another.', { level: 'bad' });
+    return true;
+  }
   function addKind(kind) {
+    if (full()) return;
     // the preset list opens in the panel (plan 4.3)
     if (kind === 'preset' && !ro() && S.draft) { stopPlacing(); endEdit(); S.adding = false; S.presetPick = true; renderInspector(); var f = el.insp.querySelector('[data-preset]'); if (f) f.focus(); return; }
     if (ro() || !S.draft || !KIND_LABEL[kind]) return;
@@ -1879,6 +1977,8 @@
         delete mem[name];
         if (S.name !== name) return true;
         S.saved = normalize(r); S.draft = clone(S.saved); S.conflict = false; S.justSaved = true; S.undo = []; S.redo = []; S.renamed = {};
+        // the save still succeeds; what it warned about shows on the layers' rows and fields until the next save
+        S.warnings = r.warnings || [];
         var up = r.updatedStreams || [];
         S.savedNote = { title: 'Saved at ' + U.hhmm() + ': ' + name + '.', detail: (up.length ? 'Updated on ' + up.join(', ') + ' now.' : 'No stream shows it yet.') +
           (r.renamed && Object.keys(r.renamed).length ? ' Renamed ' + Object.keys(r.renamed).map(function (k) { return k + ' to ' + r.renamed[k]; }).join(', ') + '; a live value feed writing to the old id now gets "no layer".' : '') };
@@ -2170,7 +2270,7 @@
       var b = frame.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]');
       if (b) { position(b, o, s); b.setAttribute('aria-label', boxLabel(o)); }
     });
-    ticked = {}; renderCoords();
+    ticked = {}; renderCoords(); renderLayers(); showProblems();
     // the Place tab's size follows a picture that has just arrived, unless someone is typing in the panel
     if (!el.insp.contains(document.activeElement)) renderInspector();
   });
