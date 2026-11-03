@@ -222,7 +222,13 @@ test('a free text\'s Y is the top of its first line, and it keeps its top when i
   await openOverlay(page, studio, 'Mixed');
   await row(page, 'HOME 2 - 1').click();
   await page.getByRole('tab', { name: 'Place' }).click();
-  const y = field(page, 'y'), top = Number(await y.inputValue());
+  // the top is measured in the text's font
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator('.pg[data-id="score"]')).toHaveAttribute('aria-label', /Y \d+/);
+  const y = field(page, 'y');
+  await expect.poll(async () => Number(await y.inputValue()), 'the field follows the font once it is here')
+    .toBe(Number((await page.locator('.pg[data-id="score"]').getAttribute('aria-label')).match(/Y (-?\d+)/)[1]));
+  const top = Number(await y.inputValue());
   expect(top, 'the top, an ascent above the baseline').toBeLessThan(200);
   expect(top).toBeGreaterThan(200 - 64);
   const asc = 200 - top;
@@ -305,4 +311,37 @@ test('fields side by side line up whether or not their label has a help button',
   expect(await top('fontStyle')).toBe(await top('align'));
   expect(await top('radius')).toBe(await top('lineHeight'));
   expect(await top('outlineColor')).toBe(await top('outlineWidth'));
+});
+
+test('No fill leaves a shape as its line only, and gives its fill back when unchecked', async ({ page, studio, wse }) => {
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, 'Rounded rectangle').click();
+  await field(page, 'gradientColor').fill('rgb(0,0,0)');
+  const noFill = page.locator('[data-nofill]');
+  await noFill.check();
+  await expect(page.locator('[data-nofillval]'), 'the Fill field says None').toHaveText('None');
+  await expect(field(page, 'gradientColor'), 'a gradient would fill it again').toHaveValue('');
+  // the canvas draws the outline over a clear fill
+  await expect.poll(() => page.locator('.pg[data-id="bar"] rect').evaluateAll((rs) => rs.map((r) => r.getAttribute('fill')))).toContain('rgba(0,0,0,0)');
+  let o = obj(await saved(page, wse, 'Mixed'), 'bar');
+  expect(o.fillColor).toBe('rgb(0,0,0,0)');
+  expect(o.gradientColor).toBeUndefined();
+  expect(o).toMatchObject({ color: 'white', stroke: 2 });
+  await row(page, 'Rounded rectangle').click();
+  await page.locator('[data-nofill]').uncheck();
+  o = obj(await saved(page, wse, 'Mixed'), 'bar');
+  expect(o.fillColor, 'the fill it had').toBe('rgb(30,90,200)');
+  expect(o.gradientColor).toBe('rgb(0,0,0)');
+});
+
+test('No fill is not offered for a shape with no line, nor for a line', async ({ page, studio }) => {
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, 'Rounded rectangle').click();
+  await field(page, 'stroke').fill('0');
+  await row(page, 'Ellipse').click();
+  await row(page, 'Rounded rectangle').click();
+  await expect(page.locator('[data-nofill]')).toBeDisabled();
+  await expect(page.locator('[data-nofill]').locator('xpath=ancestor::div[contains(@class,"fld")]')).toContainText('with no fill and no line it draws nothing');
+  await row(page, 'Arrow').click();
+  await expect(page.locator('[data-nofill]')).toHaveCount(0);
 });

@@ -758,6 +758,7 @@
       var im = U.draw.image(o.imageFile);
       if (im && im.error) out.push({ row: 'File missing', field: 'imageFile', text: 'File missing: ' + o.imageFile + '. The layer draws nothing until another image is chosen.' });
     }
+    if (noFill(o) && o.gradientColor) out.push({ field: 'gradientColor', text: 'With no fill, a gradient still fills the shape from clear to this color. Clear it for an empty shape.' });
     (S.warnings || []).forEach(function (w) { if (w.id === o.id) out.push({ row: 'Warning', field: w.field, text: w.message }); });
     if (s.known) {
       var z = area(o);
@@ -1339,6 +1340,8 @@
     el.insp.querySelectorAll('[data-liveclear]').forEach(function (b) { b.onclick = function () { clearLive(b.getAttribute('data-liveclear')); }; });
     el.insp.querySelectorAll('[data-tstyle]').forEach(function (b) { b.onclick = function () { if (o) applyStyle(o, b.getAttribute('data-tstyle')); }; });
     if (o && S.inspTab === 'format') bindFormat(o);
+    var nf = el.insp.querySelector('[data-nofill]');
+    if (nf && o) nf.onchange = function () { setNoFill(o, nf.checked); };
     showProblems();
     var bx = el.insp.querySelector('details[data-boxadv]');
     if (bx) bx.addEventListener('toggle', function () { S.boxOpen = bx.open; });
@@ -1488,8 +1491,35 @@
   }
   function shapeTabHtml(o, sv) {
     var line = o.type === 'line';
-    return kindHtml(o) + '<div class="grid2">' + (line ? '' : of(o, sv, 'fillColor')) + of(o, sv, 'lineColor') + of(o, sv, 'stroke') + of(o, sv, 'dash') +
-      (line ? of(o, sv, 'arrowHead') : '') + of(o, sv, 'gradientColor') + of(o, sv, 'gradientDirection') + '</div>' + (o.type === 'rectangle' ? of(o, sv, 'arcWidth') : '');
+    return kindHtml(o) + '<div class="grid2">' + (line ? '' : noFill(o) ? '<div class="fld"><span class="f">Fill</span><div class="val" data-nofillval>None</div></div>' : of(o, sv, 'fillColor')) +
+      of(o, sv, 'lineColor') + of(o, sv, 'stroke') + of(o, sv, 'dash') +
+      (line ? of(o, sv, 'arrowHead') : '') + of(o, sv, 'gradientColor') + of(o, sv, 'gradientDirection') + '</div>' + noFillHtml(o) + (o.type === 'rectangle' ? of(o, sv, 'arcWidth') : '');
+  }
+  // an empty shape: the line only (said by Alex, 2026-11-03). Saved as a clear fill, so an overlay-wide fill default
+  // (ObjectConfig falls back to it when fillColor is blank) does not fill it again
+  var NO_FILL = 'rgb(0,0,0,0)', lastFill = {};
+  function noFill(o) { return o.fillColor === NO_FILL; }
+  function noFillHtml(o) {
+    if (ro() || ['rectangle', 'ellipse', 'triangle'].indexOf(o.type) < 0) return '';
+    var e = U.draw.effective(o, S.draft), lineless = !(e.stroke > 0) || !e.color;
+    return '<div class="fld"><label class="check"><input type="checkbox" data-nofill' + (noFill(o) ? ' checked' : '') + (lineless && !noFill(o) ? ' disabled' : '') + '>No fill, the line only</label>' +
+      (lineless && !noFill(o) ? '<div class="hint">Give the shape a line width and color first: with no fill and no line it draws nothing.</div>' : '') + '</div>';
+  }
+  function setNoFill(o, on) {
+    snapshot();
+    var keep = lastFill[o.id] || {};
+    if (on) {
+      lastFill[o.id] = { fill: o.fillColor, gradient: o.gradientColor };
+      o.fillColor = NO_FILL;
+      // a gradient fills the shape from its fill to the gradient's color, so an empty shape has none
+      delete o.gradientColor;
+    } else {
+      o.fillColor = keep.fill && keep.fill !== NO_FILL ? keep.fill : 'rgb(30,90,200)';
+      if (keep.gradient) o.gradientColor = keep.gradient;
+    }
+    ticked = {};
+    renderLayers(); renderInspector(); placeBoxes(); markEdited(); renderBar(); renderCaption(); U.changed();
+    var c = el.insp.querySelector('[data-nofill]'); if (c) c.focus();
   }
   // the fonts the server can draw (GET /fonts), read once
   var fonts = null, fontsAsked = false;
@@ -2291,6 +2321,9 @@
       if (b) { position(b, o, s); b.setAttribute('aria-label', boxLabel(o)); }
     });
     ticked = {}; renderCoords(); renderLayers(); showProblems();
+    // a free text's Y is its top, measured in its font: the field follows once the font is here, unless it is being typed in
+    var yi = el.insp && el.insp.querySelector('#ovs-f-y'), sel = S.layer && byId(S.layer);
+    if (yi && sel && document.activeElement !== yi) yi.value = shownY(sel);
     // the Place tab's size follows a picture that has just arrived, unless someone is typing in the panel
     if (!el.insp.contains(document.activeElement)) renderInspector();
   });
