@@ -1069,10 +1069,13 @@
   function describe() {
     if (S.kind === 'new') return ['new template ' + (S.draft.name || '(no name yet)')];
     var a = S.base ? JSON.parse(S.base) : {}, b = JSON.parse(currentJson() || '{}'), out = [];
-    if (S.form) return overlayWords(a.overlays.map(function (x) { return x.name; }), b.overlays.map(function (x) { return x.name; }), JSON.stringify(a) !== JSON.stringify(b));
-    var place = function (sp) { return [{ name: sp.overlay, on: (sp.outputs || []).filter(function (o) { return o.overlay; }).map(function (o) { return o.name; }) }].concat(sp.overlays || []).filter(function (x) { return x.name; }); };
-    var pa = place(a), pb = place(b);
-    out = overlayWords(pa.map(function (x) { return x.name; }), pb.map(function (x) { return x.name; }), JSON.stringify(pa) !== JSON.stringify(pb));
+    if (S.form) return overlayWords(a.overlays, b.overlays);
+    // each overlay with the outputs it is on, none for every output, whichever slot it is saved in
+    var place = function (sp) {
+      var vids = (sp.outputs || []).filter(function (o) { return o.kind === 'video' && o.enabled; }), on = vids.filter(function (o) { return o.overlay; }).map(function (o) { return o.name; });
+      return [{ name: sp.overlay, on: on.length === vids.length ? [] : on }].concat((sp.overlays || []).map(function (x) { return { name: x.name, on: x.encodes }; })).filter(function (x) { return x.name; });
+    };
+    out = overlayWords(place(a), place(b));
     if (a.hardware !== b.hardware) out.push('hardware ' + b.hardware);
     var ao = a.outputs || [], bo = b.outputs || [];
     bo.forEach(function (o) {
@@ -1088,12 +1091,17 @@
     if (a.deinterlace !== b.deinterlace || a.gpuId !== b.gpuId || a.minFrameRate !== b.minFrameRate) out.push('decode');
     return out.length ? out : ['unsaved edits'];
   }
-  // overlays added, removed, reordered or moved, in words
-  function overlayWords(a, b, moved) {
-    var out = [];
-    b.forEach(function (n) { if (a.indexOf(n) < 0) out.push('add overlay ' + n); });
-    a.forEach(function (n) { if (b.indexOf(n) < 0) out.push('remove overlay ' + n); });
-    if (!out.length && moved) out.push(a.join() !== b.join() ? 'overlay order' : 'where the overlays draw');
+  // overlays added, removed, moved to other outputs or reordered, in words; a and b are [{name, on}]
+  function overlayWords(a, b) {
+    var out = [], an = a.map(function (x) { return x.name; }), bn = b.map(function (x) { return x.name; });
+    b.forEach(function (x) {
+      var was = a[an.indexOf(x.name)];
+      if (!was) out.push('add overlay ' + x.name);
+      else if (JSON.stringify(was.on) !== JSON.stringify(x.on)) out.push('where ' + x.name + ' draws');
+    });
+    an.forEach(function (n) { if (bn.indexOf(n) < 0) out.push('remove overlay ' + n); });
+    var kept = function (l, other) { return l.filter(function (n) { return other.indexOf(n) >= 0; }).join(); };
+    if (kept(an, bn) !== kept(bn, an)) out.push('overlay order');
     return out;
   }
   function impact() {

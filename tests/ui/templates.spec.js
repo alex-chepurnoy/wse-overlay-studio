@@ -148,3 +148,13 @@ test.describe('read-only', () => {
     await expect(screen(page).locator('[data-addov]')).toHaveCount(0);
   });
 });
+
+test('the save bar names an overlay moved to other outputs and a new stacking order', async ({ page, studio, wse }) => {
+  twoOverlays(wse);
+  await openTemplate(page, studio, 'scoreboard-cpu');
+  await outputsSec(page).locator('[data-ovmove]').click();
+  await expect(page.getByText('where LowerThird draws')).toBeVisible();
+  await expect(page.getByText('overlay order')).toHaveCount(0);
+  await decode(page).locator('[data-ovup]').click();
+  await expect(page.getByText('where LowerThird draws, overlay order')).toBeVisible();
+});
