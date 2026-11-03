@@ -1392,10 +1392,13 @@
   // the overlay's own settings, for every page in it: how often pages are captured, and how they are drawn
   function overlaySettings(d) {
     var sd = S.saved || {}, rr = d.refreshRate, draft = sd.refreshRate !== undefined && sd.refreshRate !== rr;
+    // the capture speed is how often the module takes a page's new frame (OverlayImage.nextWakeAt); text, shapes,
+    // images and clocks redraw on their own schedule, so it is offered only to an overlay with a web page
+    var pages = objects().some(function (x) { return x.type === 'webPage'; });
     var every = ro() ? '<span class="every">every ' + U.esc(rr) + ' s</span>' :
       '<label class="every" title="WSE setting refreshRate">every<input type="number" id="ovs-f-refreshRate" data-f="refreshRate" class="num' + (draft ? ' is-draft' : '') + '" min="' + F.refreshRate.min + '" max="' + F.refreshRate.max + '" step="any" value="' + U.esc(rr) + '" aria-label="Capture every, seconds">s</label>';
-    return '<div class="ovset">' + U.speedHtml(+rr, 'data-ospeed', ro(), every) + '<div class="err" data-err-for="refreshRate"></div>' +
-      (draft ? '<div class="hint">Saved: every ' + U.esc(sd.refreshRate) + ' s</div>' : '') +
+    return '<div class="ovset' + (pages ? '' : ' bare') + '">' + (pages ? U.speedHtml(+rr, 'data-ospeed', ro(), every) + '<div class="err" data-err-for="refreshRate"></div>' +
+      (draft ? '<div class="hint">Saved: every ' + U.esc(sd.refreshRate) + ' s</div>' : '') : '') +
       '<details class="adv" data-ovadv' + (S.advOpen ? ' open' : '') + '><summary>Advanced drawing</summary>' +
       fieldHtml('evenCoords', !!d.even_coords, { saved: !!sd.even_coords }) +
       fieldHtml('threadDrawing', d.threadDrawing !== false, { saved: sd.threadDrawing !== false }) +
@@ -2043,9 +2046,15 @@
     unsaved: function () { return N.name || N.url ? [{ label: 'New overlay' + (N.name ? ' ' + N.name : ''), go: 'new-overlay:' }] : []; }
   };
   // an image or a font that has just arrived changes what text, shapes and images look like and how big they are
+  // Each box is drawn again where it is, so a grip being dragged or about to be is not swapped for a new one
   U.draw.onLoad(function () {
     if (U.current() !== 'overlay' || !S.draft) return;
-    placeBoxes(); renderCoords();
+    var frame = el.stage && el.stage.querySelector('[data-frame]'), s = src();
+    if (frame) objects().forEach(function (o) {
+      var b = frame.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]');
+      if (b) { position(b, o, s); b.setAttribute('aria-label', boxLabel(o)); }
+    });
+    ticked = {}; renderCoords();
     // the Place tab's size follows a picture that has just arrived, unless someone is typing in the panel
     if (!el.insp.contains(document.activeElement)) renderInspector();
   });
