@@ -99,6 +99,16 @@
     imageFile:      { scope: 'object', key: 'imageFile', label: 'Image file', type: 'text',
                       help: 'A picture in the server\'s content folder, drawn by the module. Upload new ones here.' },
 
+    // layer: date and time tokens in a text (plan 3.3)
+    timeZone:       { scope: 'object', key: 'timeZone', label: 'Time zone', type: 'zone',
+                      help: 'The zone the time is shown in, such as America/New_York. Blank uses the server\'s zone.' },
+    locale:         { scope: 'object', key: 'locale', label: 'Language', type: 'text', def: 'en-US',
+                      help: 'A language tag such as en-US or fr-FR, for month and day names.' },
+    target:         { scope: 'object', key: 'target', label: 'Target', type: 'target',
+                      help: 'The date and time a countdown counts to, or a count-up counts from, with its offset, such as 2027-01-01T18:00:00-05:00.' },
+    endText:        { scope: 'object', key: 'endText', label: 'Text at zero', type: 'text',
+                      help: 'Shown once a countdown reaches its target. Blank shows nothing.' },
+
     // layer: timing, every kind (plan 3.3a)
     showFrom:       { scope: 'object', key: 'showFrom', label: 'Show from', type: 'when',
                       help: 'Blank shows it from the start. A date and time with its offset, such as 2027-01-01T18:00:00-05:00, or stream+N for N seconds after the stream starts.' },

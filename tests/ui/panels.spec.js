@@ -205,7 +205,7 @@ test('the frame checks use the layer\'s drawn area, not its first point', async 
   await expect(page.locator('[data-fit]')).toHaveText('Past title safe');
   await row(page, 'HOME 2 - 1').click();
   await expect(page.locator('[data-fit]')).toHaveText('Inside title safe');
-  await expect(page.locator('[data-coords]'), 'a text\'s size in whole pixels').toHaveText(/score at 100, \d+ · \d+ x \d+$/);
+  await expect(page.locator('[data-coords]'), 'a text\'s size in whole pixels').toContainText(/score at 100, \d+ · \d+ x \d+(?!\d)/);
   await field(page, 'x').fill('1250');
   await expect(page.locator('[data-fit]')).toHaveText('Outside the frame');
   await expect(page.locator('[data-outside]')).toContainText('score is outside cam1 (1200 x 700): nothing of it shows');

@@ -95,7 +95,7 @@ test('Enter places in the center; Date and time holds a clock token', async ({ p
   await openOverlay(page, studio, 'Scoreboard');
   await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Date and time' }).click();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.pg[data-id="clock-1"] text')).toHaveText('{time:HH:mm:ss}');
+  await expect(page.locator('.pg[data-id="clock-1"] text')).toHaveText(/^HH:mm:ss #\d+$/);
   const o = (await saved(page, wse, 'Scoreboard')).objects.find((x) => x.id === 'clock-1');
   expect(o).toMatchObject({ type: 'string', font: 'Fira Mono' });
   expect(Math.abs(o.x - (1920 - 300) / 2)).toBeLessThanOrEqual(2);

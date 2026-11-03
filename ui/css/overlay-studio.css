@@ -381,6 +381,14 @@
 .ovs-plugin .pg .pg-name { position: absolute; left: -2px; top: -22px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: var(--focus); color: #fff; white-space: nowrap; pointer-events: none; }
 .ovs-plugin .pg:not(.sel):not(.draft) .pg-name { display: none; }
 .ovs-plugin .pg.draft:not(.sel) .pg-name { background: var(--layer-sel); color: #3a2a00; }
+/* why a layer is faint on the live canvas: outside its show window, hidden live, or a countdown with no target */
+.ovs-plugin .pg .pg-tag { position: absolute; left: -2px; bottom: -22px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: var(--amber-bg); color: var(--amber); white-space: nowrap; pointer-events: none; }
+.ovs-plugin .bdg.live { background: var(--red-bg); color: var(--red); }
+.ovs-plugin .fpresets { display: flex; flex-direction: column; gap: 4px; }
+.ovs-plugin .fpreset { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-2); padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ovs-plugin .fpreset[aria-pressed="true"] { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+.ovs-plugin .fpreset .fs { font-weight: 600; min-height: 1em; }
+.ovs-plugin .fpreset code { color: var(--text-2); font-size: 12px; }
 .ovs-plugin .pg .h { position: absolute; width: 10px; height: 10px; background: #fff; border: 1px solid var(--focus); }
 .ovs-plugin .pg .h.nw { left: -7px; top: -7px; cursor: nwse-resize; } .ovs-plugin .pg .h.ne { right: -7px; top: -7px; cursor: nesw-resize; }
 .ovs-plugin .pg .h.sw { left: -7px; bottom: -7px; cursor: nesw-resize; } .ovs-plugin .pg .h.se { right: -7px; bottom: -7px; cursor: nwse-resize; }

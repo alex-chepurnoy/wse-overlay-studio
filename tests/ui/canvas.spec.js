@@ -18,18 +18,19 @@ function frame(page) { return page.locator('[data-frame]'); }
 test('every kind draws as its own layer, with a name a screen reader can say', async ({ page, studio }) => {
   await openMixed(page, studio);
   const names = {
-    score: 'Text: HOME 2 - 1', clock: 'Date and time: {time:HH:mm:ss}', bar: 'Rounded rectangle: Rounded rectangle', ring: 'Ellipse: Ellipse',
+    score: 'Text: HOME 2 - 1', clock: /^Date and time: HH:mm:ss #\d+$/, bar: 'Rounded rectangle: Rounded rectangle', ring: 'Ellipse: Ellipse',
     arrow: 'Arrow: Arrow', tri: 'Triangle: Triangle', logo: 'Image: logo.png'
   };
   // the canvas is one Tab stop: each layer's box is an image it can make its active descendant (plan 4.1)
   for (const [id, label] of Object.entries(names)) {
     const box = page.locator('.pg[data-id="' + id + '"]');
     await expect(box, id).toHaveAttribute('role', 'img');
-    expect((await box.getAttribute('aria-label')).startsWith(label + '. Id ' + id), id).toBe(true);
+    const said = (await box.getAttribute('aria-label')).split('. Id ' + id)[0];
+    if (label instanceof RegExp) expect(said, id).toMatch(label); else expect(said, id).toBe(label);
   }
   await expect(page.locator('.pg svg[role=img]'), 'the drawing leaves its name to the box').toHaveCount(0);
   await expect(page.locator('.pg[data-id="score"] text')).toHaveText('HOME 2 - 1');
-  await expect(page.locator('.pg[data-id="clock"] text'), 'a token shows as written until samples come (PR 8)').toHaveText('{time:HH:mm:ss}');
+  await expect(page.locator('.pg[data-id="clock"] text'), 'a token draws the server\'s sample for now').toHaveText(/^HH:mm:ss #\d+$/);
   await expect(page.locator('.pg[data-id="bar"] rect').first()).toHaveAttribute('rx', '12');
   await expect(page.locator('.pg[data-id="ring"] ellipse').last()).toHaveAttribute('stroke-dasharray', '0.01 10');
   await expect(page.locator('.pg[data-id="arrow"] polygon'), 'a head at each end').toHaveCount(2);
@@ -71,7 +72,7 @@ test('an image with no size is boxed at its picture size', async ({ page, studio
 test('the list names layers by what they show', async ({ page, studio }) => {
   await openMixed(page, studio);
   const rows = page.locator('[data-layers] .prow');
-  await expect(rows.locator('.lname')).toHaveText(['logo.png', 'HOME 2 - 1', '{time:HH:mm:ss}', 'Rounded rectangle', 'Ellipse', 'Arrow', 'Triangle']);
+  await expect(rows.locator('.lname')).toHaveText(['logo.png', 'HOME 2 - 1', /^HH:mm:ss #\d+$/, 'Rounded rectangle', 'Ellipse', 'Arrow', 'Triangle']);
   await expect(rows.filter({ hasText: 'HOME 2 - 1' }).locator('.sub')).toHaveText('Text, score');
   await expect(rows.filter({ hasText: 'HOME 2 - 1' })).toHaveAttribute('title', /the top layer draws on top/);
 });

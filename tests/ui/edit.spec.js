@@ -50,7 +50,7 @@ test('Tab into the canvas selects the front layer; Page Up and Page Down walk th
   await page.keyboard.press('PageDown');
   await expect(f).toHaveAttribute('aria-activedescendant', 'ovs-lyr-score');
   await page.keyboard.press('PageDown');
-  await expect(selectedRow(page)).toHaveText('{time:HH:mm:ss}');
+  await expect(selectedRow(page)).toHaveText(/^HH:mm:ss #\d+$/);
   await page.keyboard.press('PageUp');
   await expect(f).toHaveAttribute('aria-activedescendant', 'ovs-lyr-score');
   await expect(f).toBeFocused();
@@ -81,13 +81,13 @@ test('Enter on a shape goes to its first field; Enter or F2 on text edits it in 
   await expect(ed).toHaveCount(0);
   await expect(frame(page)).toBeFocused();
 
-  await row(page, '{time:HH:mm:ss}').click();
+  await row(page, /HH:mm:ss #\d+/).click();
   await frame(page).focus();
   await page.keyboard.press('F2');
   await expect(ed).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(ed).toHaveCount(0);
-  await expect(selectedRow(page), 'Escape ends the edit and keeps the layer').toHaveText('{time:HH:mm:ss}');
+  await expect(selectedRow(page), 'Escape ends the edit and keeps the layer').toHaveText(/^HH:mm:ss #\d+$/);
   expect(obj(await saved(page, wse), 'score').text).toBe('AWAY 3 - 0');
 });
 
