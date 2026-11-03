@@ -157,6 +157,7 @@
     return { x: x0, y: y0, w: Math.max.apply(null, xs) - x0, h: Math.max.apply(null, ys) - y0 };
   }
   function arrowSize(e) { return Math.max(10, e.stroke * 4); }
+  D.arrowSize = function (o, ov) { return arrowSize(D.effective(o, ov)); };
 
   /**
    * The layer's own area in source pixels, unrotated: what the canvas boxes it with and what it turns about. A line
@@ -291,16 +292,24 @@
   /** The icon for a layer's kind. */
   D.icon = function (o) { return o.type === 'webPage' ? 'web' : o.type === 'string' ? (D.hasToken(o.text) ? 'clock' : 'text') : o.type === 'image' ? 'image' : 'shape'; };
 
+  /** What rotation turns about, in source pixels: the center of the layer's area, or a free text's start (ObjectConfig.pivot). */
+  D.pivot = function (o, ov) {
+    var e = D.effective(o, ov), b = D.bounds(o, ov);
+    return o.type === 'string' && !isBox(e) ? { x: e.x, y: e.y } : { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+  };
+  /** The layer's accessible name: its kind and what it shows. */
+  D.label = function (o) { return (D.kind(o) + ': ' + D.name(o)).replace(/^./, function (c) { return c.toUpperCase(); }); };
+
   /**
    * The layer as an SVG over its own area: viewBox in source pixels, so the element is scaled like position(), with
-   * its accessible name. Rotation turns about the area's center, or a free text's start, as the module's pivot.
+   * its accessible name. Rotation turns about D.pivot, as the module does. opts.unrotated leaves the turn out, for
+   * the canvas, which turns the layer's whole box (handles included); opts.hidden leaves the name to that box.
    */
-  D.svg = function (o, ov, uid) {
-    var e = D.effective(o, ov), b = D.bounds(o, ov), parts = body(o, e, uid || ('l' + Math.random().toString(36).slice(2, 8)));
-    var free = o.type === 'string' && !isBox(e), px = free ? e.x : b.x + b.w / 2, py = free ? e.y : b.y + b.h / 2;
-    var label = (D.kind(o) + ': ' + D.name(o)).replace(/^./, function (c) { return c.toUpperCase(); });
-    return '<svg class="lyr-svg" role="img" aria-label="' + esc(label) + '" viewBox="' + n(b.x) + ' ' + n(b.y) + ' ' + n(b.w) + ' ' + n(b.h) + '" preserveAspectRatio="none" overflow="visible">' +
+  D.svg = function (o, ov, uid, opts) {
+    opts = opts || {};
+    var e = D.effective(o, ov), b = D.bounds(o, ov), parts = body(o, e, uid || ('l' + Math.random().toString(36).slice(2, 8))), p = D.pivot(o, ov);
+    return '<svg class="lyr-svg" ' + (opts.hidden ? 'aria-hidden="true"' : 'role="img" aria-label="' + esc(D.label(o)) + '"') + ' viewBox="' + n(b.x) + ' ' + n(b.y) + ' ' + n(b.w) + ' ' + n(b.h) + '" preserveAspectRatio="none" overflow="visible">' +
       (parts.defs ? '<defs>' + parts.defs + '</defs>' : '') +
-      '<g opacity="' + e.opacity / 100 + '"' + (e.rotation ? ' transform="rotate(' + n(e.rotation) + ' ' + n(px) + ' ' + n(py) + ')"' : '') + '>' + parts.out + '</g></svg>';
+      '<g opacity="' + e.opacity / 100 + '"' + (e.rotation && !opts.unrotated ? ' transform="rotate(' + n(e.rotation) + ' ' + n(p.x) + ' ' + n(p.y) + ')"' : '') + '>' + parts.out + '</g></svg>';
   };
 })();
