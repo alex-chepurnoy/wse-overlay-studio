@@ -111,6 +111,25 @@ test('the Shape and Effects tabs style a shape; corner rounding and the arrow he
   expect(obj(objs, 'arrow').arrowHead).toBe('none');
 });
 
+test('every color has a picker; a picked color keeps the transparency the field had', async ({ page, studio, wse }) => {
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, 'Rounded rectangle').click();
+  const fill = field(page, 'fillColor'), pick = page.locator('[data-cpick=fillColor]');
+  await expect(pick).toHaveValue('#1e5ac8');
+  await pick.fill('#00ff80');
+  await expect(fill).toHaveValue('rgb(0,255,128)');
+  // a color typed in moves the picker
+  await fill.fill('rgb(255,0,0,128)');
+  await expect(pick).toHaveValue('#ff0000');
+  await pick.fill('#0000ff');
+  await expect(fill, 'the alpha stays').toHaveValue('rgb(0,0,255,128)');
+  await page.getByRole('tab', { name: 'Effects' }).click();
+  await expect(page.locator('[data-cpick=shadowColor]'), 'a field with no color starts black').toHaveValue('#000000');
+  await row(page, 'HOME 2 - 1').click();
+  await expect(page.locator('[data-cpick=textColor]')).toHaveValue('#ffffff');
+  expect(obj(await saved(page, wse, 'Mixed'), 'bar').fillColor).toBe('rgb(0,0,255,128)');
+});
+
 test('Place turns a layer and shows only the fields its kind has', async ({ page, studio, wse }) => {
   await openOverlay(page, studio, 'Mixed');
   await row(page, 'HOME 2 - 1').click();

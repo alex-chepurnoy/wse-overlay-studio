@@ -962,10 +962,25 @@
     }
     var type = f.type === 'int' || f.type === 'num' ? 'number' : 'text';
     var attrs = (f.min !== undefined ? ' min="' + f.min + '"' : '') + (f.max !== undefined ? ' max="' + f.max + '"' : '') + (f.type === 'num' ? ' step="any"' : '');
-    var sw = f.type === 'color' ? '<span class="swatch" data-swatch style="background:' + U.esc(v) + '"></span>' : '';
-    return '<div class="fld"><label class="f" for="' + id + '">' + label + sw + (f.help && !opts.noHelp ? U.tip(f.help + ' WSE setting ' + f.key + '.') : '') + '</label><input type="' + type + '" id="' + id + '" data-f="' + name + '" value="' + U.esc(v) + '"' + attrs + title +
-      (opts.placeholder ? ' placeholder="' + U.esc(opts.placeholder) + '"' : '') + ' class="' + (type === 'number' ? 'num' : '') + draftCls + '"><div class="err" data-err-for="' + name + '"></div>' +
-      savedLine + '</div>';
+    var input = '<input type="' + type + '" id="' + id + '" data-f="' + name + '" value="' + U.esc(v) + '"' + attrs + title +
+      (opts.placeholder ? ' placeholder="' + U.esc(opts.placeholder) + '"' : '') + ' class="' + (type === 'number' ? 'num' : '') + draftCls + '">';
+    // a color has the browser's picker beside it; the text stays, for transparency and for names such as white
+    if (f.type === 'color') input = '<span class="cfield"><input type="color" data-cpick="' + name + '" value="' + hexOf(v || opts.placeholder) + '" aria-label="Pick the ' + U.esc(f.label.toLowerCase()) + '" title="Pick a color">' + input + '</span>';
+    return '<div class="fld"><label class="f" for="' + id + '">' + label + (f.help && !opts.noHelp ? U.tip(f.help + ' WSE setting ' + f.key + '.') : '') + '</label>' + input +
+      '<div class="err" data-err-for="' + name + '"></div>' + savedLine + '</div>';
+  }
+  // a color as the picker's #rrggbb: what the module would draw, black for anything it would not take
+  function hexOf(c) {
+    var m = /rgba\((\d+),(\d+),(\d+)/.exec(U.draw.css(c) || '');
+    return '#' + (m ? [m[1], m[2], m[3]] : [0, 0, 0]).map(function (x) { return ('0' + (+x).toString(16)).slice(-2); }).join('');
+  }
+  // a picked color into the field as rgb(r,g,b), keeping the transparency the field had
+  function onPick(e) {
+    var p = e.target, t = el.insp.querySelector('[data-f="' + p.getAttribute('data-cpick') + '"]');
+    if (!t) return;
+    var h = p.value, a = /^\s*rgb\s*\([^,]+,[^,]+,[^,]+,\s*(\d{1,3})\s*\)\s*$/i.exec(t.value);
+    t.value = 'rgb(' + parseInt(h.slice(1, 3), 16) + ',' + parseInt(h.slice(3, 5), 16) + ',' + parseInt(h.slice(5, 7), 16) + (a ? ',' + a[1] : '') + ')';
+    t.dispatchEvent(new Event('input'));
   }
 
   function renderInspector() {
@@ -1027,6 +1042,7 @@
       };
     });
     el.insp.querySelectorAll('[data-f]').forEach(function (i) { i.addEventListener('input', onField); i.addEventListener('change', onField); });
+    el.insp.querySelectorAll('[data-cpick]').forEach(function (p) { p.addEventListener('input', onPick); });
     var lid = el.insp.querySelector('[data-lid]');
     if (lid && o) {
       var commit = function () { if (lid.value.trim() !== o.id) renameLayer(o.id, lid.value.trim(), lid); };
@@ -1255,7 +1271,8 @@
       if (f.type === 'when') v = String(v).trim();
     }
     if (name === 'url') { var p = urlProblem(v); e.target.classList.toggle('invalid', !!p); if (err) err.textContent = p || ''; }
-    if (name === 'keyColor') { var sw = el.insp.querySelector('[data-swatch]'); if (sw) sw.style.background = v; }
+    // the picker follows a color typed in
+    if (f.type === 'color') { var cp = el.insp.querySelector('[data-cpick="' + name + '"]'); if (cp && document.activeElement !== cp) cp.value = hexOf(v || e.target.placeholder); }
     snapshot('field:' + name);
     if (f.scope === 'overlay') { S.draft[f.key] = v; if (name === 'evenCoords') renderCoords(); if (name === 'refreshRate') U.syncSpeed(el.insp, 'data-ospeed', v); }
     else if (name === 'box') { setBox(o, v); return; }
