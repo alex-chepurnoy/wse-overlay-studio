@@ -609,47 +609,32 @@ from the click or drag instead.
 
 ### 4.5 Templates tab
 
+- A template **picks from the overlays made in the Overlays tab and nothing else**: it neither makes nor changes an
+  overlay. There is no "New from a preset", no "New web page overlay" and no trip into the editor from a template
+  (decided by Alex, 2026-11-03; PM vault `60-decisions\2026-11-03-templates-pick-overlays-only.md`).
 - The Decode and Encode Overlays sections (`overlaysHtml`, `ui/js/uo-template.js:456-469`) get one **Add** menu with
-  the kinds the request names: Web page, Text, Date and time, Shape, Image.
-- **Web page, Text, Date and time, Shape**, and **Image in an overlay** under Image, all open the same overlay picker,
-  filtered to that kind:
-  - Saved overlays of the application shown in the header that contain the kind, with a thumbnail (`GET .../thumbnail`, 3.8;
-    a web page layer shows its current frame only when a capture is open, otherwise a gray box with its host).
-    Thumbnails load one at a time with a placeholder, and a 429 waits and retries. Each entry lists what is in the
-    overlay. An overlay holding a clock and a bar is found
-    under Text, Date and time and Shape. An "All" filter shows every overlay.
-  - The presets from 4.3 for that kind, under "New from a preset" (for Web page, "New web page overlay", which opens
-    New overlay's One web page start). Picking one does not add it to the template at
-    once. It opens **New overlay** (4.1) with that preset chosen and a name suggested; Create overlay writes it in the
-    application shown in the header and opens the editor, where the placeholder text ("Name", "Role") is edited. The
-    editor shows a banner "Adding to template <t>" ("Adding to the new template" for an unsaved new template, whose
-    draft is stashed under `''`, `uo-template.js:145`, `:157`, and which the return opens as `template:`) with
-    **Add to template and go back**. The template is left unsaved with the overlay added, for the user to Save. The
-    button saves the overlay if needed (a refused save or a conflict keeps the user in the editor with the error, as Save does), returns to the
-    template, and adds the overlay to the stage the user picked from. For in-place and overlay-only templates it is
-    added to that form's overlay list (`S.form`, `uo-template.js:932-953`) on all outputs, for the user to narrow. The template draft
-    survives the trip (`stash()` keeps it in `mem`, `uo-template.js:144-149`; `select()` restores it and flags a
-    conflict if the template changed meanwhile, `:166-169`). Leaving the editor another way adds nothing to the
-    template; the overlay stays saved. A taken name is refused on New overlay, as today.
+  two entries: **Overlay** and **Image (fixed)**. A template switched on in place, which has no images, gets a plain
+  **+ Overlay** button.
+- **Overlay** opens the overlay picker:
+  - The saved overlays of the application shown in the header, each with a thumbnail (`GET .../thumbnail`, 3.8; a web
+    page layer shows its current frame only when a capture is open, otherwise a gray box with its host). Thumbnails
+    load one at a time with a placeholder, and a 429 waits and retries. Each entry lists what is in the overlay.
+  - With none, it says overlays are made in the Overlays tab.
   - A new template's `d.overlays` starts **empty**: `blank()` and `copyOf()` ("New master from this one",
-    `uo-template.js:876-882`, called at `:1097`) stop pre-filling the application's first overlay (`:78-80`, `:157`),
-    so returning to an unsaved new template adds only the chosen overlay. `U.templateSpecFor` (`:84-88`), used by the
-    four-step task, sets the outputs first and then builds one entry for its overlay in Decode on every video output,
-    as today's `urlStage` does. The "Original + overlay copy" preset (`:66-67`) gets a hint, "Add an overlay for the
-    overlay output", and `problem()` (`:825`) flags it while the preset is still in effect and its overlay output
-    (by the preset's output index) is in no entry's `outputs`. Any output edit, add or removal already clears the
-    preset (`d.preset = null`, `uo-template.js:683`, `:696`, `:771`), which ends the check. For this, a Decode entry's
-    `outputs` always lists every video output.
+    `uo-template.js:876-882`, called at `:1097`) stop pre-filling the application's first overlay (`:78-80`, `:157`).
+    `U.templateSpecFor` (`:84-88`), used by the four-step task, sets the outputs first and then builds one entry for
+    its overlay in Decode on every video output, as today's `urlStage` does. The "Original + overlay copy" preset
+    (`:66-67`) gets a hint, "Add an overlay for the overlay output", and `problem()` (`:825`) flags it while the preset
+    is still in effect and its overlay output (by the preset's output index) is in no entry's `outputs`. Any output
+    edit, add or removal already clears the preset (`d.preset = null`, `uo-template.js:683`, `:696`, `:771`), which
+    ends the check. For this, a Decode entry's `outputs` always lists every video output.
   - Overlays the template already carries are shown disabled in the picker, "Already in this template".
-  - Read-only users see no Add menu at all (so no "New from a preset"; New overlay would send them home anyway,
-    `uo-overlay.js:1126`), and no Copy to other applications.
-  - "Combine several layers in one overlay in the Overlays tab" as the hint, because a template has four overlay
-    slots and one overlay can hold up to 64 layers.
-- **Image** offers two entries: **Image (fixed)**, WSE's own image layers (`imageCard`, `:439-454`), up to eight,
-  drawn by WSE with no timing; and **Image in an overlay**, the picker above filtered to overlays with Image layers
-  (including the Corner bug preset). A tip under the menu says which to use when; on stacking it keeps today's
-  "fixed images draw under the overlay" (`uo-template.js:421`) for the same stage, which S1 confirmed, and adds that
-  anything on an output draws over everything on the input.
+  - Read-only users see no Add menu at all, and no Copy to other applications.
+  - "Overlays are made and changed in the Overlays tab" as the hint, with "combine several layers in one overlay
+    there", because a template has four overlay slots and one overlay can hold up to 64 layers.
+- **Image (fixed)** is WSE's own image layers (`imageCard`, `:439-454`), up to eight, drawn by WSE with no timing. On
+  stacking it keeps today's "fixed images draw under the overlay" (`uo-template.js:421`) for the same stage, which S1
+  confirmed; anything on an output draws over everything on the input.
 - **Data for the picker:** `GET .../overlays` (`M/rest/OverlaysConfig.java:42`, today only a page count) adds
   `kinds: [...]`, `imageFiles: [...]`, and `hash` per overlay (of the overlay as `OverlayStore` would write it, keys
   sorted, so a hand-edited file and its copy match); the list today carries
@@ -898,14 +883,13 @@ Each answers a question the design depends on. Results go to `docs/perf/` or the
 - An image layer resized on the canvas draws at that size on video; lock aspect on and off.
 - Templates flows: Add menu per kind, picker filters, a mixed overlay found under each of its kinds, a preset opening
   New overlay and adding the overlay only when saved, a taken name refused, per-overlay stage and pills, reorder
-  within a stage, four-overlay limit, "Image (fixed)", "Image in an overlay", an overlay missing in another
+  within a stage, four-overlay limit, "Image (fixed)", an overlay missing in another
   application with "Copy to other applications" (over "differs" asking first); the in-place, overlay-only, other, copy
   and VIF kinds with several overlays; a template draft surviving the preset trip through New overlay and the editor,
-  and its conflict when the template changed meanwhile; "Add to template and go back", including a refused save that
-  stays in the editor, an in-place template, and an unsaved new template (from New and from "New master from this
-  one") that ends up with only the chosen overlay; an overlay already in the template disabled in the picker; the
-  four-step task's template carrying its overlay in Decode; thumbnails loading in sequence through a 429; read-only
-  (no Add menu, so no "New from a preset", and no Copy); the Corner bug saved without a file.
+  and its conflict when the template changed meanwhile; an unsaved new template (from New and from "New master from
+  this one") that starts with no overlay; an overlay already in the template disabled in the picker; the picker
+  offering no way to make an overlay; the four-step task's template carrying its overlay in Decode; thumbnails loading
+  in sequence through a 429; read-only (no Add menu and no Copy).
 - Other screens: Streams (including the template-switch confirm), On air, the left list and "On air on" with several
   overlays.
 - Keyboard: Tab into the canvas with nothing selected selects the front layer; Enter on a shape, image or web page
@@ -970,7 +954,7 @@ the pull requests below it that it depends on.
 | 7 | Page: SVG drawing of every kind (token layers show their pattern text until PR 8 adds `/format` samples), the page's `@font-face` font files, Add bar, placement, selection, guides, layer list with plain names, "layer" wording. "Date and time" adds its layer; its Format tab arrives in 8 | 3, 5 |
 | 8 | Page: panels per kind (Format tab included), presets and New overlay starts, `/format` samples in panels, rows and the canvas, live canvas, problems (4.2a) | 7 |
 | 9 | Page: the render check | 8 |
-| 10 | Page: Templates Add menu, picker, thumbnails, New overlay from presets, the editor's "Adding to template" banner, Copy to other applications, the image library's delete warning across applications, overlay list model, every template kind | 6, 9 |
+| 10 | Page: Templates Add menu, picker of saved overlays with thumbnails, Copy to other applications, the image library's delete warning across applications, overlay list model, every template kind | 6, 9 |
 | 11 | Page: Streams, On air, left list, badges and the four-step task (its `already` check and `/use` body, `ui/js/uo-task.js:252`, `:287`) read and write the `overlays` list; the module stops sending and accepting the single `overlay`/`encodes` | 6, 10 |
 | 12 | Docs: the 2.0 content of README (with "not compatible with 1.x" and Before you install), USAGE, DESIGN and BUILD (artifact table, exit code 9 in every exit-code list), THIRD-PARTY-NOTICES with the font licenses), screenshots, version 2.0.0, GitHub repository renamed | 11 |
 

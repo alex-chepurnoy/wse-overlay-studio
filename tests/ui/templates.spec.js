@@ -18,10 +18,15 @@ async function openTemplate(page, studio, name) {
   await page.locator('[data-list]').getByText(name, { exact: true }).first().click();
   await expect(screen(page)).toBeVisible();
 }
-// the Add menu of a stage (input, outputs, or form for a template switched on in place), an item, then an overlay
-async function addFrom(page, stage, item, name) {
+// Add, Overlay in a stage's menu (input or outputs), or + Overlay on a template switched on in place, then an overlay
+async function openPicker(page, stage) {
+  if (stage === 'form') { await page.locator('[data-ovpickopen="form"]').click(); return; }
   await page.locator('[data-rowfor="tpladd:' + stage + '"]').click();
-  await page.getByRole('menuitem', { name: item, exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Overlay', exact: true }).click();
+}
+async function addFromMenu(page) { await openPicker(page, 'input'); }
+async function addFrom(page, stage, name) {
+  await openPicker(page, stage);
   await page.locator('[data-ovpick] [data-ovpname="' + name + '"]').click();
 }
 // scoreboard-cpu with a second overlay on its 720p output only
@@ -47,7 +52,7 @@ test('a master shows every overlay it carries, each where it draws', async ({ pa
 
 test('a second overlay on chosen outputs is saved in slot 2 with its outputs', async ({ page, studio, wse }) => {
   await openTemplate(page, studio, 'scoreboard-cpu');
-  await addFrom(page, 'outputs', 'All overlays', 'LowerThird');
+  await addFrom(page, 'outputs', 'LowerThird');
   const card = outputsSec(page).locator('[data-ov]');
   await expect(card.locator('[data-ovname]')).toHaveValue('LowerThird');
   await expect(card.locator('option[value="Scoreboard"]'), 'one overlay is carried once').toBeDisabled();
@@ -63,7 +68,7 @@ test('a second overlay on chosen outputs is saved in slot 2 with its outputs', a
 
 test('an overlay on every output is saved on the input, and the stacking order is the slot order', async ({ page, studio, wse }) => {
   await openTemplate(page, studio, 'scoreboard-cpu');
-  await addFrom(page, 'input', 'All overlays', 'LowerThird');
+  await addFrom(page, 'input', 'LowerThird');
   await expect(decode(page).locator('[data-ovname]')).toHaveCount(2);
   await expect(decode(page).locator('[data-ov]').nth(1)).toContainText('drawn on top here');
   // up: LowerThird now draws under Scoreboard, so it takes slot 1
@@ -79,11 +84,11 @@ test('an overlay on every output is saved on the input, and the stacking order i
 test('a template carries at most four overlays', async ({ page, studio, wse }) => {
   for (const n of ['Fourth', 'Fifth']) wse.overlays[n] = JSON.parse(JSON.stringify(wse.overlays.Scoreboard));
   await openTemplate(page, studio, 'scoreboard-cpu');
-  for (const n of ['LowerThird', 'Fourth', 'Fifth']) await addFrom(page, 'input', 'All overlays', n);
+  for (const n of ['LowerThird', 'Fourth', 'Fifth']) await addFrom(page, 'input', n);
   await expect(decode(page).locator('[data-ovname]')).toHaveCount(4);
   await expect(decode(page)).toContainText('A template carries at most 4 overlays.');
   await page.locator('[data-rowfor="tpladd:outputs"]').click();
-  for (const item of ['Web page', 'Text', 'All overlays']) await expect(page.getByRole('menuitem', { name: item, exact: true })).toBeDisabled();
+  await expect(page.getByRole('menuitem', { name: 'Overlay', exact: true })).toBeDisabled();
   await expect(page.getByRole('menuitem', { name: 'Image (fixed)' }), 'fixed images are counted apart').toBeEnabled();
 });
 
@@ -117,7 +122,7 @@ test('a new template starts with no overlay, and the overlay copy preset asks fo
   await screen(page).getByRole('button', { name: 'Original + overlay copy' }).click();
   await expect(screen(page).locator('[data-presethint]')).toHaveText('Add an overlay for the overlay output.');
   await expect(page.locator('.err').filter({ hasText: 'Add an overlay for the overlay output' })).toBeVisible();
-  await addFrom(page, 'input', 'Web page', 'LowerThird');
+  await addFrom(page, 'input', 'LowerThird');
   await expect(save(page)).toBeEnabled();
   await save(page).click();
   await expect.poll(() => wse.templateWrites.length).toBe(1);
@@ -134,7 +139,7 @@ test('a template switched on in place saves its overlay list', async ({ page, st
   await expect(rows).toHaveCount(1);
   await expect(rows.first().locator('[data-io-enc][value="360p"]')).toBeChecked();
   await expect(rows.first().locator('[data-io-enc][value="720p"]')).not.toBeChecked();
-  await addFrom(page, 'form', 'All overlays', 'LowerThird');
+  await addFrom(page, 'form', 'LowerThird');
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(1).locator('[data-io-ov]')).toHaveValue('LowerThird');
   await save(page).click();
@@ -165,70 +170,36 @@ test('the save bar names an overlay moved to other outputs and a new stacking or
   await expect(page.getByText('where LowerThird draws, overlay order')).toBeVisible();
 });
 
-test('the Add menu opens a picker of the overlays holding that kind, with thumbnails, one at a time', async ({ page, studio, wse }) => {
+test('a template picks from the saved overlays only, with thumbnails, one at a time', async ({ page, studio, wse }) => {
   await openTemplate(page, studio, 'scoreboard-cpu');
   await expect(decode(page).locator('[data-ov] .ly-thumb img'), 'the card shows its overlay').toHaveAttribute('src', /^data:image\/png;base64,/);
   wse.thumbFail = 1;
   await page.locator('[data-rowfor="tpladd:input"]').click();
-  await page.getByRole('menuitem', { name: 'Text', exact: true }).click();
+  // the Add menu: an overlay or a fixed image, and nothing that makes an overlay
+  await expect(page.getByRole('menuitem')).toHaveText(['Overlay', 'Image (fixed)']);
+  await page.getByRole('menuitem', { name: 'Overlay', exact: true }).click();
   const pick = page.locator('[data-ovpick]');
-  await expect(pick.locator('[data-ovpname]'), 'only Mixed holds text').toHaveCount(1);
-  await expect(pick.locator('[data-ovpname="Mixed"]')).toContainText('text, date and time, shape, image (7 layers)');
-  await expect(pick.locator('[data-ovpname="Mixed"] img'), 'a 429 waits and tries again').toHaveAttribute('src', /^data:image\/png;base64,/);
-  expect(wse.thumbs.filter((n) => n === 'Mixed').length).toBe(2);
-  // the presets of that kind, then All, where an overlay the template carries cannot be picked again
-  await expect(pick.getByRole('button', { name: /Lower third/ })).toBeVisible();
-  await pick.locator('[data-ovkind=""]').click();
   await expect(pick.locator('[data-ovpname]')).toHaveCount(3);
+  await expect(pick.locator('[data-ovpname="Mixed"]')).toContainText('text, date and time, shape, image (7 layers)');
+  await expect(pick.locator('[data-ovpname="LowerThird"] img'), 'a 429 waits and tries again: LowerThird is asked for first').toHaveAttribute('src', /^data:image\/png;base64,/);
+  expect(wse.thumbs.filter((n) => n === 'LowerThird').length).toBe(2);
   await expect(pick.locator('[data-ovpname="Scoreboard"]')).toBeDisabled();
   await expect(pick.locator('[data-ovpname="Scoreboard"]')).toContainText('Already in this template');
   await expect(pick.locator('[data-ovpname="LowerThird"]')).toContainText('web page (1 layer)');
-  await pick.locator('[data-ovkind="webPage"]').click();
-  await expect(pick.getByRole('button', { name: /New web page overlay/ })).toBeVisible();
+  await expect(pick.locator('.pre'), 'no presets').toHaveCount(0);
+  await expect(pick.getByRole('button', { name: /New/ }), 'no way to make an overlay here').toHaveCount(0);
   await pick.locator('[data-ovpname="LowerThird"]').click();
   await expect(pick).toHaveCount(0);
   await expect(decode(page).locator('[data-ovname]').nth(1)).toHaveValue('LowerThird');
   await expect(decode(page).locator('[data-ov]').nth(1).locator('.ly-thumb img')).toHaveAttribute('src', /^data:image\/png;base64,/);
 });
 
-test('a preset opens New overlay, and the editor brings the new overlay back into the template', async ({ page, studio, wse }) => {
-  await openTemplate(page, studio, 'scoreboard-cpu');
-  await page.locator('[data-rowfor="tpladd:outputs"]').click();
-  await page.getByRole('menuitem', { name: 'Text', exact: true }).click();
-  await page.locator('[data-ovpick]').getByRole('button', { name: /Lower third/ }).click();
-  const fresh = page.locator('[data-screen="new-overlay"]');
-  await expect(fresh.locator('#ovs-nn'), 'a name suggested from the preset').toHaveValue('Lower-third');
-  await expect(fresh.locator('[data-addingnote]')).toContainText('For template scoreboard-cpu');
-  await fresh.getByRole('button', { name: 'Create overlay' }).click();
-  const banner = page.locator('[data-banner="adding"]');
-  await expect(banner).toContainText('Adding to template scoreboard-cpu.');
-  await banner.getByRole('button', { name: 'Add to template and go back' }).click();
-  await expect(screen(page)).toBeVisible();
-  const card = outputsSec(page).locator('[data-ov]');
-  await expect(card.locator('[data-ovname]')).toHaveValue('Lower-third');
-  await expect(card.locator('[data-ovout][value="720p"]')).toBeChecked();
-  await expect(save(page), 'the template is left unsaved, for the user to Save').toBeEnabled();
-  expect(wse.templateWrites).toHaveLength(0);
-  await expect(banner).toHaveCount(0);
-});
-
-test('leaving the editor another way adds nothing, and Cancel on New overlay goes back to the template', async ({ page, studio }) => {
-  await openTemplate(page, studio, 'scoreboard-cpu');
-  await page.locator('[data-rowfor="tpladd:input"]').click();
-  await page.getByRole('menuitem', { name: 'Shape', exact: true }).click();
-  await page.locator('[data-ovpick]').getByRole('button', { name: 'Circle' }).click();
-  await page.locator('[data-screen="new-overlay"]').getByRole('button', { name: 'Cancel' }).click();
-  await expect(screen(page)).toBeVisible();
-  await expect(decode(page).locator('[data-ovname]')).toHaveCount(1);
-  await page.locator('[data-rowfor="tpladd:input"]').click();
-  await page.getByRole('menuitem', { name: 'Shape', exact: true }).click();
-  await page.locator('[data-ovpick]').getByRole('button', { name: 'Circle' }).click();
-  await page.locator('[data-screen="new-overlay"]').getByRole('button', { name: 'Create overlay' }).click();
-  await expect(page.locator('[data-banner="adding"]')).toBeVisible();
-  await page.locator('[data-tab=templates]').click();
-  await page.locator('[data-list]').getByText('scoreboard-cpu', { exact: true }).first().click();
-  await expect(decode(page).locator('[data-ovname]')).toHaveCount(1);
-  await expect(page.locator('[data-banner="adding"]')).toHaveCount(0);
+test('with no overlay in the application, the picker says where overlays are made', async ({ page, studio, wse }) => {
+  for (const n of Object.keys(wse.overlays)) delete wse.overlays[n];
+  await openTemplate(page, studio, 'overlaystudio-cpu');
+  await addFromMenu(page);
+  await expect(page.locator('[data-ovpick]')).toContainText('No overlay in live yet. Overlays are made in the Overlays tab.');
+  await expect(page.locator('[data-screen=template] [data-go="new-overlay:"]')).toHaveCount(0);
 });
 
 test('Image (fixed) in the Add menu opens the image library picker', async ({ page, studio }) => {
@@ -241,8 +212,7 @@ test('Image (fixed) in the Add menu opens the image library picker', async ({ pa
 test('an overlay with no layers says so in the picker', async ({ page, studio, wse }) => {
   wse.overlays.Blank = { objects: [] };
   await openTemplate(page, studio, 'scoreboard-cpu');
-  await page.locator('[data-rowfor="tpladd:input"]').click();
-  await page.getByRole('menuitem', { name: 'All overlays' }).click();
+  await openPicker(page, 'input');
   await expect(page.locator('[data-ovpick] [data-ovpname="Blank"]')).toContainText('No layers yet');
   await expect(page.locator('[data-ovpick] [data-ovpname="Blank"]')).not.toContainText('0 layers');
 });

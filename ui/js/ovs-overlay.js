@@ -2166,25 +2166,8 @@
     });
   }
 
-  // made from the Templates picker (plan 4.5): the way back adds it to that template; leaving another way adds nothing
-  function renderAdding() {
-    var a = U.addingTo;
-    if (!a || a.overlay !== S.name) { U.clearBanner('adding'); return; }
-    U.banner('adding', 'on', 'Adding to ' + U.templateAddingLabel(a) + '.', 'Edit the layers, then go back; the template stays unsaved with this overlay added.',
-      { label: 'Add to template and go back', run: addBack });
-  }
-  function addBack() {
-    var a = U.addingTo;
-    if (!a || a.overlay !== S.name) return;
-    // a refused save or a conflict keeps the editor open with the error, as Save does
-    (changes() ? save() : Promise.resolve(true)).then(function (ok) {
-      if (!ok || U.addingTo !== a) return;
-      U.addingBack = { key: a.key, stage: a.stage, overlay: a.overlay };
-      U.go('template:' + a.key);
-    });
-  }
   function renderAll() {
-    renderHead(); renderStage(); renderLayers(); renderInspector(); renderBar(); loadPreviewChoices(); U.changed(); renderAdding();
+    renderHead(); renderStage(); renderLayers(); renderInspector(); renderBar(); loadPreviewChoices(); U.changed();
     // an Add from the overlay row's menu, for an overlay that was not open yet
     if (S.addOnOpen && S.addOnOpen.name === S.name && S.draft) { var k = S.addOnOpen.kind; S.addOnOpen = null; addOnOpen(k); }
   }
@@ -2237,7 +2220,6 @@
     // the preview player stops while another screen is shown; the draft stays in memory
     hide: function () {
       S.addOnOpen = null;
-      U.addingTo = null; U.clearBanner('adding');
       if (S.player) { S.player.stop(); S.player = null; }
       if (S.statusTimer) S.statusTimer.stop();
       if (S.timer) S.timer.stop();
@@ -2299,12 +2281,6 @@
     U.confirm('Replace the new overlay you started?', '<p>New overlay holds ' + U.esc(N.name || 'an unnamed overlay') + ', not created yet. Starting another replaces it.</p>', 'Replace it').then(function (ok) { if (ok) then(); });
   }
   U.newOverlayFrom = function (from) { replaceNew(function () { resetNew(); N.start = 'copy:' + from; N.name = from + '-copy'; U.go('new-overlay:'); }); };
-  /** New overlay with a preset chosen and a name suggested, as the Templates picker opens it (plan 4.5). */
-  U.newOverlayPreset = function (id) {
-    replaceNew(function () { resetNew(); N.start = 'preset'; N.preset = id; N.name = suggestName(id); U.go('new-overlay:'); });
-  };
-  /** New overlay's One web page start, as the Templates picker's "New web page overlay" opens it. */
-  U.newOverlayPage = function () { replaceNew(function () { resetNew(); U.go('new-overlay:'); }); };
   function suggestName(id) {
     var base = U.presets.baseName(id), n = base, i = 2;
     while ((U.overlays || []).some(function (o) { return o.name === n; })) n = base + '-' + i++;
@@ -2330,8 +2306,7 @@
         '<div class="hint">' + U.esc(F.url.help) + '</div></div><div class="grid2"><div class="fld"><label class="f" for="ovs-nw">Browser width (px)</label><input id="ovs-nw" type="number" data-n="vw" value="' + N.vw + '"></div>' +
         '<div class="fld"><label class="f" for="ovs-nh">Browser height (px)</label><input id="ovs-nh" type="number" data-n="vh" value="' + N.vh + '"></div></div><div data-test></div></div>' : '') +
       (N.start === 'preset' ? '<div>' + U.presets.listHtml(N.preset) + '<div class="err" data-perr></div></div>' : '') +
-      (U.addingTo ? '<div class="note on" data-addingnote><span class="dot on"></span><div>For ' + U.esc(U.templateAddingLabel(U.addingTo)) + ': once created, the editor offers Add to template and go back.</div></div>'
-        : '<p class="small muted">A new overlay reaches no viewer until a template names it. After creating it, pick it in a template, or in "Overlay on this stream" on a stream.</p>') +
+      '<p class="small muted">A new overlay reaches no viewer until a template names it. After creating it, pick it in a template, or in "Overlay on this stream" on a stream.</p>' +
       '<div class="hrow"><span class="spacer"></span><button type="button" class="btn" data-ncancel>Cancel</button><button type="button" class="btn primary" data-ncreate' + (N.creating ? ' disabled' : '') + '>Create overlay</button></div></div></div>';
     nbox.querySelectorAll('[data-n]').forEach(function (i) {
       i.addEventListener('input', function () {
@@ -2355,13 +2330,7 @@
       };
     });
     U.presets.fillSamples(nbox);
-    nbox.querySelector('[data-ncancel]').onclick = function () {
-      var a = U.addingTo;
-      resetNew(); U.addingTo = null; U.changed();
-      // Cancel from the Templates picker goes back to the template, which adds nothing
-      if (a) { U.go('template:' + a.key); return; }
-      U.go((U.overlays || []).length ? 'overlay:' + U.overlays[0].name : 'home:');
-    };
+    nbox.querySelector('[data-ncancel]').onclick = function () { resetNew(); U.changed(); U.go((U.overlays || []).length ? 'overlay:' + U.overlays[0].name : 'home:'); };
     nbox.querySelector('[data-ncreate]').onclick = createOverlay;
     renderTest();
   }
@@ -2416,8 +2385,7 @@
       return U.api.post(ovPath(name), body);
     }).then(function () {
       N.creating = false;
-      if (U.addingTo && !U.addingTo.overlay) U.addingTo.overlay = name;
-      U.toast('Created overlay ' + name + ' in ' + U.app + '.' + (U.addingTo ? '' : ' It is in no template yet.'));
+      U.toast('Created overlay ' + name + ' in ' + U.app + '. It is in no template yet.');
       resetNew();
       return U.refreshState(true).then(function () { U.go('overlay:' + name); });
     }, function (e) { N.creating = false; renderNew(); U.banner('ov', 'bad', 'Could not create the overlay.', e.message); });
@@ -2425,8 +2393,7 @@
   U.screens['new-overlay'] = {
     init: function (box) { nbox = box; },
     show: function () { if (U.readOnly) { U.go('home:'); return; } U.format.start(); renderNew(); if (N.start === 'page' && N.url) testSoon(); var n = nbox.querySelector('#ovs-nn'); if (n) n.focus(); },
-    // leaving New overlay without creating ends a trip from the Templates picker; Create sets the overlay first
-    hide: function () { if (N.testTimer) { N.testTimer.stop(); N.testTimer = null; } if (U.addingTo && !U.addingTo.overlay) U.addingTo = null; },
+    hide: function () { if (N.testTimer) { N.testTimer.stop(); N.testTimer = null; } },
     app: function () { resetNew(); },
     save: function () { createOverlay(); },
     unsaved: function () { return N.name || N.url ? [{ label: 'New overlay' + (N.name ? ' ' + N.name : ''), go: 'new-overlay:' }] : []; }
