@@ -21,9 +21,13 @@ test('every kind draws as its own layer, with a name a screen reader can say', a
     score: 'Text: HOME 2 - 1', clock: 'Date and time: {time:HH:mm:ss}', bar: 'Rounded rectangle: Rounded rectangle', ring: 'Ellipse: Ellipse',
     arrow: 'Arrow: Arrow', tri: 'Triangle: Triangle', logo: 'Image: logo.png'
   };
+  // the canvas is one Tab stop: each layer's box is an image it can make its active descendant (plan 4.1)
   for (const [id, label] of Object.entries(names)) {
-    await expect(page.locator('.pg[data-id="' + id + '"] svg[role=img]'), id).toHaveAttribute('aria-label', label);
+    const box = page.locator('.pg[data-id="' + id + '"]');
+    await expect(box, id).toHaveAttribute('role', 'img');
+    expect((await box.getAttribute('aria-label')).startsWith(label + '. Id ' + id), id).toBe(true);
   }
+  await expect(page.locator('.pg svg[role=img]'), 'the drawing leaves its name to the box').toHaveCount(0);
   await expect(page.locator('.pg[data-id="score"] text')).toHaveText('HOME 2 - 1');
   await expect(page.locator('.pg[data-id="clock"] text'), 'a token shows as written until samples come (PR 8)').toHaveText('{time:HH:mm:ss}');
   await expect(page.locator('.pg[data-id="bar"] rect').first()).toHaveAttribute('rx', '12');
@@ -75,16 +79,20 @@ test('the list names layers by what they show', async ({ page, studio }) => {
 test('only boxed layers get corner grips; a line moves by both ends', async ({ page, studio, wse }) => {
   await openMixed(page, studio);
   await page.locator('[data-layers] .prow').filter({ hasText: 'Rounded rectangle' }).click();
-  await expect(page.locator('.pg[data-id="bar"] .h')).toHaveCount(4);
+  const corners = (id) => page.locator('.pg[data-id="' + id + '"] .h:not(.rot):not(.pt)');
+  await expect(corners('bar')).toHaveCount(4);
   await page.locator('[data-layers] .prow').filter({ hasText: 'HOME 2 - 1' }).click();
-  await expect(page.locator('.pg[data-id="score"] .h'), 'free text sizes by its font').toHaveCount(0);
+  await expect(corners('score'), 'free text sizes by its font').toHaveCount(0);
 
   const arrow = page.locator('.pg[data-id="arrow"]'), b = await arrow.boundingBox(), f = await frame(page).boundingBox();
   const px = f.width / 1920;
+  // Ctrl: exactly where it is dragged, not to a guide (PR 7c)
+  await page.keyboard.down('Control');
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.down();
   await page.mouse.move(b.x + b.width / 2 - 100 * px, b.y + b.height / 2 + 50 * px, { steps: 5 });
   await page.mouse.up();
+  await page.keyboard.up('Control');
   const bar = page.getByRole('region', { name: 'Unsaved changes' });
   await bar.getByRole('button', { name: /^Save/ }).click();
   await expect(bar).toBeHidden();

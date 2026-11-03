@@ -24,7 +24,26 @@
     captures: {}, raw: {}, rawAt: {}, busy: {}, thumbAt: {}, seq: 0, shown: {}, capStatus: {}, drafted: {}, saving: false, player: null, timer: null, statusTimer: null,
     undo: [], redo: [], lastSnap: null, known: null, conflict: false, theirs: null, justSaved: false, soon: {}, guides: false, inspTab: null, adding: false, savedNote: null,
     // the kind being placed on the canvas (plan 4.1), and layer ids renamed since the last save: first id -> current
-    placing: null, renamed: {} };
+    placing: null, renamed: {},
+    // the text layer being edited on the canvas (plan 4.1), and when the canvas last took a press
+    editing: null, pressedAt: 0 };
+  // layers hidden on the canvas, by overlay and id: this browser only, never in a draft or a save
+  var hiddenBy = {};
+  function hiddenKey(id) { return S.name + '\n' + id; }
+  function hidden(id) { return !!hiddenBy[hiddenKey(id)]; }
+  // the element id of a layer's box on the canvas, for aria-activedescendant
+  function boxId(id) { return 'ovs-lyr-' + id; }
+  function rotationOf(o) { return o.type === 'webPage' ? 0 : (typeof o.rotation === 'number' && isFinite(o.rotation) ? o.rotation : 0); }
+  // a point turned by deg about c
+  function turn(p, c, deg) {
+    var a = deg * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a), dx = p.x - c.x, dy = p.y - c.y;
+    return { x: c.x + dx * cs - dy * sn, y: c.y + dx * sn + dy * cs };
+  }
+  // how far a point is from the segment a-b
+  function segDist(p, a, b) {
+    var vx = b.x - a.x, vy = b.y - a.y, l = vx * vx + vy * vy, t = l ? Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / l)) : 0;
+    return Math.hypot(p.x - a.x - t * vx, p.y - a.y - t * vy);
+  }
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function objects() { return (S.draft && S.draft.objects) || []; }
@@ -109,6 +128,7 @@
     S.lastSnap = { tag: tag, at: now };
   }
   function restore(json) {
+    endEdit();
     S.draft = JSON.parse(json);
     if (S.layer && !byId(S.layer)) { var top = sorted()[0]; S.layer = top ? top.id : null; }
     S.lastSnap = null;
@@ -399,9 +419,20 @@
   /* ---------- canvas ---------- */
   function renderStage() {
     if (S.player) { S.player.stop(); S.player = null; }
-    el.stage.innerHTML = '<div class="frame" data-frame aria-label="Canvas: layers over a background stream"><video muted playsinline></video><div class="waiting" data-wait></div>' +
+    // one Tab stop for every layer (plan 4.1): the selected layer is its active descendant
+    el.stage.innerHTML = '<div class="frame" data-frame tabindex="0" role="application" aria-roledescription="canvas" aria-label="Canvas: layers over a background stream. Page Up and Page Down choose a layer' +
+      (ro() ? '' : ', arrow keys move it, Enter edits it') + '."><video muted playsinline></video><div class="waiting" data-wait></div>' +
       '<div class="safe" data-safe' + (S.guides ? '' : ' hidden') + '></div><span class="lbl top" data-airlbl hidden></span></div>';
-    el.stage.querySelector('[data-frame]').addEventListener('pointerdown', onPlaceDown, true);
+    var fr = el.stage.querySelector('[data-frame]');
+    fr.addEventListener('pointerdown', onPlaceDown, true);
+    fr.addEventListener('pointerdown', onCanvasDown);
+    fr.addEventListener('dblclick', onCanvasDbl);
+    // Tab into the canvas with nothing selected selects the front layer; a click chooses for itself
+    fr.addEventListener('focus', function () {
+      if (Date.now() - S.pressedAt < 600 || S.layer || S.placing) return;
+      var top = visible()[0];
+      if (top) select(top.id, true);
+    });
     var v = el.stage.querySelector('video'), wait = el.stage.querySelector('[data-wait]');
     var url = U.hls(S.previewInfo && S.previewInfo.source && S.previewInfo.source.hls);
     if (S.preview && url && U.current() === 'overlay') {
@@ -431,30 +462,58 @@
     if (lbl) { lbl.hidden = !S.preview || air; lbl.textContent = 'Background: ' + (S.preview || '') + '. Not on air with ' + S.name; }
   }
 
+  // the layers the canvas shows, front first: every one but those hidden on it
+  function visible() { return sorted().filter(function (o) { return !hidden(o.id); }); }
+  // what the canvas's active descendant says: the layer, its id and where it is
+  function boxLabel(o) {
+    var r = rotationOf(o);
+    return (o.type === 'webPage' ? 'Web page: ' + host(o.url) : U.draw.label(o)) + '. Id ' + o.id + ', X ' + (o.x || 0) + ', Y ' + (o.y || 0) +
+      (r ? ', turned ' + r + ' degrees' : '') + (!ro() && edited(o.id) ? ', unsaved' : '');
+  }
+  // the selected layer's grips: corners on a box, a point on each end of a line and each corner of a triangle, and
+  // the turn handle on anything the module draws itself
+  function handlesHtml(o) {
+    var h = '';
+    if (resizable(o)) h += '<i class="h nw" data-g="nw"></i><i class="h ne" data-g="ne"></i><i class="h sw" data-g="sw"></i><i class="h se" data-g="se"></i>';
+    var pts = o.type === 'line' ? 2 : o.type === 'triangle' ? 3 : 0;
+    for (var i = 1; i <= pts; i++) h += '<i class="h pt" data-g="p' + i + '" title="Drag to move this ' + (o.type === 'line' ? 'end' : 'corner') + '"></i>';
+    if (o.type !== 'webPage') h += '<i class="h rot" data-g="rot" title="Drag to turn; Shift turns in 15 degree steps"></i>';
+    return h;
+  }
+  function pointOf(o, g) { return g === 'p1' ? { x: o.x || 0, y: o.y || 0 } : g === 'p2' ? { x: o.x2 || 0, y: o.y2 || 0 } : { x: o.x3 || 0, y: o.y3 || 0 }; }
+  function markSel() {
+    var frame = el.stage.querySelector('[data-frame]');
+    if (!frame) return;
+    frame.querySelectorAll('.pg').forEach(function (b) { b.classList.toggle('sel', b.getAttribute('data-id') === S.layer); });
+    var b = S.layer && frame.querySelector('.pg[data-id="' + CSS.escape(S.layer) + '"]');
+    if (b) frame.setAttribute('aria-activedescendant', b.id); else frame.removeAttribute('aria-activedescendant');
+  }
+
   function placeBoxes() {
     var frame = el.stage.querySelector('[data-frame]');
     if (!frame) return;
-    var a = document.activeElement, focused = a && frame.contains(a) && a.getAttribute ? a.getAttribute('data-id') : null;
     var s = src();
     frame.style.aspectRatio = s.w + ' / ' + s.h; frame.style.setProperty('--ar', String(s.w / s.h));
     frame.classList.toggle('placing', !!S.placing);
     frame.querySelectorAll('.pg').forEach(function (b) { b.remove(); });
+    var tedit = frame.querySelector('[data-tedit]');
     objects().slice().sort(function (x, y) { return (x.zOrder || 0) - (y.zOrder || 0); }).forEach(function (o) {
-      var b = document.createElement('div'), web = o.type === 'webPage', draft = web ? isDraftPage(o) : !ro() && !savedById(o.id), sel = o.id === S.layer && !ro();
+      if (hidden(o.id)) return;
+      var b = document.createElement('div'), web = o.type === 'webPage', draft = web ? isDraftPage(o) : !ro() && !savedById(o.id), sel = o.id === S.layer;
       b.className = 'pg' + (web ? '' : ' lyr') + (sel ? ' sel' : '') + (draft || (!ro() && edited(o.id)) ? ' draft' : '');
       b.setAttribute('data-id', o.id);
-      if (!ro()) { b.tabIndex = 0; b.setAttribute('role', 'button'); }
-      b.setAttribute('aria-label', (web ? o.id : U.draw.kind(o) + ' ' + o.id + ', ' + U.draw.name(o)) + ', X ' + (o.x || 0) + ', Y ' + (o.y || 0) + (ro() ? '' : '. Arrow keys move 1 px, Shift 10 px.'));
-      b.innerHTML = (web ? '<img alt="" hidden>' : U.draw.svg(o, S.draft, 'ovs-' + o.id)) + '<span class="pg-name">' + U.esc(o.id) + (draft || edited(o.id) ? ', unsaved' : '') + '</span>' +
-        (sel && resizable(o) ? '<i class="h nw" data-g="nw"></i><i class="h ne" data-g="ne"></i><i class="h sw" data-g="sw"></i><i class="h se" data-g="se"></i>' : '');
+      b.id = boxId(o.id);
+      b.setAttribute('role', 'img');
+      b.setAttribute('aria-label', boxLabel(o));
+      b.innerHTML = (web ? '<img alt="" hidden>' : U.draw.svg(o, S.draft, 'ovs-' + o.id, { unrotated: true, hidden: true })) + '<span class="pg-name" aria-hidden="true">' + U.esc(o.id) + (draft || edited(o.id) ? ', unsaved' : '') + '</span>' +
+        (sel && !ro() ? handlesHtml(o) : '');
       if (web && S.captures[o.id]) { b.querySelector('img').src = S.captures[o.id]; b.querySelector('img').hidden = false; }
       if (web && o.opacity != null && o.opacity >= 0) b.querySelector('img').style.opacity = String(o.opacity / 100);
-      frame.appendChild(b);
+      // the text being edited keeps its box above every layer
+      if (tedit) frame.insertBefore(b, tedit); else frame.appendChild(b);
       position(b, o, s);
-      b.addEventListener('pointerdown', function (e) { startDrag(e, o.id, e.target.getAttribute('data-g')); });
-      b.addEventListener('focus', function () { if (S.layer !== o.id && !ro()) select(o.id, true); });
-      if (focused === o.id) b.focus({ preventScroll: true });
     });
+    markSel();
     renderCoords();
   }
 
@@ -465,7 +524,16 @@
     b.style.width = (100 * z.w / s.w) + '%';
     b.style.height = (100 * z.h / s.h) + '%';
     // text, shapes and images draw as they change, a page keeps its capture
-    if (o.type !== 'webPage') { var g = b.querySelector('.lyr-svg'); if (g) g.outerHTML = U.draw.svg(o, S.draft, 'ovs-' + o.id); }
+    if (o.type === 'webPage') return;
+    var g = b.querySelector('.lyr-svg'); if (g) g.outerHTML = U.draw.svg(o, S.draft, 'ovs-' + o.id, { unrotated: true, hidden: true });
+    // the box turns about the module's pivot, so its outline and grips turn with the drawing
+    var r = rotationOf(o);
+    if (r) { var p = U.draw.pivot(o, S.draft); b.style.transformOrigin = (100 * (p.x - z.x) / z.w) + '% ' + (100 * (p.y - z.y) / z.h) + '%'; b.style.transform = 'rotate(' + r + 'deg)'; }
+    else { b.style.transform = ''; b.style.transformOrigin = ''; }
+    b.querySelectorAll('.h.pt').forEach(function (h) {
+      var p = pointOf(o, h.getAttribute('data-g'));
+      h.style.left = (100 * (p.x - z.x) / z.w) + '%'; h.style.top = (100 * (p.y - z.y) / z.h) + '%';
+    });
   }
 
   function renderCoords() {
@@ -483,54 +551,231 @@
     if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' starts at ' + (o.x || 0) + ', ' + (o.y || 0) + ', outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '). Move it under Place.';
   }
 
+  function frameEl() { return el.stage.querySelector('[data-frame]'); }
+  function focusCanvas() { var f = frameEl(); if (f && document.activeElement !== f) f.focus({ preventScroll: true }); }
+  // keepFocus: the canvas keeps (or takes) the focus, with the layer as its active descendant
   function select(id, keepFocus) {
+    endEdit();
     S.layer = id; S.adding = false;
-    renderLayers(); renderInspector();
-    el.stage.querySelectorAll('.pg').forEach(function (b) { b.classList.toggle('sel', b.getAttribute('data-id') === id); });
-    if (!keepFocus) placeBoxes(); else { placeBoxes(); var b = el.stage.querySelector('.pg[data-id="' + CSS.escape(id) + '"]'); if (b) b.focus({ preventScroll: true }); }
+    renderLayers(); renderInspector(); placeBoxes();
+    if (keepFocus) focusCanvas();
+  }
+  function deselect() { endEdit(); S.layer = null; renderLayers(); renderInspector(); placeBoxes(); }
+
+  /* ---------- picking a layer on the canvas ---------- */
+  // where a pointer event is, in source pixels
+  function toSource(ev) {
+    var f = frameEl(), r = f.getBoundingClientRect(), s = src();
+    return { x: (ev.clientX - r.left) * s.w / r.width, y: (ev.clientY - r.top) * s.h / r.height };
+  }
+  // the layers under p, front first; m is the margin around them, in source pixels (6 screen pixels), so a thin line
+  // can be hit
+  function hits(p, m) {
+    return visible().filter(function (o) {
+      var q = rotationOf(o) ? turn(p, U.draw.pivot(o, S.draft), -rotationOf(o)) : p, e = U.draw.effective(o, S.draft);
+      if (o.type === 'line') return segDist(q, { x: e.x, y: e.y }, { x: e.x2, y: e.y2 }) <= Math.max(e.stroke, 1) / 2 + (e.arrowHead && e.arrowHead !== 'none' ? U.draw.arrowSize(o, S.draft) / 2 : 0) + m;
+      if (o.type === 'triangle') {
+        var a = { x: e.x, y: e.y }, b = { x: e.x2, y: e.y2 }, c = { x: e.x3, y: e.y3 };
+        var side = function (u, v) { return (v.x - u.x) * (q.y - u.y) - (v.y - u.y) * (q.x - u.x); };
+        var s1 = side(a, b), s2 = side(b, c), s3 = side(c, a);
+        return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0) || Math.min(segDist(q, a, b), segDist(q, b, c), segDist(q, c, a)) <= m;
+      }
+      var z = area(o);
+      return q.x >= z.x - m && q.x <= z.x + z.w + m && q.y >= z.y - m && q.y <= z.y + z.h + m;
+    }).map(function (o) { return o.id; });
+  }
+  function onCanvasDown(e) {
+    if (e.button !== 0 || S.placing) return;
+    S.pressedAt = Date.now();
+    if (e.target.closest('[data-tedit]')) return;
+    var g = e.target.closest('[data-g]');
+    if (g && !ro()) { startDrag(e, g.closest('.pg').getAttribute('data-id'), g.getAttribute('data-g')); return; }
+    var f = frameEl(), list = hits(toSource(e), 6 * src().w / f.clientWidth);
+    if (!list.length) { if (S.layer) deselect(); return; }
+    // the selected layer wins while it is under the pointer, so a layer reached by Alt+click can be dragged
+    var id = list.indexOf(S.layer) >= 0 ? S.layer : list[0];
+    if (e.altKey) {
+      // Alt+click: the next layer under the pointer, toward the back, round again
+      e.preventDefault();
+      var i = list.indexOf(S.layer);
+      select(list[i < 0 ? 0 : (i + 1) % list.length], true);
+      return;
+    }
+    if (ro()) { e.preventDefault(); select(id, true); return; }
+    startDrag(e, id, null);
+  }
+  function onCanvasDbl(e) {
+    if (ro() || S.placing || e.target.closest('[data-tedit]')) return;
+    var list = hits(toSource(e), 6 * src().w / frameEl().clientWidth), id = list.indexOf(S.layer) >= 0 ? S.layer : list[0], o = id && byId(id);
+    if (o && o.type === 'string') { e.preventDefault(); startEdit(o.id); }
   }
 
+  /* ---------- guides: snapping to the frame, the title safe area and the other layers ---------- */
+  function snapTargets(id) {
+    var s = src(), xs = [0, s.w / 2, s.w], ys = [0, s.h / 2, s.h];
+    if (S.guides) { xs.push(s.w * 0.05, s.w * 0.95); ys.push(s.h * 0.05, s.h * 0.95); }
+    visible().forEach(function (o) {
+      if (o.id === id) return;
+      var z = area(o);
+      xs.push(z.x, z.x + z.w / 2, z.x + z.w); ys.push(z.y, z.y + z.h / 2, z.y + z.h);
+    });
+    return { xs: xs, ys: ys };
+  }
+  // the smallest move that puts one of cands on one of targets, within tol, or null
+  function snapAxis(cands, targets, tol) {
+    var best = null;
+    cands.forEach(function (c) { targets.forEach(function (t) { var d = t - c; if (Math.abs(d) <= tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d: d, at: t }; }); });
+    return best;
+  }
+  function drawGuides(lines) {
+    var f = frameEl(), s = src();
+    if (!f) return;
+    f.querySelectorAll('[data-guide]').forEach(function (g) { g.remove(); });
+    (lines || []).forEach(function (l) {
+      var g = document.createElement('div');
+      g.className = 'guide ' + (l.v !== undefined ? 'v' : 'h'); g.setAttribute('data-guide', l.v !== undefined ? 'x' + Math.round(l.v) : 'y' + Math.round(l.h)); g.setAttribute('aria-hidden', 'true');
+      if (l.v !== undefined) g.style.left = (100 * l.v / s.w) + '%'; else g.style.top = (100 * l.h / s.h) + '%';
+      f.appendChild(g);
+    });
+  }
+
+  // a press on a layer: drag moves it; a corner grip resizes it, a point grip moves that point, the turn grip turns
+  // it; guides snap unless Ctrl is held
   function startDrag(e, id, grip) {
     if (e.button !== 0 || ro() || S.placing) return;
     e.preventDefault();
-    // a press on another page selects it and drags it at once; its corner grips appear on release
+    endEdit();
+    // a press on another layer selects it and drags it at once; its grips appear on release
     var fresh = S.layer !== id;
-    if (fresh) {
-      S.layer = id; S.adding = false; grip = null; renderLayers(); renderInspector();
-      el.stage.querySelectorAll('.pg').forEach(function (b) { b.classList.toggle('sel', b.getAttribute('data-id') === id); });
-    }
-    var frame = el.stage.querySelector('[data-frame]');
+    if (fresh) { S.layer = id; S.adding = false; grip = null; renderLayers(); renderInspector(); markSel(); }
+    var frame = frameEl();
     var box = frame.querySelector('.pg[data-id="' + CSS.escape(id) + '"]');
-    var o = byId(id), s = src(), scale = frame.clientWidth / s.w, z = area(o);
-    var st = { x: e.clientX, y: e.clientY, ox: z.x, oy: z.y, ow: z.w, oh: z.h, from: clone(o) }, moved = false;
-    box.setPointerCapture(e.pointerId);
+    var o = byId(id), s = src(), scale = frame.clientWidth / s.w, z = area(o), rot = rotationOf(o);
+    var st = { x: e.clientX, y: e.clientY, ox: z.x, oy: z.y, ow: z.w, oh: z.h, from: clone(o), piv: U.draw.pivot(o, S.draft), t: snapTargets(id) }, moved = false;
+    var tol = 6 / scale;
+    frame.setPointerCapture(e.pointerId);
     function move(ev) {
       if (!moved) { snapshot(); moved = true; }
+      var snap = !(ev.ctrlKey || ev.metaKey), lines = [];
       var dx = (ev.clientX - st.x) / scale, dy = (ev.clientY - st.y) / scale;
       var x = st.ox, y = st.oy, w = st.ow, h = st.oh;
       if (!grip) {
         // the whole layer stays on the frame: its area is clamped, and every point moves by the same amount
-        dx = Math.max(-st.ox, Math.min(dx, s.w - st.ow - st.ox)); dy = Math.max(-st.oy, Math.min(dy, s.h - st.oh - st.oy));
+        var clampX = function (d) { return Math.max(-st.ox, Math.min(d, s.w - st.ow - st.ox)); }, clampY = function (d) { return Math.max(-st.oy, Math.min(d, s.h - st.oh - st.oy)); };
+        dx = clampX(dx); dy = clampY(dy);
+        if (snap) {
+          var sx = snapAxis([st.ox + dx, st.ox + dx + st.ow / 2, st.ox + dx + st.ow], st.t.xs, tol), sy = snapAxis([st.oy + dy, st.oy + dy + st.oh / 2, st.oy + dy + st.oh], st.t.ys, tol);
+          if (sx) { dx = clampX(dx + sx.d); lines.push({ v: sx.at }); }
+          if (sy) { dy = clampY(dy + sy.d); lines.push({ h: sy.at }); }
+        }
         shift(o, st.from, dx, dy);
+      } else if (grip === 'rot') {
+        // the turn handle sits above the layer: straight up is no turn
+        var p = toSource(ev), deg = Math.atan2(p.y - st.piv.y, p.x - st.piv.x) * 180 / Math.PI + 90;
+        if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+        else if (snap && Math.abs(deg - Math.round(deg / 90) * 90) <= 3) deg = Math.round(deg / 90) * 90;
+        deg = Math.round(((deg % 360) + 540) % 360 - 180);
+        if (deg === -180) deg = 180;
+        if (deg) o.rotation = deg; else delete o.rotation;
+      } else if (grip.charAt(0) === 'p') {
+        // a point is kept unturned, so the pointer is turned back about where the layer turned when the drag began
+        var q = rot ? turn(toSource(ev), st.piv, -rot) : toSource(ev);
+        q.x = Math.max(0, Math.min(q.x, s.w)); q.y = Math.max(0, Math.min(q.y, s.h));
+        if (snap && !rot) {
+          var px = snapAxis([q.x], st.t.xs, tol), py = snapAxis([q.y], st.t.ys, tol);
+          if (px) { q.x += px.d; lines.push({ v: px.at }); }
+          if (py) { q.y += py.d; lines.push({ h: py.at }); }
+        }
+        var n = grip.charAt(1), kx = n === '1' ? 'x' : 'x' + n, ky = n === '1' ? 'y' : 'y' + n;
+        o[kx] = even(q.x); o[ky] = even(q.y);
       } else {
+        // a turned box resizes along its own sides
+        if (rot) { var lr = turn({ x: dx, y: dy }, { x: 0, y: 0 }, -rot); dx = lr.x; dy = lr.y; }
         if (grip.indexOf('w') >= 0) { x += dx; w -= dx; }
         if (grip.indexOf('e') >= 0) w += dx;
         if (grip.indexOf('n') >= 0) { y += dy; h -= dy; }
         if (grip.indexOf('s') >= 0) h += dy;
+        if (snap && !rot) {
+          var ex = snapAxis([grip.indexOf('w') >= 0 ? x : x + w], st.t.xs, tol), ey = snapAxis([grip.indexOf('n') >= 0 ? y : y + h], st.t.ys, tol);
+          if (ex) { if (grip.indexOf('w') >= 0) { x += ex.d; w -= ex.d; } else w += ex.d; lines.push({ v: ex.at }); }
+          if (ey) { if (grip.indexOf('n') >= 0) { y += ey.d; h -= ey.d; } else h += ey.d; lines.push({ h: ey.at }); }
+        }
         w = Math.max(2, Math.min(w, s.w)); h = Math.max(2, Math.min(h, s.h));
         x = Math.max(0, Math.min(x, s.w - w)); y = Math.max(0, Math.min(y, s.h - h));
         o.x = even(x); o.y = even(y); o.w = even(w); o.h = even(h);
       }
-      position(box, o, s); afterMove();
+      position(box, o, s); drawGuides(lines); afterMove();
     }
     function up() {
-      box.removeEventListener('pointermove', move); box.removeEventListener('pointerup', up); box.removeEventListener('pointercancel', up);
+      frame.removeEventListener('pointermove', move); frame.removeEventListener('pointerup', up); frame.removeEventListener('pointercancel', up);
+      drawGuides(null);
       if (moved) { renderLayers(); renderCaption(); U.changed(); }
       if (fresh || moved) placeBoxes();
-      var b = el.stage.querySelector('.pg[data-id="' + CSS.escape(id) + '"]');
-      if (b) b.focus({ preventScroll: true });
+      if (moved && !fresh) renderInspector();
+      focusCanvas();
     }
-    box.addEventListener('pointermove', move); box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
+    frame.addEventListener('pointermove', move); frame.addEventListener('pointerup', up); frame.addEventListener('pointercancel', up);
+  }
+
+  /* ---------- editing a text layer on the canvas (double-click, Enter or F2) ---------- */
+  function startEdit(id) {
+    var o = byId(id), frame = frameEl();
+    if (!o || o.type !== 'string' || ro() || !frame) return;
+    if (S.layer !== id) select(id, true);
+    endEdit();
+    var s = src(), k = frame.clientWidth / s.w, e = U.draw.effective(o, S.draft), t = document.createElement('textarea');
+    t.className = 'tedit'; t.setAttribute('data-tedit', ''); t.spellcheck = false;
+    t.setAttribute('aria-label', 'Text of ' + id + '. Enter finishes, Shift+Enter starts a new line.');
+    t.value = o.text == null ? '' : String(o.text);
+    t.style.fontFamily = '"' + String(e.font).replace(/"/g, '') + '", "Fira Sans", sans-serif';
+    t.style.fontSize = Math.max(10, e.fontSize * k) + 'px';
+    if (/bold/i.test(e.fontStyle)) t.style.fontWeight = '700';
+    if (/italic/i.test(e.fontStyle)) t.style.fontStyle = 'italic';
+    var fit = function () {
+      var z = area(o);
+      t.style.left = (100 * z.x / s.w) + '%'; t.style.top = (100 * z.y / s.h) + '%';
+      t.style.width = (100 * z.w / s.w) + '%'; t.style.height = (100 * z.h / s.h) + '%';
+    };
+    fit();
+    frame.appendChild(t);
+    S.editing = id;
+    t.focus({ preventScroll: true }); t.select();
+    t.addEventListener('input', function () {
+      snapshot('text:' + id);
+      o.text = t.value;
+      var b = frame.querySelector('.pg[data-id="' + CSS.escape(id) + '"]');
+      if (b) { position(b, o, s); b.classList.add('draft'); b.setAttribute('aria-label', boxLabel(o)); }
+      var nm = el.layers.querySelector('.prow[data-id="' + CSS.escape(id) + '"] .lname'); if (nm) nm.textContent = U.draw.name(o);
+      fit(); markEdited(); renderBar(); renderCaption(); U.changed();
+    });
+    // the canvas's keys and the shell's Escape stay out of the text
+    t.addEventListener('keydown', function (ev) {
+      ev.stopPropagation();
+      if ((ev.key === 'Enter' && !ev.shiftKey) || ev.key === 'Escape') { ev.preventDefault(); endEdit(true); }
+    });
+    t.addEventListener('blur', function () { endEdit(); });
+    renderCoords();
+  }
+  function endEdit(refocus) {
+    if (!S.editing) return;
+    S.editing = null;
+    var f = frameEl(), t = f && f.querySelector('[data-tedit]');
+    if (t) t.remove();
+    renderLayers(); renderInspector(); placeBoxes();
+    if (refocus) focusCanvas();
+  }
+  // Enter on a layer that is not text: its first field in the panel
+  function focusPanel() {
+    if (el.grid) el.grid.classList.add('insp-open');
+    var i = el.insp.querySelector('[data-lid], [data-f], select, input');
+    if (i) i.focus();
+  }
+  // Page Up toward the front, Page Down toward the back; nothing selected selects the front layer
+  function stepLayer(by) {
+    var list = visible(), i = list.map(function (o) { return o.id; }).indexOf(S.layer);
+    if (!list.length) return;
+    var j = i < 0 ? 0 : Math.max(0, Math.min(list.length - 1, i + by));
+    select(list[j].id, true);
   }
 
   // the coordinates, the inspector fields and the save bar after a move, at most once per animation frame: the bar
@@ -548,7 +793,7 @@
     var s = src(), z = area(o);
     shift(o, clone(o), Math.max(-z.x, Math.min(dx, s.w - z.w - z.x)), Math.max(-z.y, Math.min(dy, s.h - z.h - z.y)));
     var box = el.stage.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]');
-    if (box) { position(box, o, s); box.classList.add('draft'); }
+    if (box) { position(box, o, s); box.classList.add('draft'); box.setAttribute('aria-label', boxLabel(o)); }
     renderCoords(); syncPlacement(); renderBar(); markEdited(); renderCaption(); U.changed();
   }
 
@@ -566,9 +811,11 @@
       return '<div class="prow" data-id="' + U.esc(o.id) + '"' + (ro() ? '' : ' draggable="true"') + ' tabindex="0" role="button" aria-selected="' + (o.id === S.layer) + '" title="' + (ro() ? '' : 'Drag to reorder; the top layer draws on top') + '">' +
         (web ? '<div class="thumb"><img alt="" hidden></div>' : '<div class="thumb kind" title="' + U.esc(kind) + '">' + U.icon(U.draw.icon(o)) + '</div>') +
         '<div style="min-width:0"><div class="nm">' + (web ? '<span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) : '<span class="lname">' + U.esc(U.draw.name(o)) + '</span>') +
-        (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + (web ? pageTag(o.id) : '') + '</div>' +
+        (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + (hidden(o.id) ? '<span class="bdg" data-hiddenmark title="Hidden on this canvas only. Viewers still see it.">Hidden here</span>' : '') + (web ? pageTag(o.id) : '') + '</div>' +
         '<div class="sub">' + U.esc(web ? host(o.url) : kind.charAt(0).toUpperCase() + kind.slice(1) + ', ' + o.id) + '</div></div>' +
-        U.rowMenuHtml('page:' + o.id, 'Actions for ' + (web ? 'page ' : 'layer ') + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1], ['reload', 'Reload page', false, !web || !savedById(o.id)], '-', ['rm', web ? 'Remove page' : 'Remove layer', true]]) + '</div>';
+        U.rowMenuHtml('page:' + o.id, 'Actions for ' + (web ? 'page ' : 'layer ') + o.id, [['up', 'Move up', false, !i], ['down', 'Move down', false, i === list.length - 1],
+          ['front', 'Bring to front', false, !i], ['back', 'Send to back', false, i === list.length - 1], '-', ['dup', 'Duplicate'], ['hide', hidden(o.id) ? 'Show on canvas' : 'Hide on canvas'],
+          ['reload', 'Reload page', false, !web || !savedById(o.id)], '-', ['rm', web ? 'Remove page' : 'Remove layer', true]]) + '</div>';
     }).join('');
     var dragId = null;
     el.layers.querySelectorAll('.prow').forEach(function (l) {
@@ -596,12 +843,40 @@
     reorder(order);
   }
   U.rowActions.page = function (id, act) {
-    if (!byId(id) || ro()) return;
+    if (!byId(id)) return;
+    if (act === 'hide') { toggleHidden(id); return; }
+    if (ro()) return;
     if (act === 'up') movePage(id, -1);
     else if (act === 'down') movePage(id, 1);
+    else if (act === 'front' || act === 'back') {
+      var order = sorted().map(function (o) { return o.id; }).filter(function (x) { return x !== id; });
+      if (act === 'front') order.unshift(id); else order.push(id);
+      reorder(order);
+    }
+    else if (act === 'dup') duplicate(id);
     else if (act === 'rm') removePage(id);
     else if (act === 'reload') reloadPage(id);
   };
+  // Hide on canvas: in this browser only, so the layer is out of the way while others are placed; never saved
+  function toggleHidden(id) {
+    var k = hiddenKey(id);
+    if (hiddenBy[k]) delete hiddenBy[k]; else hiddenBy[k] = true;
+    if (hiddenBy[k] && S.layer === id) { endEdit(); S.layer = null; renderInspector(); }
+    renderLayers(); placeBoxes();
+    U.toast(hiddenBy[k] ? 'Hid ' + id + ' on this canvas. Viewers still see it, and Save keeps it.' : 'Showing ' + id + ' on the canvas again.');
+  }
+  // a copy of a layer, a little down and to the right, on top, with an id of its kind
+  function duplicate(id) {
+    var o = byId(id), s = src(), z = area(o), c = clone(o);
+    c.id = freeId(o.type === 'webPage' ? 'page' : o.type === 'string' ? (U.draw.hasToken(o.text) ? 'clock' : 'text') : o.type === 'image' ? 'image' : 'shape');
+    shift(c, o, Math.max(-z.x, Math.min(20, s.w - z.w - z.x)), Math.max(-z.y, Math.min(20, s.h - z.h - z.y)));
+    c.zOrder = (sorted()[0].zOrder || 0) + 1;
+    snapshot();
+    S.draft.objects.push(c);
+    S.layer = c.id; renderEditor();
+    if (c.type === 'webPage') captureSoon(c.id);
+    U.toast('Duplicated ' + id + ' as ' + c.id + ' in the draft. Viewers see it after Save.');
+  }
   U.rowActions.overlay = function (name, act) {
     if (act === 'dup') U.newOverlayFrom(name);
     else if (act === 'addpage' || act.indexOf('add:') === 0) {
@@ -705,12 +980,12 @@
       if (S.inspTab === 'page') body = fieldHtml('url', o.url, { saved: sv.url }) +
         '<div class="grid2">' + fieldHtml('viewportWidth', o.viewportWidth, { placeholder: String(z.w), saved: sv.viewportWidth }) + fieldHtml('viewportHeight', o.viewportHeight, { placeholder: String(z.h), noHelp: true, saved: sv.viewportHeight }) + '</div>' +
         overlaySettings(d) + U.roNote();
-      else if (S.inspTab === 'place') body = '<div class="grid2">' +
+      else if (S.inspTab === 'place') body = kindHtml(o) + '<div class="grid2">' +
         fieldHtml('x', o.x || 0, { noHelp: true, saved: sv.x || 0 }) + fieldHtml('y', o.y || 0, { noHelp: true, saved: sv.y || 0 }) +
         fieldHtml('w', z.w, { noHelp: true, saved: sv.id ? size(sv).w : undefined }) + fieldHtml('h', z.h, { noHelp: true, saved: sv.id ? size(sv).h : undefined }) + '</div>' +
         fieldHtml('opacity', o.opacity == null || o.opacity < 0 ? 100 : o.opacity, { noHelp: true }) +
         '<div class="hrow chips">' + (past ? '<span class="bdg warn">Past title safe</span>' : '<span class="bdg">Inside title safe</span>') +
-        '<span class="bdg">Source ' + s.w + ' x ' + s.h + '</span>' + (ro() ? '' : U.tip('Drag the layer on the canvas; its corners resize it. Arrow keys move 1 px, Shift 10 px. Positions are in source pixels.')) + '</div>' + (ro() ? U.roNote() : '');
+        '<span class="bdg">Source ' + s.w + ' x ' + s.h + '</span>' + (ro() ? '' : U.tip('Drag the layer on the canvas; its corners resize it and the round handle above turns it. It snaps to the frame, the title safe area and other layers; hold Ctrl to place it freely. Arrow keys move 1 px, Shift 10 px. Positions are in source pixels.')) + '</div>' + (ro() ? U.roNote() : '');
       else if (S.inspTab === 'look') body = keyHtml(o, sv);
       else if (S.inspTab === 'time') body = '<div class="grid2">' + fieldHtml('pageDelay', o.pageDelay, { saved: sv.pageDelay }) + fieldHtml('reloadRate', o.reloadRate, { saved: sv.reloadRate }) + '</div>';
       if (web && capNote(o.id) === 'bad') h += '<section><div class="note bad" data-capnote><span class="dot bad"></span><div>' + capLine(o.id) + '</div></div></section>';
@@ -736,6 +1011,8 @@
       lid.addEventListener('change', commit);
       lid.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape') { lid.value = o.id; lid.blur(); } });
     }
+    var kd = el.insp.querySelector('[data-kind]');
+    if (kd && o) kd.onchange = function () { changeKind(o.id, kd.value); };
     var rp = el.insp.querySelector('[data-reloadpage]');
     if (rp) rp.onclick = function () { reloadPage(o.id); };
     var ci = el.insp.querySelector('[data-closeinsp]');
@@ -743,6 +1020,41 @@
     var raw = el.insp.querySelector('[data-raw]');
     if (raw && !ro()) raw.addEventListener('click', pickColor);
     if (o) bindCropper(o);
+  }
+
+  /* ---------- a shape's kind, within its geometry (plan 4.1): the box kinds share x, y, w, h; line and arrow their ends ---------- */
+  var BOX_KINDS = ['rectangle', 'rounded', 'square', 'ellipse', 'circle'], LINE_KINDS = ['line', 'arrow'];
+  function shapeKind(o) {
+    if (o.type === 'rectangle') return o.arcWidth > 0 ? 'rounded' : o.w > 0 && o.w === o.h ? 'square' : 'rectangle';
+    if (o.type === 'ellipse') return o.w > 0 && o.w === o.h ? 'circle' : 'ellipse';
+    if (o.type === 'line') return o.arrowHead && o.arrowHead !== 'none' ? 'arrow' : 'line';
+    return null;
+  }
+  function kindHtml(o) {
+    var now = shapeKind(o);
+    if (!now) return '';
+    if (ro()) return '<div class="fld"><span class="f">Shape</span><div class="val">' + U.esc(KIND_LABEL[now]) + '</div></div>';
+    var kinds = o.type === 'line' ? LINE_KINDS : BOX_KINDS;
+    return '<div class="fld"><label class="f" for="ovs-kind">Shape</label><select id="ovs-kind" data-kind>' + kinds.map(function (k) {
+      return '<option value="' + k + '"' + (k === now ? ' selected' : '') + '>' + U.esc(KIND_LABEL[k]) + '</option>'; }).join('') + '</select>' +
+      '<div class="hint">' + (o.type === 'line' ? 'A line and an arrow share their ends.' : 'These shapes share one box. A line, arrow or triangle is a new layer.') + '</div></div>';
+  }
+  function changeKind(id, kind) {
+    var o = byId(id);
+    if (!o || ro() || shapeKind(o) === kind) return;
+    snapshot();
+    if (kind === 'arrow') o.arrowHead = 'end';
+    else if (kind === 'line') delete o.arrowHead;
+    else {
+      o.type = kind === 'ellipse' || kind === 'circle' ? 'ellipse' : 'rectangle';
+      if (kind === 'rounded') { if (!(o.arcWidth > 0)) { o.arcWidth = 24; o.arcHeight = 24; } }
+      else { delete o.arcWidth; delete o.arcHeight; }
+      // a square or circle takes the shorter side, so it stays where the box was
+      if (kind === 'square' || kind === 'circle') o.w = o.h = even(Math.min(o.w || 0, o.h || 0)) || 2;
+      else if (o.w === o.h && (kind === 'rectangle' || kind === 'ellipse')) o.w = even(Math.min(o.w * 1.5, src().w - (o.x || 0)));
+    }
+    renderEditor();
+    var kd = el.insp.querySelector('[data-kind]'); if (kd) kd.focus();
   }
 
   // the overlay's own settings, for every page in it: how often pages are captured, and how they are drawn
@@ -927,16 +1239,16 @@
     if (ro() || !S.draft || !KIND_LABEL[kind]) return;
     // a web page asks for its address first, and appears at the usual spot once added
     if (kind === 'page') { stopPlacing(); startAdd(); return; }
+    endEdit();
     S.adding = false; S.placing = kind;
     renderInspector(); placeBoxes();
-    var f = el.stage.querySelector('[data-frame]');
-    if (f) { f.tabIndex = 0; f.focus({ preventScroll: true }); }
+    focusCanvas();
   }
   function stopPlacing() {
     if (!S.placing) return;
     S.placing = null;
-    var f = el.stage.querySelector('[data-frame]');
-    if (f) { f.removeAttribute('tabindex'); var g = f.querySelector('[data-ghost]'); if (g) g.remove(); }
+    var f = frameEl(), g = f && f.querySelector('[data-ghost]');
+    if (g) g.remove();
     placeBoxes();
   }
   // a press on the canvas while placing: a click places the layer at its usual size, a drag draws it
@@ -1023,9 +1335,8 @@
     snapshot();
     S.draft.objects.push(o);
     S.placing = null;
-    var f = el.stage.querySelector('[data-frame]'); if (f) f.removeAttribute('tabindex');
     S.layer = o.id; renderEditor();
-    var b = el.stage.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]'); if (b) b.focus({ preventScroll: true });
+    focusCanvas();
     U.toast('Added ' + KIND_LABEL[kind].toLowerCase() + ' ' + o.id + ' to the draft. Viewers see it after Save.');
   }
   // a new id for a layer; a saved layer's rename goes with the save, so its live values move with it (plan 3.6)
@@ -1039,6 +1350,7 @@
     ['captures', 'raw', 'rawAt', 'busy', 'thumbAt', 'shown', 'capStatus', 'drafted', 'soon'].forEach(function (m) {
       if (S[m] && Object.prototype.hasOwnProperty.call(S[m], old)) { S[m][id] = S[m][old]; delete S[m][old]; }
     });
+    if (hiddenBy[hiddenKey(old)]) { delete hiddenBy[hiddenKey(old)]; hiddenBy[hiddenKey(id)] = true; }
     var first = Object.keys(S.renamed).filter(function (k) { return S.renamed[k] === old; })[0] || old;
     S.renamed[first] = id;
     S.layer = id;
@@ -1210,24 +1522,35 @@
       return out;
     },
     key: function (e, typing) {
-      if (!S.draft || ro()) return;
+      if (!S.draft) return;
       var k = e.key, mod = e.ctrlKey || e.metaKey;
       if (typing) return;
-      if (mod && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
-      if (mod && k.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+      if (mod && !ro() && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if (mod && !ro() && k.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
       if (mod) return;
       if (S.placing && k === 'Escape') { e.preventDefault(); stopPlacing(); return; }
       if (S.placing && k === 'Enter') { e.preventDefault(); place(S.placing, null); return; }
-      var a = document.activeElement;
-      // keys act on the canvas when a page or nothing has the focus, never while a button or the list has it
-      var onCanvas = !a || a === document.body || el.stage.contains(a) || (a.classList && a.classList.contains('prow'));
-      if (!onCanvas) return;
-      if (a && a.classList && a.classList.contains('pg') && (k === 'Enter' || k === ' ')) { e.preventDefault(); select(a.getAttribute('data-id'), true); return; }
+      var a = document.activeElement, frame = frameEl(), onFrame = !!frame && a === frame, onList = !!(a && a.classList && a.classList.contains('prow'));
+      // keys act on the canvas when it or nothing has the focus, and Delete and Escape from the layer list too
+      if (!(onFrame || onList || !a || a === document.body)) return;
+      // Page Up and Page Down choose a layer, read-only too, so each can be heard
+      if (onFrame && (k === 'PageUp' || k === 'PageDown')) { e.preventDefault(); stepLayer(k === 'PageUp' ? -1 : 1); return; }
+      if (k === 'Escape' && S.layer) { e.preventDefault(); deselect(); return; }
+      if (ro()) return;
+      if (onFrame && (k === 'Enter' || k === 'F2') && S.layer) {
+        e.preventDefault();
+        var o = byId(S.layer);
+        if (o && o.type === 'string') startEdit(o.id); else focusPanel();
+        return;
+      }
       if (k === 'Delete' && S.layer) { e.preventDefault(); removePage(S.layer); return; }
-      if (k === 'Escape' && S.layer) { S.layer = null; renderLayers(); renderInspector(); placeBoxes(); return; }
       var step = e.shiftKey ? 10 : 1;
       var d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[k];
-      if (d && S.layer && !(a && a.classList && a.classList.contains('prow'))) { e.preventDefault(); nudge(d[0], d[1]); }
+      if (!d || onList) return;
+      e.preventDefault();
+      // after Escape the next arrow chooses the front layer, as Page Up and Page Down do
+      if (!S.layer) { if (onFrame) stepLayer(0); return; }
+      nudge(d[0], d[1]);
     }
   };
 

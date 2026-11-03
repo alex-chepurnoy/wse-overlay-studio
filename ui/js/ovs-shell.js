@@ -386,7 +386,13 @@
   function help() {
     var rows = [['Ctrl+S', 'Save the screen in view'], ['Ctrl+Z', 'Undo an unsaved overlay edit'], ['Ctrl+Shift+Z', 'Redo'],
       ['Delete', 'Remove the selected layer from the draft (Undo in the message)'], ['Arrow keys', 'Nudge the selected layer by 1 px'],
-      ['Shift+Arrow keys', 'Nudge by 10 px'], ['Left, Right', 'Move between the list tabs'], ['Up, Down, Home, End', 'Move in a list'],
+      ['Shift+Arrow keys', 'Nudge by 10 px'], ['Tab', 'Into the canvas; with nothing selected it selects the front layer'],
+      ['Page Up, Page Down', 'On the canvas: select the next layer toward the front or the back'],
+      ['Enter, F2', 'On the canvas: edit the selected text in place, or go to the first field of any other layer'],
+      ['Shift+Enter', 'A new line while editing text on the canvas; Enter or Escape finishes'],
+      ['Double-click', 'Edit a text layer in place'], ['Alt+click', 'Select the next layer under the pointer'],
+      ['Ctrl+drag', 'Move, resize or turn without snapping to guides'], ['Shift+drag', 'On the turn handle: turn in 15 degree steps'],
+      ['Left, Right', 'Move between the list tabs'], ['Up, Down, Home, End', 'Move in a list'],
       ['Escape', 'Close a drawer, menu or dialog; deselect a layer'], ['?', 'This help']];
     U.choose('How Overlay Studio works', '<p>A camera publishes a stream to a Wowza application. The application\'s transcoder loads a ' +
       '<strong>transcoder template</strong> for the stream, which decodes it, draws the overlay and makes the outputs viewers watch, ' +
