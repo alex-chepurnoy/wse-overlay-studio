@@ -21,6 +21,8 @@ test('every kind draws as its own layer, with a name a screen reader can say', a
     score: 'Text: HOME 2 - 1', clock: /^Date and time: HH:mm:ss #\d+$/, bar: 'Rounded rectangle: Rounded rectangle', ring: 'Ellipse: Ellipse',
     arrow: 'Arrow: Arrow', tri: 'Triangle: Triangle', logo: 'Image: logo.png'
   };
+  // a token's name holds its sample, which comes from the server after the canvas first draws
+  await expect(page.locator('.pg[data-id="clock"] text')).toHaveText(/^HH:mm:ss #\d+$/);
   // the canvas is one Tab stop: each layer's box is an image it can make its active descendant (plan 4.1)
   for (const [id, label] of Object.entries(names)) {
     const box = page.locator('.pg[data-id="' + id + '"]');
