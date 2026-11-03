@@ -21,7 +21,13 @@
   function outputs() {
     var st = S.status, t = st && st.transcoder;
     if (t && t.state === 'running' && (t.encodes || []).length) {
-      return t.encodes.map(function (e) { return { name: e.name, stream: e.outputStream || e.name, passthrough: !!e.passThrough, audio: false, carries: !!e.overlay }; });
+      // the slots each running encode draws, by the overlay in each slot
+      var names = {};
+      (st.overlays || []).forEach(function (x) { names[x.slot] = x.name || 'the stream\'s own overlay'; });
+      return t.encodes.map(function (e) {
+        var on = (e.slots || []).map(function (n) { return names[n]; }).filter(Boolean);
+        return { name: e.name, stream: e.outputStream || e.name, passthrough: !!e.passThrough, audio: false, carries: !!e.overlay, overlays: on };
+      });
     }
     var r = row();
     return U.outputsOf(tpl()).map(function (o) { o.stream = r.name + '_' + o.name; return o; });
@@ -51,7 +57,13 @@
   }
   U.streamItems = function (name) { return streamItems(U.streamRow(name) || { name: name, added: true }); };
   function renderPipe() {
-    var r = row(), t = tpl(), base = U.baseOfStream(r), ov = r.overlay ? U.overlayEntry(r.overlay) : null, outs = outputs();
+    var r = row(), t = tpl(), base = U.baseOfStream(r), names = U.overlayNames(r), outs = outputs();
+    // a badge per overlay the template names, opening it; one this application does not hold is marked
+    var badges = names.map(function (n) {
+      var ov = U.overlayEntry(n);
+      return ov ? '<button type="button" class="ovbadge" data-go="overlay:' + U.esc(n) + '">' + U.icon('overlay') + U.esc(n) + ', ' + (ov.pages || 0) + ' layer' + (ov.pages === 1 ? '' : 's') + '</button>'
+        : '<span class="ln"><span class="dot bad"></span>' + U.esc(n) + ' does not exist</span>';
+    }).join('');
     var dec = S.status && S.status.transcoder && S.status.transcoder.decoderWidth ? S.status.transcoder.decoderWidth + ' x ' + S.status.transcoder.decoderHeight : null;
     if (!S.out || !outs.some(function (o) { return o.name === S.out; })) S.out = (outs.filter(function (o) { return o.carries; })[0] || outs[0] || {}).name || null;
     el.pipe.innerHTML = '<div class="pn pn-in"><span class="nk">Input</span><span class="ln"><b>' + (r.publishing ? (r.pulled ? 'Pulled stream' : r.arrives === 'server' ? 'Published inside WSE' : 'Pushed stream') : 'Waiting') + '</b></span>' +
@@ -60,8 +72,7 @@
         '<span class="ln"><button type="button" class="linkbtn" data-go="template:' + U.esc(r.own ? fileName(r) : base || fileName(r)) + '"><b>' + U.esc(r.template) + '</b></button><span class="faint">' + (r.own ? 'copy of ' + U.esc(base || '') : 'shared') + (r.restartNeeded ? ', restart pending' : '') + '</span></span>' +
         // the way to give the stream another template is on the card, not only in its menu (said by Alex, 2026-11-03)
         (U.readOnly ? '' : '<button type="button" class="btn sm" data-write data-applytpl>Change template</button>') +
-        (r.vif ? '<span class="ln faint">A VIF template; no overlay</span>' : ov ? '<button type="button" class="ovbadge" data-go="overlay:' + U.esc(ov.name) + '">' + U.icon('overlay') + U.esc(ov.name) + ', ' + (ov.pages || 0) + ' layer' + (ov.pages === 1 ? '' : 's') + '</button>' :
-          r.overlay ? '<span class="ln"><span class="dot bad"></span>' + U.esc(r.overlay) + ' does not exist</span>' : '<span class="ln faint">' + (t && !t.dynamicOverlays ? 'Cannot carry an overlay yet' : 'No overlay') + '</span>')
+        (r.vif ? '<span class="ln faint">A VIF template; no overlay</span>' : badges || '<span class="ln faint">' + (t && !t.dynamicOverlays ? 'Cannot carry an overlay yet' : 'No overlay') + '</span>')
         : '<span class="ln"><b>None</b></span><span class="ln faint">Not transcoded</span>' + (U.readOnly ? '' : '<button type="button" class="btn sm" data-applytpl>Apply a template</button>')) + '</div>' +
       '<span class="ar">' + U.icon('arrow') + '</span><div class="pn-outs" role="group" aria-label="Outputs, as configured; pick one to watch and check">' + (outs.length ? outs.map(function (o) {
         return '<button type="button" class="pn" aria-pressed="' + (o.name === S.out) + '" data-out="' + U.esc(o.name) + '"><span class="nk">Output</span><span class="ln"><b>' + U.esc(o.name) + '</b></span>' +
@@ -83,17 +94,23 @@
     var r = row(), st = S.status, o = outputs().filter(function (x) { return x.name === S.out; })[0];
     if (!r.publishing) return ['', 'Not publishing.'];
     if (!st) return ['', 'Reading the status of ' + U.esc(r.name) + '...'];
-    var t = st.transcoder || {}, from = st.overlayFrom || {}, d = st.draw;
+    // every slot in use (plan 3.9): the template's overlays, and a stream's own in slot 1
+    var t = st.transcoder || {}, slots = (st.overlays || []).filter(function (x) { return x.name || x.configured; });
+    var named = slots.map(function (x) { return x.name || 'the stream\'s own overlay'; }), all = U.esc(named.join(', '));
+    var missing = slots.filter(function (x) { return x.missing; }).map(function (x) { return x.name; });
     var caps = (st.objects || []).filter(function (x) { return x.capture; });
     var down = caps.filter(function (x) { return !(x.capture.state === 'running' && x.capture.lastCaptureAt); });
+    var slow = slots.reduce(function (n, x) { return n + ((x.draw && x.draw.slowCount) || 0); }, 0);
     if (t.state === 'vif-template') return ['', 'Runs a VIF template, so no overlay is drawn.'];
     if (t.state !== 'running') return ['bad', U.esc(r.name) + ' is not transcoded, so no overlay is drawn.'];
-    if (from.missing) return ['bad', 'No overlay: ' + U.esc(from.name) + ' does not exist in ' + U.esc(U.app) + '.'];
-    if (!from.name) return ['', 'The template names no overlay.'];
-    if (down.length) return ['bad', U.esc(from.name) + ': ' + down.map(function (x) { return U.esc(x.id); }).join(', ') + ' not capturing, so viewers see the last picture.'];
-    if (d && d.slowCount) return ['warn', U.esc(from.name) + ' is drawn, but ' + d.slowCount + (d.slowCount === 1 ? ' burn-in update was' : ' burn-in updates were') + ' slow since ' + U.esc(r.name) + ' started.'];
-    if (o && !o.carries) return ['', U.esc(o.name) + ' carries no overlay. ' + U.esc(from.name) + ' is on the outputs that do.'];
-    return ['', (o ? U.esc(o.name) + ' is configured to carry ' : 'Configured to carry ') + U.esc(from.name) + (caps.length ? ', and its pages are capturing' : '') + '. Whether the encoder drew it is not measured yet.'];
+    if (missing.length) return ['bad', U.esc(missing.join(', ')) + (missing.length > 1 ? ' do' : ' does') + ' not exist in ' + U.esc(U.app) + ', so ' + (missing.length > 1 ? 'they are' : 'it is') + ' not drawn.'];
+    if (!slots.length) return ['', 'The template names no overlay.'];
+    // pages capture for the first slot's overlay (the module reports its layers)
+    if (down.length) return ['bad', U.esc(named[0]) + ': ' + down.map(function (x) { return U.esc(x.id); }).join(', ') + ' not capturing, so viewers see the last picture.'];
+    if (slow) return ['warn', all + (named.length > 1 ? ' are' : ' is') + ' drawn, but ' + slow + (slow === 1 ? ' burn-in update was' : ' burn-in updates were') + ' slow since ' + U.esc(r.name) + ' started.'];
+    if (o && !o.carries) return ['', U.esc(o.name) + ' carries no overlay. ' + all + (named.length > 1 ? ' are' : ' is') + ' on the outputs that do.'];
+    var mine = o && (o.overlays || []).length ? U.esc(o.overlays.join(', ')) : all;
+    return ['', (o ? U.esc(o.name) + ' is configured to carry ' : 'Configured to carry ') + mine + (caps.length ? ', and its pages are capturing' : '') + '. Whether the encoder drew it is not measured yet.'];
   }
 
   /* ---------- watch: today's HLS player, on demand ---------- */
@@ -137,8 +154,10 @@
   function scopeHtml() {
     if (U.readOnly) return '';
     var r = row(), h = '', base = U.baseOfStream(r);
-    var od = r.overlay && U.screens.overlay.draftInfo ? U.screens.overlay.draftInfo(r.overlay) : null;
-    if (od) h += U.scopeLine('<b>' + U.esc(r.overlay) + ' has unsaved edits in the overlay editor</b> (' + U.esc(od.join(', ')) + ').', 'Open overlay editor', 'overlay:' + r.overlay);
+    U.overlayNames(r).forEach(function (n) {
+      var od = U.screens.overlay.draftInfo ? U.screens.overlay.draftInfo(n) : null;
+      if (od) h += U.scopeLine('<b>' + U.esc(n) + ' has unsaved edits in the overlay editor</b> (' + U.esc(od.join(', ')) + ').', 'Open overlay editor', 'overlay:' + n);
+    });
     var td = base && U.screens.template.draftInfo ? U.screens.template.draftInfo(base) : null;
     if (td) h += U.scopeLine('<b>' + U.esc(base) + ' has unsaved edits in the template editor</b> (' + U.esc(td.join(', ')) + ').' + (r.own ? ' ' + U.esc(r.template) + ' would not follow them.' : ''), 'Open template editor', 'template:' + base);
     return h;
@@ -229,13 +248,15 @@
     if (d.error) rows = [['Not possible', '<span class="err">' + U.esc(d.error) + '</span>']];
     else if (!d.plan) rows = [['Checking', '<span class="faint">Reading what would change...</span>']];
     else {
-      var p = d.plan, ovNew = t && t.overlay, ovNow = r.overlay || null, n = U.viewers(r);
+      var p = d.plan, sw = swap(r, t), n = U.viewers(r);
       var curOuts = U.outputsOf(tpl()).map(function (o) { return o.name; }), newOuts = U.outputsOf(t).map(function (o) { return o.name; });
       var gone = curOuts.filter(function (x) { return newOuts.indexOf(x) < 0; }), added = newOuts.filter(function (x) { return curOuts.indexOf(x) < 0; });
       rows.push(['File written', p.writeFile ? (r.own ? 'Replaces ' : 'Writes ') + '<span class="mono">transcoder/templates/' + U.esc(p.writeFile) + '</span>, an own copy of ' + U.esc(p.template) + '.' +
         (r.own ? ' ' + U.esc(r.name) + '\'s current copy is replaced and not kept.' : ' Later edits to ' + U.esc(p.template) + ' reach it only when you update the copy.') : U.esc(r.name) + ' already has this template as its own.']);
-      rows.push(['Overlay, live now', !r.publishing ? (ovNew ? U.esc(ovNew) + ' shows when it starts.' : 'None when it starts.') : ovNew === ovNow ? (ovNow ? U.esc(ovNow) + ' stays.' : 'Still none.') :
-        ovNow ? '<b>' + U.esc(ovNow) + ' disappears' + (n != null ? ' for ' + U.viewersText(n) : '') + ' now.</b>' + (ovNew ? ' ' + U.esc(ovNew) + ' replaces it.' : '') : U.esc(ovNew) + ' appears now.']);
+      rows.push(['Overlays, live now', !r.publishing ? (sw.next.length ? U.esc(sw.next.join(', ')) + (sw.next.length > 1 ? ' show' : ' shows') + ' when it starts.' : 'None when it starts.') :
+        !sw.gone.length && !sw.come.length ? (sw.now.length ? U.esc(sw.now.join(', ')) + (sw.now.length > 1 ? ' stay.' : ' stays.') : 'Still none.') :
+        (sw.gone.length ? '<b>' + U.esc(sw.gone.join(', ')) + (sw.gone.length > 1 ? ' disappear' : ' disappears') + (n != null ? ' for ' + U.viewersText(n) : '') + ' now.</b> ' : '') +
+        (sw.come.length ? U.esc(sw.come.join(', ')) + (sw.come.length > 1 ? ' appear' : ' appears') + ' now. ' : '') + (sw.kept.length ? U.esc(sw.kept.join(', ')) + (sw.kept.length > 1 ? ' stay.' : ' stays.') : '')]);
       rows.push(['Outputs, after restart', !r.template ? (newOuts.join(', ') || 'None') + ' start.' : (gone.length ? U.esc(gone.join(', ')) + ' stop. ' : '') + (added.length ? U.esc(added.join(', ')) + ' start. ' : '') +
         (newOuts.filter(function (x) { return added.indexOf(x) < 0; }).length ? U.esc(newOuts.filter(function (x) { return added.indexOf(x) < 0; }).join(', ')) + ' remain.' : '')]);
       rows.push(['VIF', p.currentIsVif ? '<b>VIF stops analyzing ' + U.esc(r.name) + '.</b> It now runs ' + U.esc(p.currentTemplate) + '. Other streams keep VIF.' : 'Not used on ' + U.esc(r.name) + '. Nothing lost.']);
@@ -254,6 +275,13 @@
     el.dry.querySelector('[data-dclose]').onclick = function () { m().dry = null; renderDry(); renderBar(); U.changed(); };
   }
 
+  // the overlays a stream shows now and would show with template t: those that go, come and stay
+  function swap(r, t) {
+    var now = U.overlayNames(r), next = U.overlayNames(t);
+    return { now: now, next: next, gone: now.filter(function (x) { return next.indexOf(x) < 0; }), come: next.filter(function (x) { return now.indexOf(x) < 0; }),
+      kept: next.filter(function (x) { return now.indexOf(x) >= 0; }) };
+  }
+
   /* ---------- the save bar: the dry run ---------- */
   function changes() {
     var r = row(), d = m().dry, out = [];
@@ -263,8 +291,8 @@
   function impact() {
     var r = row(), d = m().dry, n = U.viewers(r);
     if (d) {
-      var t = U.templateEntry(d.template), removes = r.publishing && r.overlay && (!t || t.overlay !== r.overlay);
-      return (removes ? r.overlay + ' leaves ' + r.name + ' now. ' : 'Overlay ' + (t && t.overlay !== (r.overlay || null) ? 'changes now' : 'unchanged') + '. ') +
+      var sw = swap(r, U.templateEntry(d.template)), removes = r.publishing && sw.gone.length > 0;
+      return (removes ? sw.gone.join(', ') + (sw.gone.length > 1 ? ' leave ' : ' leaves ') + r.name + ' now. ' : (sw.come.length ? 'Overlays change now' : 'Overlays unchanged') + '. ') +
         (r.publishing ? 'Outputs wait for a restart' + (n != null ? ' (' + U.viewersText(n) + ')' : '') + '.' : 'Applies when it starts publishing.') + (removes || r.own ? ' You confirm before it is written.' : '');
     }
     return '';
@@ -281,9 +309,9 @@
     return saveUse(r, x.dry);
   }
   function saveUse(r, d) {
-    var t = U.templateEntry(d.template), n = U.viewers(r), removes = r.publishing && r.overlay && (!t || t.overlay !== r.overlay);
+    var sw = swap(r, U.templateEntry(d.template)), n = U.viewers(r), removes = r.publishing && sw.gone.length > 0;
     var ask = !(removes || r.own) ? Promise.resolve(true) : U.confirm('Use ' + d.template + ' on ' + r.name + '?',
-      (removes ? '<p><b>' + U.esc(r.overlay) + ' disappears' + (n != null ? ' for ' + U.viewersText(n) : '') + ' now.</b></p>' : '') +
+      (removes ? '<p><b>' + U.esc(sw.gone.join(', ')) + (sw.gone.length > 1 ? ' disappear' : ' disappears') + (n != null ? ' for ' + U.viewersText(n) : '') + ' now.</b></p>' : '') +
       (r.own ? '<p>This replaces <span class="mono">' + U.esc(r.template) + '</span>, ' + U.esc(r.name) + '\'s own copy' + (U.copyBase(r) ? ' of ' + U.esc(U.copyBase(r)) : '') + '. The replaced copy is not kept.</p>' : '') +
       '<p>Outputs change at the next restart of ' + U.esc(r.name) + '.</p>', 'Use ' + d.template, false);
     return ask.then(function (ok) {

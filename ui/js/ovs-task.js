@@ -253,7 +253,7 @@
   function step2() {
     var p = T.tpl, list = candidates(), isNew = p.mode === 'new';
     if (!isNew && !p.existing && list.length) p.existing = list[0].name;
-    var ex = !isNew && p.existing ? U.templateEntry(p.existing) : null, already = ex && ex.overlay === T.made.overlay;
+    var ex = !isNew && p.existing ? U.templateEntry(p.existing) : null, already = !!ex && U.overlayNames(ex).indexOf(T.made.overlay) >= 0;
     var copyName = ex && !already ? unique(slug(ex.name) + '-' + slug(T.made.overlay), templateNames()) : null;
     var mine = isNew && p.name === T.made.template, key = p.mode + '|' + (isNew ? p.preset + '|' + p.name : p.existing), same = T.made.template && key === p.madeKey;
     var nameErr = isNew ? (!NAME.test(p.name) ? 'Letters, digits, dot, dash and underscore.' : !mine && templateNames().indexOf(p.name) >= 0 ? 'A template with this name exists.' :
@@ -269,7 +269,7 @@
           var users = U.streamsUsing(t.name).map(function (s) { return s.name; });
           return '<label class="opt"><input type="radio" name="ovs-t2x" value="' + U.esc(t.name) + '"' + (t.name === p.existing ? ' checked' : '') + '><span><b>' + U.esc(t.name) + '</b><span class="sub">' +
             U.esc(U.outputsOf(t).map(function (o) { return o.name; }).join(', ')) + (users.length ? '; used by ' + U.esc(users.join(', ')) : '') + '</span></span>' +
-            (t.overlay === T.made.overlay ? '<span class="spacer"></span><span class="bdg on">Already carries it</span>' : '') + '</label>'; }).join('') + '</div>' +
+            (U.overlayNames(t).indexOf(T.made.overlay) >= 0 ? '<span class="spacer"></span><span class="bdg on">Already carries it</span>' : '') + '</label>'; }).join('') + '</div>' +
           (ex ? '<div class="chips">' + (already ? '<span class="bdg on">Used as it is: it already draws ' + U.esc(T.made.overlay) + '</span>' : '<span class="bdg">New copy: ' + U.esc(copyName) + '</span><span class="bdg on">' + U.esc(ex.name) + ' is not changed</span>') + '</div>' : '')) +
       '<details class="adv"' + (nameErr ? ' open' : '') + '><summary>Advanced: name, hardware, each rendition</summary><div class="stack-3">' +
       (isNew ? '<div><label class="f" for="ovs-t-tn">Template name' + U.tip('Templates are shared by every application on this server.') + '</label><input id="ovs-t-tn" type="text" data-tname value="' + U.esc(p.name) + '" spellcheck="false" autocomplete="off"></div>' : '') +
@@ -288,7 +288,7 @@
     T.busy = true; render();
     var body = isNew ? U.templateSpecFor(T.tpl.name, T.made.overlay, T.tpl.preset) : null;
     var req = mine ? U.api.post(U.vhostPath() + '/templates/' + U.enc(T.tpl.name) + '/spec', body) : isNew ? U.api.post(U.vhostPath() + '/templates', body)
-      : U.api.post(U.vhostPath() + '/templates/' + U.enc(ex.name) + '/use', { how: 'copy', name: copyName, overlay: T.made.overlay, encodes: [] });
+      : U.api.post(U.vhostPath() + '/templates/' + U.enc(ex.name) + '/use', { how: 'copy', name: copyName, overlays: [{ name: T.made.overlay, encodes: [] }] });
     req.then(function (r) {
       T.busy = false;
       T.made.template = isNew ? T.tpl.name : String((r && r.template) || copyName).replace(/\.xml$/, '');
@@ -317,13 +317,19 @@
       if (seq === s.planSeq) { s.plan = p; if (T.step === 3) render(); }
     }, function (e) { if (seq === s.planSeq) { s.planErr = e.message; if (T.step === 3) render(); } });
   }
+  // the overlays stream r shows now that the template made in step 2 does not carry
+  function leaving(r) {
+    var t = T.made.template && U.templateEntry(T.made.template), keep = t ? U.overlayNames(t) : [T.made.overlay];
+    return U.overlayNames(r).filter(function (x) { return keep.indexOf(x) < 0; });
+  }
   function planRows() {
     var s = T.str, p = s.plan, n = target(), r = U.streamRow(n) || { name: n }, out = [];
     var appRestart = p.transcoderTurnsOn || p.templatesBefore !== p.templatesAfter;
     out.push(['', '<span class="pill" title="Writes ' + U.esc(p.writeFile || n + '.xml') + ', its own copy">' + U.esc(n) + '</span> will use <span class="pill">' + U.esc(T.made.template) + '</span>' + (r.own ? '<span class="small muted">, replacing its current copy</span>' : '')]);
     if (p.currentIsVif) out.push(['warn', '<b>VIF stops analyzing ' + U.esc(n) + '.</b> Other streams keep it.']);
     if (s.mode === 'live') {
-      out.push(['', U.esc(T.made.overlay) + ' shows at once on the renditions ' + U.esc(n) + ' already has' + (r.overlay && r.overlay !== T.made.overlay ? '; ' + U.esc(r.overlay) + ' leaves it' : '')]);
+      var gone = leaving(r);
+      out.push(['', U.esc(T.made.overlay) + ' shows at once on the renditions ' + U.esc(n) + ' already has' + (gone.length ? '; ' + U.esc(gone.join(', ')) + (gone.length > 1 ? ' leave it' : ' leaves it') : '')]);
       var now = U.outputsOf(U.templateOfStream(r)).map(function (o) { return o.name; }).sort().join(','), next = U.outputsOf(U.templateEntry(T.made.template)).map(function (o) { return o.name; }).sort().join(',');
       if (now !== next || !r.template) out.push(['warn', 'Its renditions change' + (next ? ' to ' + U.esc(next.split(',').join(', ')) : '') + ' when <b>' + U.esc(n) + ' restarts</b>: ' + (r.pulled ? 'it is pulled by WSE and resets' : r.arrives === 'server' ? 'it is published inside WSE and restarts with the application ' + U.esc(U.app) : 'it is pushed by an encoder and stops until the encoder reconnects') + '. You choose when, after Apply']);
       else out.push(['', 'Its renditions stay the same: ' + U.esc(next.split(',').join(', '))]);
@@ -362,7 +368,7 @@
           var v = U.viewers(r), how = r.pulled ? 'Pulled by WSE' : r.arrives === 'server' ? 'Published inside WSE; restarts only with the application' : 'Pushed by an encoder';
           return '<label class="opt"><input type="radio" name="ovs-t3l" value="' + U.esc(r.name) + '"' + (r.name === s.live ? ' checked' : '') + (applied ? ' disabled' : '') + '><span class="dot live" style="margin-top:6px"></span><span><b>' + U.esc(r.name) + '</b><span class="sub">' + how +
             (r.template ? '; ' + U.esc(r.template) + ' now' : '; not transcoded now') + (v != null ? '; ' + U.viewersText(v) : '') + '</span></span>' +
-            (r.overlay && r.overlay !== T.made.overlay ? '<span class="spacer"></span><span class="bdg warn">' + U.esc(r.overlay) + ' leaves it</span>' : '') + '</label>';
+            (leaving(r).length ? '<span class="spacer"></span><span class="bdg warn">' + U.esc(leaving(r).join(', ')) + (leaving(r).length > 1 ? ' leave it' : ' leaves it') + '</span>' : '') + '</label>';
         }).join('') + '</div>' : '<p class="muted">No stream is publishing to ' + U.esc(U.app) + ' now. Name one that starts later.</p>') +
       (n && !bad ? '<div><div class="sec-h">' + (applied ? 'Done' : 'What Apply does') + '</div>' + (applied ? planHtml(doneRows()) : s.planErr ? '<p class="err">' + U.esc(s.planErr) + '</p>' : s.plan ? planHtml(planRows()) : '<div class="skel"></div>') + '</div>' : '') +
       '<details class="adv"><summary>Advanced: template order for ' + U.esc(U.app) + '</summary><p class="small muted">Streams look for a template named after themselves first. The order is in Templates, Template order; changing it restarts the application.</p></details></div></div>';

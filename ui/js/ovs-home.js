@@ -19,23 +19,27 @@
     var to = U.templateEntry && U.templateEntry(tpl) ? ' data-go="template:' + U.esc(tpl) + '" title="Open ' + U.esc(tpl) + (s.own ? ', the copy for this stream' : '') + '"' : ' disabled';
     if (!outs.length) return '<button type="button" class="ochips linkbtn"' + to + '><span class="small faint">' + U.esc(s.template) + '</span></button>';
     return '<button type="button" class="ochips linkbtn"' + to + '>' + outs.map(function (o) {
-      return '<span class="ochip" title="' + U.esc(U.configuredText(o)) + ', configured"><b>' + U.esc(o.name) + '</b>' + (o.carries ? 'overlay' : o.passthrough ? 'passthrough' : o.audio ? 'audio' : 'no overlay') + '</span>';
+      return '<span class="ochip" title="' + U.esc(U.configuredText(o)) + ', configured"><b>' + U.esc(o.name) + '</b>' + (o.carries ? (o.overlays.length > 1 ? o.overlays.length + ' overlays' : 'overlay') : o.passthrough ? 'passthrough' : o.audio ? 'audio' : 'no overlay') + '</span>';
     }).join('') + '<span class="small faint">configured</span></button>';
   }
   // one chip per stream, the most important fact; broken beats attention. At most three amber marks on a screen.
   var amber = 0;
   function chip(s) {
-    if (s.overlay && !U.overlayEntry(s.overlay)) return '<span class="bdg bad">Overlay missing</span>';
+    if (U.missingOverlays(s).length) return '<span class="bdg bad">Overlay missing</span>';
     if (s.restartNeeded) return '<span class="bdg' + (amber++ < 3 ? ' warn' : '') + '">Restart pending</span>';
-    if (s.publishing && !s.overlay) return '<span class="bdg">No overlay</span>';
+    if (s.publishing && !U.overlayNames(s).length) return '<span class="bdg">No overlay</span>';
     return '';
   }
   function vwText(s) { var n = U.viewers(s); return s.publishing && n != null ? n + ' viewer' + (n === 1 ? '' : 's') : ''; }
   function row(s) {
-    var n = U.viewers(s), ov = s.overlay && U.overlayEntry(s.overlay);
+    var n = U.viewers(s);
+    // every overlay its template names, each a link to the editor when it exists here
+    var ovs = U.overlayNames(s).map(function (o) {
+      return U.overlayEntry(o) ? '<button type="button" class="linkbtn" data-go="overlay:' + U.esc(o) + '" title="Open the overlay ' + U.esc(o) + '">' + U.esc(o) + '</button>' : U.esc(o);
+    }).join(', ');
     return '<div class="srow' + (U.view.highlight === s.name ? ' new' : '') + '">' +
       '<span class="dot ' + (s.publishing ? 'live' : '') + '"></span><button type="button" class="nm linkbtn" data-go="stream:' + U.esc(s.name) + '" title="Open ' + U.esc(s.name) + '">' + U.esc(s.name) + '</button>' +
-      '<span class="ov">' + (ov ? '<button type="button" class="linkbtn" data-go="overlay:' + U.esc(s.overlay) + '" title="Open the overlay ' + U.esc(s.overlay) + '">' + U.esc(s.overlay) + '</button>' : s.overlay ? U.esc(s.overlay) : '') + ' ' + chip(s) + '</span>' +
+      '<span class="ov">' + ovs + ' ' + chip(s) + '</span>' +
       '<span class="outs">' + outsHtml(s) + '</span>' +
       '<span class="vw" data-vw="' + U.esc(s.name) + '" ' + (n != null ? 'title="Viewers on this server"' : '') + '>' + vwText(s) + '</span></div>';
   }
@@ -57,7 +61,7 @@
     h += '<div class="pnl">' + (list.length ? '<div class="srow-h"><span></span><span>Stream</span><span class="c3">Overlay</span><span class="c4">Outputs, from the template</span><span>' + (anyViewers ? 'Viewers' : '') + '</span></div>' + list.map(row).join('')
       : '<p class="empty-sm">' + (f === 'all' ? 'No stream is publishing to ' + U.esc(U.app) + ' now. Streams show here while they publish.' : 'Nothing here.') + '</p>') + '</div>';
     if (f === 'all' && off.length) h += '<div class="offrow"><span class="small muted">Not publishing:</span>' + off.map(function (s) {
-      return '<button type="button" class="chip' + (U.view.highlight === s.name ? ' new' : '') + '" data-go="stream:' + U.esc(s.name) + '"><span class="dot"></span>' + U.esc(s.name) + (s.overlay ? '<span class="k">' + U.esc(s.overlay) + ' when it starts</span>' : '') + '</button>';
+      return '<button type="button" class="chip' + (U.view.highlight === s.name ? ' new' : '') + '" data-go="stream:' + U.esc(s.name) + '"><span class="dot"></span>' + U.esc(s.name) + (U.overlayNames(s).length ? '<span class="k">' + U.esc(U.overlayNames(s).join(', ')) + ' when it starts</span>' : '') + '</button>';
     }).join('') + '</div>';
     var blocks = ((U.serverInfo && U.serverInfo.egress && U.serverInfo.egress.recentBlocks) || []).slice(-3).reverse();
     if (blocks.length) h += '<div class="pnl" style="margin-top:16px"><div class="pnl-h"><h3>Recent page blocks</h3><span class="small faint">Since WSE started</span><span class="spacer"></span>' +
