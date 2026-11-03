@@ -34,6 +34,17 @@
       '<div class="hrow end" style="margin-top:8px"><button type="button" class="btn sm" data-pickcancel>Cancel</button><button type="button" class="btn sm primary" data-pickok' + (lib.length ? '' : ' disabled') + '>' + U.esc(opts.okLabel || 'Use image') + '</button></div></div>';
   };
 
+  /** The saved overlays, in every application with the module, that draw file: "overlay app/name" for each. */
+  I.overlaysUsing = function (file) {
+    var apps = (U.apps || []).filter(function (a) { return a.installed; });
+    return Promise.all(apps.map(function (a) {
+      var list = a.name === U.app ? Promise.resolve({ overlays: U.overlays || [] }) : U.api.get(U.appPath(a.name) + '/overlays').catch(function () { return { overlays: [] }; });
+      return list.then(function (r) {
+        return ((r && r.overlays) || []).filter(function (o) { return (o.imageFiles || []).indexOf(file) >= 0; }).map(function (o) { return 'overlay ' + a.name + '/' + o.name; });
+      });
+    })).then(function (l) { return [].concat.apply([], l); });
+  };
+
   /**
    * Wires a picker in box. opts.onPick(file, uploaded) gets the chosen or uploaded file; opts.onCancel closes it;
    * opts.inUse(file) says why an upload may not be deleted, or null; opts.onChange() follows a delete.
@@ -48,8 +59,11 @@
         e.preventDefault();
         var f = b.getAttribute('data-imgdel'), why = opts.inUse && opts.inUse(f);
         if (why) { U.toast(why, { level: 'bad' }); return; }
-        U.api.post(U.vhostPath() + '/images', { 'delete': f }).then(function () { U.toast('Deleted ' + f + ' from the server.'); return I.library(true).then(function () { if (opts.onChange) opts.onChange(); }); },
-          function (er) { U.toast(er.message, { level: 'bad' }); });
+        // image files are the virtual host's: an overlay in any application may draw it (the module checks again)
+        I.overlaysUsing(f).then(function (users) {
+          if (users.length) { U.toast(f + ' is drawn by ' + users.join(', ') + '; choose another image there first.', { level: 'bad' }); return null; }
+          return U.api.post(U.vhostPath() + '/images', { 'delete': f }).then(function () { U.toast('Deleted ' + f + ' from the server.'); return I.library(true).then(function () { if (opts.onChange) opts.onChange(); }); });
+        }).catch(function (er) { U.toast(er.message, { level: 'bad' }); });
       };
     });
     var up = box.querySelector('#ovs-img-up');

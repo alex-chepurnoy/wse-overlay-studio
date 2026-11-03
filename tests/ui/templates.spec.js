@@ -246,3 +246,65 @@ test('an overlay with no layers says so in the picker', async ({ page, studio, w
   await expect(page.locator('[data-ovpick] [data-ovpname="Blank"]')).toContainText('No layers yet');
   await expect(page.locator('[data-ovpick] [data-ovpname="Blank"]')).not.toContainText('0 layers');
 });
+
+// live2 has the module too, and holds its own copies of overlays
+function secondApp(wse) {
+  wse.apps[1].installed = true;
+  wse.otherOverlays.live2 = { Scoreboard: JSON.parse(JSON.stringify(wse.overlays.Scoreboard)), LowerThird: { objects: [] } };
+  wse.otherShowing.live2 = { LowerThird: ['studio1'] };
+  wse.apps.push({ name: 'live3', installed: true, streamType: 'live', liveStreamTranscoder: '', templates: '', savedStreams: [] });
+}
+
+test('Copy to other applications marks each one by the overlay it holds, and copies to the missing ones', async ({ page, studio, wse }) => {
+  secondApp(wse);
+  twoOverlays(wse);
+  await openTemplate(page, studio, 'scoreboard-cpu');
+  await decode(page).locator('[data-ovcopy="Scoreboard"]').click();
+  const panel = decode(page).locator('[data-copyp]');
+  await expect(panel.locator('[data-copyrow="live2"]')).toContainText('Has it');
+  await expect(panel.locator('[data-copyrow="live3"]')).toContainText('Missing');
+  await expect(panel.locator('[data-copyapp="live2"]'), 'the same overlay is not copied again').toBeDisabled();
+  await panel.locator('[data-copyapp="live3"]').check();
+  await panel.getByRole('button', { name: 'Copy to 1 application' }).click();
+  await expect.poll(() => wse.otherOverlays.live3 && Object.keys(wse.otherOverlays.live3)).toEqual(['Scoreboard']);
+  expect(wse.otherOverlays.live3.Scoreboard).toEqual(wse.overlays.Scoreboard);
+  await expect(panel.locator('[data-copyrow="live3"]')).toContainText('Has it');
+});
+
+test('copying over a different version asks first, and says when it is on air there', async ({ page, studio, wse }) => {
+  secondApp(wse);
+  twoOverlays(wse);
+  await openTemplate(page, studio, 'scoreboard-cpu');
+  await outputsSec(page).locator('[data-ovcopy="LowerThird"]').click();
+  const panel = outputsSec(page).locator('[data-copyp]');
+  const row = panel.locator('[data-copyrow="live2"]');
+  await expect(row).toContainText('Differs');
+  await expect(row).toContainText('On air there on studio1');
+  await panel.locator('[data-copyapp="live2"]').check();
+  await panel.getByRole('button', { name: 'Copy to 1 application' }).click();
+  const dlg = page.getByRole('alertdialog');
+  await expect(dlg).toContainText('Replace LowerThird in live2?');
+  await expect(dlg).toContainText('live2 shows it on studio1');
+  await dlg.getByRole('button', { name: 'Cancel' }).click();
+  expect(wse.otherOverlays.live2.LowerThird).toEqual({ objects: [] });
+  await panel.getByRole('button', { name: 'Copy to 1 application' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Replace' }).click();
+  await expect(row).toContainText('Has it');
+  expect(wse.otherOverlays.live2.LowerThird).toEqual(wse.overlays.LowerThird);
+});
+
+test('with no other application holding the module, there is no Copy', async ({ page, studio }) => {
+  await openTemplate(page, studio, 'scoreboard-cpu');
+  await expect(decode(page).locator('[data-ovcopy]')).toHaveCount(0);
+});
+
+test('an image drawn by an overlay in any application is not deleted', async ({ page, studio, wse }) => {
+  secondApp(wse);
+  wse.otherOverlays.live2.Logo = { objects: [{ id: 'logo', type: 'image', imageFile: 'overlaystudio/logo.png', x: 0, y: 0, w: 100, h: 50 }] };
+  await openTemplate(page, studio, 'scoreboard-cpu');
+  await page.locator('[data-rowfor="tpladd:input"]').click();
+  await page.getByRole('menuitem', { name: 'Image (fixed)' }).click();
+  await screen(page).locator('[data-imgdel="overlaystudio/logo.png"]').click();
+  await expect(page.locator('.toast').filter({ hasText: 'overlaystudio/logo.png is drawn by overlay live/Mixed, overlay live2/Logo; choose another image there first.' })).toBeVisible();
+  expect(wse.posts.filter((x) => x.path.endsWith('/images'))).toHaveLength(0);
+});
