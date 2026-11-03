@@ -43,6 +43,8 @@ class FakeWse {
     this.formats = [];
     // the draft renders the page asked for, and what a test sets them to answer
     this.renders = [];
+    // the template writes the page made, in order
+    this.templateWrites = [];
     this.textBoxes = {};
     this.renderShift = {};
     this.renderFail = 0;
@@ -53,7 +55,7 @@ class FakeWse {
     Object.keys(starters).forEach((n) => { this.templates[n] = Object.assign({}, starters[n]); });
     // a master built from the CPU starter that carries the scoreboard, as the page's template editor makes one
     this.templates['scoreboard-cpu'] = Object.assign({}, starters['overlaystudio-cpu'], {
-      overlay: 'Scoreboard',
+      overlay: 'Scoreboard', overlays: [{ name: 'Scoreboard', encodes: [], slot: 1 }],
       description: 'Managed by Overlay Studio: CPU decode and encode, 720p and 360p, with overlays.'
     });
     this.apps = [
@@ -224,6 +226,23 @@ class FakeWse {
         replacedFallback: null, liveStreamTranscoderBefore: app.liveStreamTranscoder, liveStreamTranscoderAfter: app.liveStreamTranscoder, restartRequired: false,
         validation: { usable: true, problems: [] }, currentTemplate: s && s.template, currentIsVif: false, transcoderTurnsOn: false,
         overlays: [], overlay: (this.templates[tpl] || {}).overlay || null, dryRun: true, publishing: this.streams.filter((x) => x.publishing).map((x) => x.name) };
+    }
+    // template writes (TemplatesBuildConfig, TemplateSpecConfig, TemplateOverlayConfig): recorded, and the overlays
+    // they name read back as the validator would, slot 1 from the outputs marked overlay
+    if (method === 'POST' && (m = /^\/vhosts\/_defaultVHost_\/templates(?:\/([^/]+)\/(spec|overlay))?$/.exec(r))) {
+      this.templateWrites.push({ path: r, body });
+      const name = m[1] ? decodeURIComponent(m[1]) : body.name;
+      let slots;
+      if (m[2] === 'overlay') slots = (body.overlays || []).map((x, i) => ({ name: x.name, encodes: x.encodes || [], slot: x.slot || i + 1 }));
+      else {
+        const vids = (body.outputs || []).filter((o) => o.kind === 'video' && o.enabled), on = vids.filter((o) => o.overlay).map((o) => o.name);
+        slots = (body.overlay ? [{ name: body.overlay, encodes: on.length === vids.length ? [] : on, slot: 1 }] : []).concat(body.overlays || []);
+        if (!m[1]) this.templates[name] = Object.assign({}, this.templates['overlaystudio-cpu'], { managed: true, description: 'Managed by Overlay Studio: built here.' });
+      }
+      Object.assign(this.templates[name], { overlays: slots, overlay: slots.length && slots[0].slot === 1 ? slots[0].name : null,
+        overlayEncodes: slots.length && slots[0].slot === 1 ? slots[0].encodes : [] });
+      this.revision++;
+      return { success: true, template: name + '.xml', live: [] };
     }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/templates\/order$/.exec(r))) {
       if (method === 'POST') { this.posts.push({ path: r, body }); return { success: true }; }
