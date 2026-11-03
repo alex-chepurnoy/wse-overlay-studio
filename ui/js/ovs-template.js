@@ -1071,7 +1071,20 @@
       if (group(t) === 'other') d = copyOf(t);
       startNew(d);
     } else if (act === 'del') deleteTemplate(name);
+    else if (act === 'use') useOnStream(name);
   };
+  // a master put on a stream: the stream gets its own copy, linked to the master, after the stream's dry run
+  function useOnStream(name) {
+    var list = U.streams().map(function (s) { return s.name; });
+    if (!list.length) { U.toast('There is no stream yet. Streams show under Streams while they publish, or add one there.', { level: 'bad' }); return; }
+    var pick = list[0];
+    var p = U.choose('Use ' + name + ' on a stream', '<p>The stream gets its own copy of ' + U.esc(name) + ', linked to it. You see what changes on the stream before anything is written.</p>' +
+      '<div class="fld"><label class="f" for="ovs-usestream">Stream</label><select id="ovs-usestream" data-usestream>' + list.map(function (n) { return '<option value="' + U.esc(n) + '">' + U.esc(n) + '</option>'; }).join('') + '</select></div>',
+      [{ label: 'Cancel', value: false }, { label: 'Continue', value: true, kind: 'primary' }]);
+    var sel = U.root.querySelector('[data-usestream]');
+    if (sel) sel.onchange = function () { pick = sel.value; };
+    p.then(function (ok) { if (ok) U.useTemplateOn(pick, name); });
+  }
   U.rowActions.copy = function (name, act) {
     var c = findAny(name), base = c && U.copyBase(c);
     if (act === 'update' && base && find(base)) updateCopies(base, [name]);

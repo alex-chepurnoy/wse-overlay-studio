@@ -26,8 +26,7 @@
     U.view.screen = screen; U.view.id = id;
     if (opts.filter) U.view.filter = opts.filter;
     var tab = TAB[screen];
-    // a publishing stream opened from On air keeps the On air tab
-    if (screen === 'stream' && U.view.tab === 'onair' && !opts.tab) tab = 'onair';
+    // a stream opened from On air shows under Streams, with the list beside it (said by Alex, 2026-11-03)
     if (opts.tab) tab = opts.tab;
     if (tab) U.view.tab = tab;
     if (tab && tab !== 'onair' && id) { U.view.last = U.view.last || {}; U.view.last[tab] = screen + ':' + id; }
@@ -186,7 +185,9 @@
       foot.innerHTML = '';
     } else if (tab === 'streams') {
       U.streams().forEach(function (s) {
-        var sub = (s.publishing ? '' : 'Not publishing, ') + (s.overlay ? s.overlay : 'No overlay') + (s.restartNeeded ? ', restart pending' : '') + (s.added ? ', added here' : '');
+        var base = U.baseOfStream(s), tname = s.template ? String(s.template).replace(/\.xml$/i, '') : null;
+        var sub = (s.publishing ? '' : 'Not publishing, ') + (s.overlay ? s.overlay : 'No overlay') + (tname ? ', ' + (s.own && base ? 'copy of ' + base : tname) : ', no template') +
+          (s.restartNeeded ? ', restart pending' : '') + (s.added ? ', added here' : '');
         if (!matches(s.name + ' ' + sub)) return;
         h.push(item('stream:' + s.name, s.publishing ? 'live' : '', U.esc(s.name), U.esc(sub), unsavedFor('stream:' + s.name), v.screen === 'stream' && v.id === s.name, null,
           U.rowMenuHtml('stream:' + s.name, 'Actions for ' + s.name, U.streamItems(s.name))));
@@ -225,7 +226,7 @@
         var sub = (t.overlay ? t.overlay : 'No overlay') + (master ? ', ' + copies.length + ' stream cop' + (copies.length === 1 ? 'y' : 'ies') + (behind ? ', ' + behind + ' differ' + (behind === 1 ? 's' : '') : '') : t.shipped ? ', ships with WSE' : '');
         if (!matches(t.name + ' ' + sub + ' ' + copies.map(function (c) { return c.name; }).join(' '))) return '';
         return item('template:' + t.name, live.length ? 'on' : '', U.esc(t.name), U.esc(sub), unsavedFor('template:' + t.name), v.screen === 'template' && v.id === t.name, null,
-          U.rowMenuHtml('template:' + t.name, 'Actions for ' + t.name, master ? [['dup', 'Duplicate...'], '-', ['del', 'Delete template...', true, !t.managed]] : [['dup', 'New master from this one']])) +
+          U.rowMenuHtml('template:' + t.name, 'Actions for ' + t.name, master ? [['use', 'Use on a stream...', false, !t.overlay], ['dup', 'Duplicate...'], '-', ['del', 'Delete template...', true, !t.managed]] : [['dup', 'New master from this one']])) +
           copies.map(copyItem).join('');
       }
       var a = mine.map(function (t) { return tplItem(t, true); }).join(''), b = other.map(function (t) { return tplItem(t, false); }).join('');

@@ -453,10 +453,12 @@ Kept: rectangle (rounded with `arcWidth`/`arcHeight`), ellipse, line, triangle. 
 
 ### 4.1 Overlays tab
 
-- **Add bar above the canvas:** Web page, Text, Date and time, Shape (menu: rectangle, rounded rectangle, square,
-  ellipse, circle, line, arrow, triangle), Image. The same Add menu replaces all three "Add page" entries: under the
-  layer list (`ui/js/uo-overlay.js:968-971`), in the empty inspector (`:657`) and in the overlay row's menu
-  (`ui/js/uo-shell.js:198`). "Date and time" adds a Text layer holding `{time:HH:mm:ss}` and opens its Format tab.
+- **Adding a layer:** one **Add layer** menu, under the layer list and in the empty inspector: Web page, Text, Date
+  and time, the eight shapes (rectangle, rounded rectangle, square, ellipse, circle, line, arrow, triangle) and
+  Image, each with its icon. The overlay row's menu offers the same kinds. While placing, a banner on the canvas says
+  what a click does, with Cancel. "Date and time" adds a Text layer holding `{time:HH:mm:ss}` and opens its Format
+  tab. (An Add bar above the canvas was dropped on 2026-11-03: it repeated the menu and placing showed no sign on the
+  canvas. PM vault: `60-decisions\2026-11-03-overlay-studio-add-layer-menu-and-stream-template-control.md`.)
 - **Words:** the tab says "layer" where it says "page" for anything that is not a web page ("No layer selected",
   `uo-overlay.js:655`; the coordinates hint, `:454`; the delete confirm, `:939`; "No pages yet.", `:529`; "Actions
   for page" and "Remove page", `:537`; the Help rows, `uo-shell.js:383-385`; the shared id check's "A page with this

@@ -8,6 +8,12 @@
 'use strict';
 const { test, expect } = require('./harness');
 
+// the Add layer menu under the layer list, the one way to add (plan 4.1, as changed 2026-11-03)
+async function addLayer(page, kind) {
+  await page.locator('[data-rowfor="add:list"]').click();
+  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+}
+
 async function openMixed(page, studio) {
   await studio.open();
   await page.locator('[data-tab=overlays]').click();
@@ -40,7 +46,7 @@ const obj = (objs, id) => objs.find((o) => o.id === id);
 
 test('Tab into the canvas selects the front layer; Page Up and Page Down walk the layers', async ({ page, studio }) => {
   await openMixed(page, studio);
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Image' }).focus();
+  await page.locator('[data-guides]').focus();
   await page.keyboard.press('Tab');
   const f = frame(page);
   await expect(f).toBeFocused();
@@ -107,7 +113,7 @@ test('a double-click edits text in place; Shift+Enter adds a line', async ({ pag
 test('Alt+click selects the next layer under the pointer; a thin line is hit near it', async ({ page, studio }) => {
   await openMixed(page, studio);
   // a rectangle placed over the bar
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Add a shape' }).click();
+  await page.locator('[data-rowfor="add:list"]').click();
   await page.getByRole('menuitem', { name: 'Rectangle', exact: true }).click();
   let p = await at(page, 650, 170);
   await page.mouse.click(p.x, p.y);
@@ -122,7 +128,7 @@ test('Alt+click selects the next layer under the pointer; a thin line is hit nea
   await page.keyboard.up('Alt');
 
   // a line: a press a few pixels off it still takes it, one well away from everything deselects
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Add a shape' }).click();
+  await page.locator('[data-rowfor="add:list"]').click();
   await page.getByRole('menuitem', { name: 'Line', exact: true }).click();
   await drag(page, await at(page, 300, 950), await at(page, 900, 950));
   await page.keyboard.press('Escape');

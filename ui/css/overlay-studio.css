@@ -400,10 +400,9 @@
 .ovs-plugin[data-readonly] .pg { cursor: default; }
 /* text, shapes and images: drawn, not captured, so no box around them until selected or unsaved */
 .ovs-plugin .pg.lyr { border-color: transparent; }
-/* adding layers (plan 4.1): the Add bar over the canvas, the crosshair while placing, and what a drag is drawing */
-.ovs-plugin .addbar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0 0 var(--s-2); }
-.ovs-plugin .addbar .btn svg { width: 15px; height: 15px; }
-.ovs-plugin .addbar .shapemenu svg:last-child { width: 12px; height: 12px; margin-left: 2px; }
+/* adding layers (plan 4.1): the banner and the crosshair while placing, and what a drag is drawing */
+.ovs-plugin .placebanner { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: var(--s-2);
+  max-width: calc(100% - 20px); padding: 6px 6px 6px 12px; border-radius: var(--r-md); background: rgba(17, 24, 39, .88); color: #fff; font-size: 13px; cursor: default; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
 .ovs-plugin .frame.placing, .ovs-plugin .frame.placing .pg { cursor: crosshair; }
 .ovs-plugin .frame.placing:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ovs-plugin .frame .ghost { position: absolute; border: 2px dashed #fff; background: rgba(37, 99, 235, .25); pointer-events: none; }
@@ -613,7 +612,8 @@
 .ovs-plugin .menu { position: relative; display: inline-flex; }
 .ovs-plugin .menu-list.rowfloat { position: fixed; right: auto; top: 0; left: 0; z-index: 1065; }
 .ovs-plugin .menu-list { position: absolute; right: 0; top: calc(100% + 4px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-3); min-width: 200px; padding: var(--s-1); z-index: 40; }
-.ovs-plugin .menu-list button { display: flex; width: 100%; gap: var(--s-2); border: 0; background: none; padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer; text-align: left; color: var(--text); font-size: 13px; }
+.ovs-plugin .menu-list button svg { width: 16px; height: 16px; flex: none; color: var(--text-2); }
+.ovs-plugin .menu-list button { display: flex; width: 100%; gap: var(--s-2); align-items: center; border: 0; background: none; padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer; text-align: left; color: var(--text); font-size: 13px; }
 .ovs-plugin .menu-list button:hover, .ovs-plugin .menu-list button:focus-visible { background: var(--surface-2); }
 .ovs-plugin .menu-list .danger { color: var(--red); }
 .ovs-plugin .menu-list hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }

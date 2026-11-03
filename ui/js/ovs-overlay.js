@@ -650,11 +650,9 @@
   }
 
   function renderCoords() {
+    placeBanner();
     if (S.placing) {
-      // the placing hint, shown here and said through data-say
-      el.coords.innerHTML = '<span class="bdg on" data-placehint>Click to place the ' + U.esc(KIND_LABEL[S.placing].toLowerCase()) + ', or drag to draw it. Enter puts it in the center, Escape cancels.</span>';
-      // the readout is not a live region, so a ticking clock's size is not read out every second; the hint is said once
-      if (el.say) el.say.textContent = el.coords.textContent;
+      el.coords.innerHTML = '';
       el.outside.hidden = true;
       return;
     }
@@ -669,6 +667,22 @@
     var outside = o && s.known && frameFit(o, s) === 'outside';
     el.outside.hidden = !outside;
     if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' is outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '): nothing of it shows. Move it under Place.';
+  }
+  // while placing, a banner on the canvas itself says what a click does, with Cancel; it is said once through data-say
+  // (the readout under the canvas is not a live region, so a ticking clock's size is not read out every second)
+  function placeBanner() {
+    var f = frameEl(), b = f && f.querySelector('[data-placehint]');
+    if (!S.placing) { if (b) b.remove(); return; }
+    var text = 'Click to place the ' + KIND_LABEL[S.placing].toLowerCase() + ', or drag to draw it. Enter puts it in the center, Escape cancels.';
+    if (!f) return;
+    if (!b) {
+      b = document.createElement('div'); b.className = 'placebanner'; b.setAttribute('data-placehint', '');
+      b.innerHTML = '<span></span><button type="button" class="btn sm" data-placecancel>Cancel</button>';
+      b.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+      b.querySelector('[data-placecancel]').onclick = function (e) { e.stopPropagation(); stopPlacing(); renderCoords(); focusCanvas(); };
+      f.appendChild(b);
+    }
+    if (b.firstChild.textContent !== text) { b.firstChild.textContent = text; if (el.say) el.say.textContent = text; }
   }
   // where the selected layer is and how big it draws, for the readout under the canvas
   function layerCoords(o) { var z = size(drawn(o)); return o.id + ' at ' + (o.x || 0) + ', ' + shownY(o) + ' · ' + Math.round(z.w) + ' x ' + Math.round(z.h); }
@@ -1147,7 +1161,7 @@
       var body = '';
       if (S.inspTab === 'page') body = fieldHtml('url', o.url, { saved: sv.url }) +
         '<div class="grid2">' + fieldHtml('viewportWidth', o.viewportWidth, { placeholder: String(z.w), fromPicture: true, saved: sv.viewportWidth }) + fieldHtml('viewportHeight', o.viewportHeight, { placeholder: String(z.h), fromPicture: true, noHelp: true, saved: sv.viewportHeight }) + '</div>' +
-        overlaySettings(d) + U.roNote();
+        overlaySettings(d, true) + U.roNote();
       else if (S.inspTab === 'format') body = formatTabHtml(o, sv);
       else if (S.inspTab === 'text') body = textTabHtml(o, sv);
       else if (S.inspTab === 'shape') body = shapeTabHtml(o, sv);
@@ -1172,7 +1186,8 @@
       if (web && capNote(o.id) === 'bad') h += '<section><div class="note bad" data-capnote><span class="dot bad"></span><div>' + capLine(o.id) + '</div></div></section>';
       if (body) h += '<section>' + body + '</section>';
     }
-    if (!o || !web) h += '<section>' + (o ? '' : '<div class="sec-h">Every layer of ' + U.esc(S.name) + '</div>') + overlaySettings(d) + U.roNote() + '</section>';
+    // a text, shape or image shows only Advanced drawing; with nothing selected, the capture speed shows too when there is a page
+    if (!o || !web) h += '<section>' + (o ? '' : '<div class="sec-h">Every layer of ' + U.esc(S.name) + '</div>') + overlaySettings(d, !o) + U.roNote() + '</section>';
     el.insp.innerHTML = h;
     el.insp.querySelectorAll('details[data-ovadv]').forEach(function (x) { x.addEventListener('toggle', function () { S.advOpen = x.open; }); });
     // a named speed fills in the exact value beside it, so the draft, Save and Revert treat it as that field
@@ -1402,11 +1417,12 @@
   }
 
   // the overlay's own settings, for every page in it: how often pages are captured, and how they are drawn
-  function overlaySettings(d) {
+  function overlaySettings(d, speed) {
     var sd = S.saved || {}, rr = d.refreshRate, draft = sd.refreshRate !== undefined && sd.refreshRate !== rr;
     // the capture speed is how often the module takes a page's new frame (OverlayImage.nextWakeAt); text, shapes,
     // images and clocks redraw on their own schedule, so it is offered only to an overlay with a web page
-    var pages = objects().some(function (x) { return x.type === 'webPage'; });
+    // and only where a page is being looked at: its own panel, or the overlay's with nothing selected (said by Alex, 2026-11-03)
+    var pages = speed && objects().some(function (x) { return x.type === 'webPage'; });
     var every = ro() ? '<span class="every">every ' + U.esc(rr) + ' s</span>' :
       '<label class="every" title="WSE setting refreshRate">every<input type="number" id="ovs-f-refreshRate" data-f="refreshRate" class="num' + (draft ? ' is-draft' : '') + '" min="' + F.refreshRate.min + '" max="' + F.refreshRate.max + '" step="any" value="' + U.esc(rr) + '" aria-label="Capture every, seconds">s</label>';
     return '<div class="ovset' + (pages ? '' : ' bare') + '">' + (pages ? U.speedHtml(+rr, 'data-ospeed', ro(), every) + '<div class="err" data-err-for="refreshRate"></div>' +
@@ -1617,23 +1633,21 @@
   var KIND_LABEL = { page: 'Web page', text: 'Text', datetime: 'Date and time', image: 'Image', rectangle: 'Rectangle', rounded: 'Rounded rectangle', square: 'Square',
     ellipse: 'Ellipse', circle: 'Circle', line: 'Line', arrow: 'Arrow', triangle: 'Triangle' };
   var SHAPE_KINDS = ['rectangle', 'rounded', 'square', 'ellipse', 'circle', 'line', 'arrow', 'triangle'];
-  function shapeItems() { return SHAPE_KINDS.map(function (k) { return [k, KIND_LABEL[k]]; }); }
-  // one menu for every kind, under the layer list and in the empty inspector
+  var KIND_ICON = { page: 'web', text: 'text', datetime: 'clock', image: 'image', rectangle: 'rect', rounded: 'rounded', square: 'square',
+    ellipse: 'ellipse', circle: 'circle', line: 'line', arrow: 'arrow', triangle: 'triangle' };
+  function kindItem(k) { return [k, KIND_LABEL[k], false, false, KIND_ICON[k]]; }
+  function shapeItems() { return SHAPE_KINDS.map(kindItem); }
+  // the one way to add a layer, each kind with its icon: under the layer list and in the empty inspector (said by
+  // Alex, 2026-11-03: the bar over the canvas repeated it and did nothing visible when clicked)
   function addMenuHtml(where, cls) {
-    return U.rowMenuHtml('add:' + where, 'Add a layer', [['page', 'Web page'], ['text', 'Text'], ['datetime', 'Date and time'], '-'].concat(shapeItems()).concat(['-', ['image', 'Image']]),
+    return U.rowMenuHtml('add:' + where, 'Add a layer', [kindItem('page'), kindItem('text'), kindItem('datetime'), '-'].concat(shapeItems()).concat(['-', kindItem('image')]),
       { html: U.icon('plus') + 'Add layer', cls: cls });
   }
-  function addBarHtml() {
-    var b = function (k, icon) { return '<button type="button" class="btn sm ghost" data-write data-addkind="' + k + '">' + U.icon(icon) + KIND_LABEL[k] + '</button>'; };
-    return b('page', 'web') + b('text', 'text') + b('datetime', 'clock') +
-      U.rowMenuHtml('add:bar', 'Add a shape', shapeItems(), { html: U.icon('shape') + 'Shape' + U.icon('chev'), cls: 'shapemenu' }) + b('image', 'image');
-  }
   U.rowActions.add = function (where, kind) { addKind(kind); };
-  // from the overlay row's menu: Add shape... opens the Shape menu, the rest start at once
+  // from the overlay row's menu: Add shape... opens the Add layer menu, the rest start at once
   function addOnOpen(kind) {
     if (kind !== 'shape') { addKind(kind); return; }
-    var m = el.addbar && el.addbar.querySelector('[data-rowfor="add:bar"]');
-    if (m) U.openRowMenu(m);
+    if (el.pagesAdd) U.openRowMenu(el.pagesAdd);
   }
   function addKind(kind) {
     if (ro() || !S.draft || !KIND_LABEL[kind]) return;
@@ -1653,7 +1667,8 @@
   }
   // a press on the canvas while placing: a click places the layer at its usual size, a drag draws it
   function onPlaceDown(e) {
-    if (!S.placing || e.button !== 0) return;
+    // the banner's Cancel is not a click on the picture (this listens before the banner can stop it)
+    if (!S.placing || e.button !== 0 || e.target.closest('[data-placehint]')) return;
     e.preventDefault(); e.stopPropagation();
     var frame = e.currentTarget, r = frame.getBoundingClientRect(), s = src(), k = s.w / r.width;
     var at = function (ev) { return { x: Math.max(0, Math.min(s.w, (ev.clientX - r.left) * k)), y: Math.max(0, Math.min(s.h, (ev.clientY - r.top) * k)) }; };
@@ -1874,7 +1889,6 @@
         '<span class="spacer"></span><label class="small muted" for="ovs-pv">Background' + U.tip('A publishing stream to place the layers on. It does not put this overlay on that stream.') + '</label><select id="ovs-pv" data-preview></select>' +
         '<label class="check small"><input type="checkbox" data-guides>Safe area</label>' +
         '<button type="button" class="btn sm only-1200" data-togglei>' + U.icon('panel') + 'Inspector</button></div>' +
-        '<div class="addbar" data-addbar data-write role="toolbar" aria-label="Add a layer"></div>' +
         '<div class="canvas"><div data-stage></div><div class="canvas-bar"><span class="coords" data-coords aria-live="off"></span><span class="vh" data-say aria-live="polite"></span><span class="spacer"></span><span class="hrow" data-caption></span></div>' +
         '<p class="small warn-text" data-outside hidden></p></div></div><div data-bar hidden></div>';
       // the page list lives in the list column, under the open overlay; the shell places it there
@@ -1887,9 +1901,6 @@
         listBtn: box.querySelector('[data-showlist]'), bar: box.querySelector('[data-bar]'), insp: insp, grid: U.root.querySelector('[data-grid]') };
       S.name = null; S.draft = S.saved = null; mem = {};
       el.preview.onchange = function () { setPreview(el.preview.value); };
-      el.addbar = box.querySelector('[data-addbar]');
-      el.addbar.innerHTML = addBarHtml();
-      el.addbar.querySelectorAll('[data-addkind]').forEach(function (b) { b.onclick = function () { addKind(b.getAttribute('data-addkind')); }; });
       box.querySelector('[data-togglei]').onclick = U.toggleInsp;
       el.listBtn.onclick = function () { var on = !el.grid.classList.contains('show-left'); U.showList(on); el.listBtn.setAttribute('aria-expanded', String(on)); };
       box.querySelector('[data-guides]').onchange = function (e) {

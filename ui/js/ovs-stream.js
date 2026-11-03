@@ -58,6 +58,8 @@
         '<span class="ln">' + (r.publishing ? dec || 'Publishing' : 'No encoder connected') + '</span></div><span class="ar">' + U.icon('arrow') + '</span>' +
       '<div class="pn pn-tpl"><span class="nk">Template' + (r.template ? U.rowMenuHtml('tpl:' + r.name, 'Template actions for ' + r.name, [['tpl', 'Change template...'], ['stop', 'Stop using it...', true, !r.own], '-', ['open', 'Open ' + (base || fileName(r))]]) : '') + '</span>' + (r.template ?
         '<span class="ln"><button type="button" class="linkbtn" data-go="template:' + U.esc(r.own ? fileName(r) : base || fileName(r)) + '"><b>' + U.esc(r.template) + '</b></button><span class="faint">' + (r.own ? 'copy of ' + U.esc(base || '') : 'shared') + (r.restartNeeded ? ', restart pending' : '') + '</span></span>' +
+        // the way to give the stream another template is on the card, not only in its menu (said by Alex, 2026-11-03)
+        (U.readOnly ? '' : '<button type="button" class="btn sm" data-write data-applytpl>Change template</button>') +
         (r.vif ? '<span class="ln faint">A VIF template; no overlay</span>' : ov ? '<button type="button" class="ovbadge" data-go="overlay:' + U.esc(ov.name) + '">' + U.icon('overlay') + U.esc(ov.name) + ', ' + (ov.pages || 0) + ' layer' + (ov.pages === 1 ? '' : 's') + '</button>' :
           r.overlay ? '<span class="ln"><span class="dot bad"></span>' + U.esc(r.overlay) + ' does not exist</span>' : '<span class="ln faint">' + (t && !t.dynamicOverlays ? 'Cannot carry an overlay yet' : 'No overlay') + '</span>')
         : '<span class="ln"><b>None</b></span><span class="ln faint">Not transcoded</span>' + (U.readOnly ? '' : '<button type="button" class="btn sm" data-applytpl>Apply a template</button>')) + '</div>' +
@@ -203,10 +205,10 @@
     (U.overlays || []).forEach(function (o) { (o.templates || []).forEach(function (t) { if (!U.copyBase(U.templateEntry(t) || {}) && out.indexOf(t) < 0) out.push(t); }); });
     return out.sort();
   }
-  function openDry() {
+  function openDry(pick) {
     var list = candidates(), r = row();
     if (!list.length) { U.toast('No template carries an overlay yet. Make one in Templates first.', { level: 'bad' }); return; }
-    var want = (m().dry && m().dry.template) || (r.own ? U.copyBase(r) : null);
+    var want = pick || (m().dry && m().dry.template) || (r.own ? U.copyBase(r) : null);
     if (list.indexOf(want) < 0) want = list[0];
     m().dry = { template: want, plan: null, error: null };
     renderDry(); renderBar(); U.changed(); plan();
@@ -242,9 +244,11 @@
         ' It needs an application restart, which drops every stream in it.' : p.templatesBefore !== p.templatesAfter ? U.esc(U.app) + ' is set to look for a template named after each stream first: <span class="mono">' + U.esc(p.templatesAfter) + '</span>. Applies after an application restart.' :
         'No application restart needed.']);
     }
-    el.dry.innerHTML = '<div class="dry"><div class="dry-h"><b>Use a template on ' + U.esc(r.name) + '</b><select data-dtpl aria-label="Template">' + list.map(function (x) {
+    el.dry.innerHTML = '<div class="dry"><div class="dry-h"><b>Give ' + U.esc(r.name) + ' its own copy of</b><select data-dtpl aria-label="Template">' + list.map(function (x) {
         return '<option value="' + U.esc(x) + '"' + (x === d.template ? ' selected' : '') + '>' + U.esc(x) + (r.own && U.copyBase(r) === x ? ' (current)' : '') + '</option>'; }).join('') + '</select>' +
       '<span class="small faint">Dry run, nothing is written until you save</span><span class="spacer"></span><button type="button" class="btn sm ghost icon" data-dclose aria-label="Close dry run">' + U.icon('close') + '</button></div>' +
+      // a stream runs a template named after it, else the application's; so "using" a master is having a copy of it
+      '<p class="small muted">WSE runs a template named after the stream when there is one. The copy stays linked to ' + U.esc(d.template) + ': when ' + U.esc(d.template) + ' changes, update the copy from Templates.</p>' +
       '<table class="tbl kvt"><tbody>' + rows.map(function (x) { return '<tr><td>' + x[0] + '</td><td>' + x[1] + '</td></tr>'; }).join('') + '</tbody></table></div>';
     el.dry.querySelector('[data-dtpl]').onchange = function (e) { d.template = e.target.value; plan(); };
     el.dry.querySelector('[data-dclose]').onclick = function () { m().dry = null; renderDry(); renderBar(); U.changed(); };
@@ -360,7 +364,9 @@
         }, function (e) { U.banner('delstream', 'bad', 'Not deleted.', e.message); });
       });
   }
-  function onStream(name, then) { if (U.current() !== 'stream' || S.name !== name) U.go('stream:' + name, { tab: U.view.tab === 'onair' ? 'onair' : 'streams' }); then(); }
+  function onStream(name, then) { if (U.current() !== 'stream' || S.name !== name) U.go('stream:' + name, { tab: 'streams' }); then(); }
+  // from Templates: give a stream its own copy of a master, starting with the dry run on the stream
+  U.useTemplateOn = function (stream, template) { onStream(stream, function () { openDry(template); }); };
   U.rowActions.stream = function (name, act) {
     if (act === 'tpl') onStream(name, openDry);
     else if (act === 'stop') onStream(name, stopUsing);

@@ -7,6 +7,12 @@
 'use strict';
 const { test, expect } = require('./harness');
 
+// the Add layer menu under the layer list, the one way to add (plan 4.1, as changed 2026-11-03)
+async function addLayer(page, kind) {
+  await page.locator('[data-rowfor="add:list"]').click();
+  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+}
+
 async function openOverlay(page, studio, name) {
   await studio.open();
   await page.locator('[data-tab=overlays]').click();
@@ -234,7 +240,7 @@ test('a free text\'s Y is the top of its first line, and it keeps its top when i
 
 test('a layer never saved shows no saved values; the empty panel offers to add one', async ({ page, studio }) => {
   await openOverlay(page, studio, 'Mixed');
-  await page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Text' }).click();
+  await addLayer(page, 'Text');
   await page.keyboard.press('Enter');
   await page.getByRole('tab', { name: 'Place' }).click();
   await expect(page.locator('[data-insp] .hint').filter({ hasText: 'Saved:' })).toHaveCount(0);
