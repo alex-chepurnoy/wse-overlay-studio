@@ -191,7 +191,7 @@ test('Timing takes a stream time or a date with its offset, and fades and blinks
 // the stream's decoded size as the module reports it, under transcoder (OverlayStudioModule.streamStatus)
 function streamSize(wse, w, h) {
   const orig = wse.streamStatus;
-  wse.streamStatus = function (s) { const r = orig.call(this, s); if (r.transcoder === true) r.transcoder = { state: 'running', decoderWidth: w, decoderHeight: h, encodes: r.encodes }; return r; };
+  wse.streamStatus = function (s) { const r = orig.call(this, s); if (r.transcoder.state === 'running') Object.assign(r.transcoder, { decoderWidth: w, decoderHeight: h }); return r; };
 }
 
 test('the frame checks use the layer\'s drawn area, not its first point', async ({ page, studio, wse }) => {

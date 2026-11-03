@@ -203,13 +203,15 @@ class FakeWse {
   streamStatus(s) {
     if (!s || !s.publishing) return { stream: s ? s.name : null, configured: false, state: 'stopped' };
     const tpl = s.template && this.templates[s.template.replace(/\.xml$/, '')];
-    if (!tpl) return { stream: s.name, configured: false, state: 'running', transcoder: false };
+    // the shape of OverlayStudioModule.streamStatus
+    if (!tpl) return { stream: s.name, configured: false, overlayIndex: null, transcoder: { state: 'not-started', decoderWidth: null, decoderHeight: null, encodes: [] }, template: null, overlayFrom: { source: null, name: null, missing: false }, draw: null };
+    const pass = (e) => e.codec === 'PassThru';
     return {
-      stream: s.name, configured: true, overlayIndex: 16, state: 'running', decoderWidth: 1280, decoderHeight: 720,
-      encodes: (tpl.encodes || []).map((e) => ({ name: e.name, outputStream: e.streamName.replace('${SourceStreamName}', s.name), width: 1280, height: 720, passThrough: e.codec === 'PassThru', overlay: true })),
-      transcoder: true, outputsChanged: false, template: s.template,
-      source: tpl.overlay ? { name: tpl.overlay, missing: !this.overlays[tpl.overlay] } : null,
-      overlayFrom: tpl.overlay ? 'template' : null,
+      stream: s.name, configured: true, overlayIndex: 16,
+      transcoder: { state: 'running', decoderWidth: 1920, decoderHeight: 1080,
+        encodes: (tpl.encodes || []).map((e) => ({ name: e.name, outputStream: e.streamName.replace('${SourceStreamName}', s.name), width: 1280, height: 720, passThrough: pass(e), overlay: !pass(e), slots: pass(e) ? [] : [1] })) },
+      template: { loaded: s.template, own: s.template === s.name + '.xml', list: '${SourceStreamName}.xml,transrate.xml', outputsChanged: false },
+      overlayFrom: { source: tpl.overlay ? 'template' : 'stream', name: tpl.overlay || null, missing: !!tpl.overlay && !this.overlays[tpl.overlay] },
       draw: []
     };
   }

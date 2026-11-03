@@ -45,6 +45,26 @@ test('a click places text at the click point at its usual size', async ({ page, 
   expect(o.zOrder, 'on top of the page').toBe(2);
 });
 
+test('on a smaller stream a new layer starts at a size scaled to it, where it was clicked', async ({ page, studio, wse }) => {
+  // layers are in the stream's own pixels; the usual sizes are for 1080p, so a 512 x 288 stream gets them at 288/1080
+  const orig = wse.streamStatus;
+  wse.streamStatus = function (s) { const r = orig.call(this, s); if (r.transcoder.state === 'running') Object.assign(r.transcoder, { decoderWidth: 512, decoderHeight: 288 }); return r; };
+  await openOverlay(page, studio, 'Scoreboard');
+  const f = await frame(page).boundingBox(), pt = (x, y) => ({ x: f.x + x * f.width / 512, y: f.y + y * f.height / 288 });
+  const add = page.getByRole('toolbar', { name: 'Add a layer' });
+  await add.getByRole('button', { name: 'Text' }).click();
+  let p = pt(100, 60); await page.mouse.click(p.x, p.y);
+  await add.getByRole('button', { name: 'Image' }).click();
+  await expect(page.locator('[data-placehint]')).toBeVisible();
+  p = pt(400, 100); await page.mouse.click(p.x, p.y);
+  const objs = (await saved(page, wse, 'Scoreboard')).objects, text = objs.find((x) => x.id === 'text-1'), img = objs.find((x) => x.id === 'image-1');
+  expect(text.fontSize).toBe(13);
+  expect(Math.abs(text.y - 73)).toBeLessThanOrEqual(2);
+  expect(Math.abs(img.w - 85)).toBeLessThanOrEqual(2);
+  expect(Math.abs(img.h - 48)).toBeLessThanOrEqual(2);
+  expect(Math.abs(img.x - 400), 'the click point, not pushed left to fit a 1080p size').toBeLessThanOrEqual(2);
+});
+
 test('a drag draws a shape at the dragged size; Escape cancels placing', async ({ page, studio, wse }) => {
   await openOverlay(page, studio, 'Scoreboard');
   const shape = page.getByRole('toolbar', { name: 'Add a layer' }).getByRole('button', { name: 'Add a shape' });

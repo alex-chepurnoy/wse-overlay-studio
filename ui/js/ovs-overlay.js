@@ -1447,11 +1447,13 @@
     if (id !== current && byId(id)) return 'A layer with this id exists.';
     return null;
   }
-  // a new layer of this kind; at is the click point {x, y}, a drag {x, y, x2, y2}, or null for the frame's center
+  // a new layer of this kind; at is the click point {x, y}, a drag {x, y, x2, y2}, or null for the frame's center.
+  // Layers are in the stream's own pixels, so the default sizes, set for 1080p, scale with the stream's height
   function layerFor(kind, at, s) {
+    var k = s.h / 1080, sz = function (n) { return Math.max(2, Math.round(n * k)); };
     var box = { rectangle: [320, 120], rounded: [320, 120], square: [160, 160], ellipse: [240, 140], circle: [160, 160], line: [300, 0], arrow: [300, 0],
       triangle: [200, 170], image: [320, 180], text: [360, 64], datetime: [300, 64] }[kind];
-    var x, y, w = box[0], h = box[1], drag = at && at.x2 !== undefined;
+    var x, y, w = sz(box[0]), h = kind === 'line' || kind === 'arrow' ? 0 : sz(box[1]), drag = at && at.x2 !== undefined;
     if (drag) {
       x = Math.min(at.x, at.x2); y = Math.min(at.y, at.y2); w = Math.abs(at.x2 - at.x); h = Math.abs(at.y2 - at.y);
       // a square or circle keeps its sides equal
@@ -1462,10 +1464,10 @@
     var o = { opacity: 100 };
     if (kind === 'text' || kind === 'datetime') {
       o.id = freeId(kind === 'text' ? 'text' : 'clock'); o.type = 'string';
-      o.text = kind === 'text' ? 'Text' : '{time:HH:mm:ss}'; o.font = kind === 'text' ? 'Fira Sans' : 'Fira Mono'; o.fontSize = 48; o.color = 'white';
+      o.text = kind === 'text' ? 'Text' : '{time:HH:mm:ss}'; o.font = kind === 'text' ? 'Fira Sans' : 'Fira Mono'; o.fontSize = sz(48); o.color = 'white';
       // a drawn text is a box it wraps in; a placed one starts where it was clicked, its first line's baseline a size below
       if (drag) { o.box = true; o.x = even(x); o.y = even(y); o.w = even(Math.max(w, 40)); o.h = even(Math.max(h, 40)); }
-      else { o.x = even(x); o.y = even(y + 48); }
+      else { o.x = even(x); o.y = even(y + o.fontSize); }
       return o;
     }
     if (kind === 'image') { o.id = freeId('image'); o.type = 'image'; o.x = even(x); o.y = even(y); o.w = even(Math.max(w, 8)); o.h = even(Math.max(h, 8)); return o; }
@@ -1485,7 +1487,7 @@
     }
     o.type = kind === 'ellipse' || kind === 'circle' ? 'ellipse' : 'rectangle'; o.fillColor = 'rgb(30,90,200)';
     o.x = even(x); o.y = even(y); o.w = even(w); o.h = even(h);
-    if (kind === 'rounded') { o.arcWidth = 24; o.arcHeight = 24; }
+    if (kind === 'rounded') { o.arcWidth = even(sz(24)); o.arcHeight = o.arcWidth; }
     return o;
   }
   function place(kind, at) {
