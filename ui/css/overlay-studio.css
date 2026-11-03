@@ -103,6 +103,8 @@
 .ovs-plugin input[type="checkbox"], .ovs-plugin input[type="radio"] { width: auto; height: auto; margin: 0 6px 0 0; vertical-align: middle; accent-color: var(--ink); }
 .ovs-plugin input[type="file"] { font-size: 12px; }
 .ovs-plugin .fld { display: grid; gap: 4px; margin-bottom: var(--s-3); }
+/* a label is as tall with its help button as without, so fields side by side line up */
+.ovs-plugin .fld > .f { display: flex; align-items: center; min-height: 20px; }
 .ovs-plugin .fld:last-child { margin-bottom: 0; }
 .ovs-plugin .fld:has(> label.check) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
 .ovs-plugin .fld:has(> label.check) > .hint, .ovs-plugin .fld:has(> label.check) > .err { flex-basis: 100%; }
@@ -113,7 +115,9 @@
 .ovs-plugin .key { font-family: var(--mono); font-size: 11px; color: var(--text-3); font-weight: 400; }
 .ovs-plugin:not([data-keys="on"]) .key, .ovs-plugin:not([data-keys="on"]) .key-note { display: none; }
 .ovs-plugin .drawer .key { display: inline; }
-.ovs-plugin .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2) var(--s-3); }
+.ovs-plugin .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2) var(--s-3); align-items: start; }
+/* a taller neighbor does not stretch a field's own rows apart */
+.ovs-plugin .grid2 > .fld { align-content: start; }
 .ovs-plugin .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-1); }
 .ovs-plugin .cfield { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .ovs-plugin .cfield input[type="color"] { flex: none; width: 34px; height: 30px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); cursor: pointer; }
@@ -699,6 +703,8 @@
 .ovs-plugin .every { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); white-space: nowrap; }
 .ovs-plugin .every input { width: 72px; }
 .ovs-plugin .ovset { margin-top: var(--s-4); padding-top: var(--s-3); border-top: 1px solid var(--border); }
+/* with no web page there is no capture speed, and Advanced drawing needs no rule of its own */
+.ovs-plugin .ovset.bare { margin-top: 0; padding-top: 0; border-top: 0; }
 .ovs-plugin .ovset details.adv { margin-top: var(--s-3); }
 .ovs-plugin .ovset details.adv > summary { font-size: 13px; color: var(--text-2); }
 

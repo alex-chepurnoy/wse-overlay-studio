@@ -278,3 +278,25 @@ test.describe('read-only', () => {
     await expect(insp).toContainText('overlaystudio/logo.png');
   });
 });
+
+test('capture speed shows only for an overlay with a web page', async ({ page, studio }) => {
+  // the module takes a page's new frame at the capture speed; text, shapes, images and clocks redraw on their own
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, 'HOME 2 - 1').click();
+  await expect(page.locator('[data-insp] [data-ospeed]')).toHaveCount(0);
+  await expect(page.locator('#ovs-f-refreshRate')).toHaveCount(0);
+  await expect(page.locator('[data-insp] details[data-ovadv]'), 'Advanced drawing applies to every layer').toHaveCount(1);
+  await page.locator('[data-list]').getByText('Scoreboard', { exact: true }).first().click();
+  await expect(page.locator('#ovs-f-refreshRate')).toHaveCount(1);
+});
+
+test('fields side by side line up whether or not their label has a help button', async ({ page, studio }) => {
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, 'HOME 2 - 1').click();
+  await page.locator('details[data-boxadv] summary').click();
+  const top = async (name) => Math.round((await field(page, name).boundingBox()).y);
+  // Style has no help button and Align has one; Corners and Line height share a row the same way
+  expect(await top('fontStyle')).toBe(await top('align'));
+  expect(await top('radius')).toBe(await top('lineHeight'));
+  expect(await top('outlineColor')).toBe(await top('outlineWidth'));
+});
