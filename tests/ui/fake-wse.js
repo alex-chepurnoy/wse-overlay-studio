@@ -41,6 +41,15 @@ function kindsOf(ov) {
   return ['webPage', 'text', 'datetime', 'shape', 'image'].filter((k) => found.has(k));
 }
 
+// the image files an overlay draws, and a hash of its content with keys sorted (OverlayStore.imageFiles, hash)
+function imageFilesOf(ov) { return [...new Set((ov.objects || []).filter((o) => o.type === 'image' && o.imageFile).map((o) => o.imageFile))].sort(); }
+function sorted(v) {
+  if (Array.isArray(v)) return v.map(sorted);
+  if (v && typeof v === 'object') return Object.keys(v).sort().reduce((a, k) => { a[k] = sorted(v[k]); return a; }, {});
+  return v;
+}
+function hashOf(ov) { const c = Object.assign({}, ov); delete c.name; return require('crypto').createHash('sha256').update(JSON.stringify(sorted(c))).digest('hex'); }
+
 class FakeWse {
   constructor(opts = {}) {
     this.opts = Object.assign({ bridge: true, write: true, serviceRunning: true }, opts);
@@ -55,6 +64,9 @@ class FakeWse {
     this.formats = [];
     // the draft renders the page asked for, and what a test sets them to answer
     this.renders = [];
+    // other applications' overlays, by application, and the streams showing each there
+    this.otherOverlays = {};
+    this.otherShowing = {};
     // the thumbnails asked for, by overlay name, and how many to refuse first
     this.thumbs = [];
     this.thumbFail = 0;
@@ -159,6 +171,18 @@ class FakeWse {
     }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/state$/.exec(r)) && method === 'GET') {
       return this.state(q.get('rev'));
+    }
+    // the overlays listing of an application (OverlaysConfig), for Copy to other applications and the image check
+    if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays$/.exec(r)) && method === 'GET') {
+      const app = decodeURIComponent(m[1]), s = this.store(app), on = this.otherShowing[app] || {};
+      return { overlays: Object.keys(s).sort().map((n) => ({ name: n, pages: (s[n].objects || []).length, kinds: kindsOf(s[n]), imageFiles: imageFilesOf(s[n]), hash: hashOf(s[n]),
+        showingOn: app === 'live' ? [] : on[n] || [] })) };
+    }
+    if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays\/([^/]+)$/.exec(r)) && decodeURIComponent(m[1]) !== 'live') {
+      // another application's overlays: read and written apart from live's
+      const s = this.store(decodeURIComponent(m[1])), name = decodeURIComponent(m[2]);
+      if (method === 'GET') return s[name] ? Object.assign({ name }, s[name]) : { status: 404, json: { success: false, message: 'No overlay ' + name } };
+      if (method === 'POST') { this.posts.push({ path: r, body }); s[name] = body; return { success: true, name, updatedStreams: [], warnings: [] }; }
     }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays\/([^/]+)$/.exec(r))) {
       const name = decodeURIComponent(m[2]);
@@ -320,6 +344,8 @@ class FakeWse {
     };
   }
 
+  store(app) { return app === 'live' ? this.overlays : (this.otherOverlays[app] = this.otherOverlays[app] || {}); }
+
   state(rev) {
     const revision = 'r' + this.revision;
     if (rev === revision) return { revision, unchanged: true, viewers: { cam1: 3, cam2: 0 } };
@@ -334,6 +360,7 @@ class FakeWse {
     });
     const overlays = Object.keys(this.overlays).sort().map((n) => ({
       name: n, pages: (this.overlays[n].objects || []).length, modified: this.modified[n], kinds: kindsOf(this.overlays[n]),
+      imageFiles: imageFilesOf(this.overlays[n]), hash: hashOf(this.overlays[n]),
       templates: Object.keys(this.templates).filter((t) => this.templates[t].overlay === n),
       showingOn: this.streams.filter((s) => s.publishing && this.overlayOf(s) === n).map((s) => s.name)
     }));

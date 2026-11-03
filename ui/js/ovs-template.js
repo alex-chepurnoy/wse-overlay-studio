@@ -475,7 +475,8 @@
       '<span class="small muted">' + kindIcons(x.name) + 'Overlay' + (same.length > 1 ? ', ' + (k === 0 ? 'drawn under the others here' : k === same.length - 1 ? 'drawn on top here' : 'drawn ' + ordinal(k + 1) + ' here') : '') + '</span></div>' +
       '<div class="ly-acts">' + (k > 0 ? '<button class="btn sm icon ghost" type="button" data-ovup="' + i + '" aria-label="Move ' + U.esc(x.name || 'overlay') + ' down the stack" title="Draw it under the one before">' + U.icon('up') + '</button>' : '') +
       (canMove ? '<button class="btn sm ghost" type="button" data-ovmove="' + i + '" title="' + (other === 'input' ? 'Draw it on the input, so every video output shows it' : 'Draw it on chosen outputs only') + '">' + U.icon(other === 'input' ? 'input' : 'outputs') + (other === 'input' ? 'To Decode' : 'To outputs') + '</button>' : '') +
-      '<button class="btn sm icon ghost" type="button" data-ovrm="' + i + '" aria-label="Remove overlay ' + U.esc(x.name || (i + 1)) + '">' + U.icon('close') + '</button></div></div>' +
+      copyButton(x.name) +
+      '<button class="btn sm icon ghost" type="button" data-ovrm="' + i + '" aria-label="Remove overlay ' + U.esc(x.name || (i + 1)) + '">' + U.icon('close') + '</button></div></div>' + copyPanelHtml(x.name) +
       (missing ? '<div class="note bad"><span class="dot bad"></span><div>Overlay <strong>' + U.esc(x.name) + '</strong> does not exist in ' + U.esc(U.app) + '. Overlays are saved per application.</div></div>' : '') +
       (stage === 'outputs' ? '<div class="lyc-row"><span class="f">On</span>' + outPicks('data-ovout', i, vids, function (o) { return x.outputs.indexOf(o.name) >= 0; }) + '</div>' +
         (picked === vids.length && vids.length ? '<span class="bdg">Every output picked: saved on the input, in Decode</span>' : !picked ? '<span class="bdg warn">Pick at least one output</span>' : '') : '') + '</div>';
@@ -635,6 +636,91 @@
       redraw();
     }
   }
+  /* ---------- Copy to other applications (plan 4.5) ---------- */
+  // Overlays are saved per application and templates per virtual host, and which applications load a template cannot
+  // be read reliably, so the card offers the overlay to every other application with the module, each marked by
+  // comparing the overlay's hash (OverlaysConfig). Image files are the virtual host's, so a copy moves no image.
+  function otherApps() { return (U.apps || []).filter(function (a) { return a.installed && a.name !== U.app; }); }
+  function copyButton(name) {
+    var o = name && U.overlayEntry(name);
+    if (ro() || !o || !otherApps().length) return '';
+    var open = S.copy && S.copy.name === name;
+    return '<button class="btn sm ghost" type="button" data-write data-ovcopy="' + U.esc(name) + '" aria-expanded="' + open + '" title="Copy to other applications">' + U.icon('copy') + 'Copy</button>';
+  }
+  function copyPanelHtml(name) {
+    var c = S.copy;
+    if (!c || c.name !== name) return '';
+    var apps = otherApps(), picked = apps.filter(function (a) { return c.picked[a.name]; });
+    return '<div class="copyp" data-copyp><div class="sec-h">Copy ' + U.esc(name) + ' to other applications</div>' +
+      '<p class="small muted">Overlays are saved per application. This template draws ' + U.esc(name) + ' as it is in ' + U.esc(U.app) + '; a stream in another application draws that application\'s ' + U.esc(name) + '. Image files are shared, so none is copied.</p>' +
+      '<div class="stack">' + apps.map(function (a) {
+        var r = c.rows[a.name] || { state: 'loading' }, can = r.state === 'differs' || r.state === 'missing';
+        var word = { loading: 'Checking...', has: 'Has it', differs: 'Differs', missing: 'Missing', error: 'Could not read' }[r.state];
+        return '<div class="hrow copyrow" data-copyrow="' + U.esc(a.name) + '"><label class="check"><input type="checkbox" data-copyapp="' + U.esc(a.name) + '"' + (c.picked[a.name] ? ' checked' : '') + (can && !c.busy ? '' : ' disabled') + '>' + U.esc(a.name) + '</label>' +
+          '<span class="bdg' + (r.state === 'has' ? ' on' : r.state === 'differs' || r.state === 'error' ? ' warn' : '') + '">' + word + '</span>' +
+          (r.onAir && r.onAir.length ? '<span class="small warn-text">On air there on ' + U.esc(r.onAir.join(', ')) + '</span>' : '') +
+          (r.state === 'error' ? '<span class="small faint">' + U.esc(r.error || '') + '</span>' : '') + '</div>';
+      }).join('') + '</div>' +
+      '<div class="hrow"><span class="spacer"></span><button type="button" class="btn sm" data-copyclose>Close</button>' +
+      '<button type="button" class="btn sm primary" data-copygo' + (picked.length && !c.busy ? '' : ' disabled') + '>' + (c.busy ? 'Copying...' : 'Copy to ' + picked.length + ' application' + (picked.length === 1 ? '' : 's')) + '</button></div></div>';
+  }
+  function copyCheck() {
+    var c = S.copy, mine = U.overlayEntry(c.name);
+    otherApps().forEach(function (a) {
+      c.rows[a.name] = { state: 'loading' };
+      U.api.get(U.appPath(a.name) + '/overlays').then(function (r) {
+        if (S.copy !== c) return;
+        var there = ((r && r.overlays) || []).filter(function (o) { return o.name === c.name; })[0];
+        c.rows[a.name] = !there ? { state: 'missing' } : { state: there.hash && mine && there.hash === mine.hash ? 'has' : 'differs', onAir: there.showingOn || [] };
+        if (c.rows[a.name].state === 'has') delete c.picked[a.name];
+        redraw();
+      }, function (e) { if (S.copy !== c) return; c.rows[a.name] = { state: 'error', error: e.message }; redraw(); });
+    });
+  }
+  function bindCopy() {
+    el.body.querySelectorAll('[data-ovcopy]').forEach(function (b) {
+      b.onclick = function () {
+        var n = b.getAttribute('data-ovcopy');
+        if (S.copy && S.copy.name === n) { S.copy = null; redraw(); return; }
+        S.copy = { name: n, rows: {}, picked: {}, busy: false };
+        copyCheck(); redraw();
+      };
+    });
+    var p = el.body.querySelector('[data-copyp]');
+    if (!p) return;
+    var c = S.copy;
+    p.querySelectorAll('[data-copyapp]').forEach(function (x) { x.onchange = function () { if (x.checked) c.picked[x.getAttribute('data-copyapp')] = true; else delete c.picked[x.getAttribute('data-copyapp')]; redraw(); }; });
+    p.querySelector('[data-copyclose]').onclick = function () { S.copy = null; redraw(); };
+    p.querySelector('[data-copygo]').onclick = function () { copyGo(c); };
+  }
+  function copyGo(c) {
+    var to = Object.keys(c.picked), over = to.filter(function (a) { return (c.rows[a] || {}).state === 'differs'; });
+    var live = over.filter(function (a) { return (c.rows[a].onAir || []).length; });
+    // a different version there is replaced, and on air at once, since saving an overlay reapplies it (NamedOverlayConfig)
+    var ask = !over.length ? Promise.resolve(true) : U.confirm('Replace ' + c.name + ' in ' + over.join(', ') + '?',
+      '<p>' + U.esc(over.join(', ')) + (over.length > 1 ? ' have' : ' has') + ' a different ' + U.esc(c.name) + '. Copying replaces it with the one in ' + U.esc(U.app) + '.</p>' +
+      (live.length ? '<p><b>On air:</b> ' + live.map(function (a) { return U.esc(a) + ' shows it on ' + U.esc(c.rows[a].onAir.join(', ')); }).join('; ') + '. Viewers see the copy at once.</p>' : ''), 'Replace', !!live.length);
+    ask.then(function (ok) {
+      if (!ok || S.copy !== c) return;
+      c.busy = true; redraw();
+      U.api.get(U.appPath() + '/overlays/' + U.enc(c.name)).then(function (body) {
+        delete body.name;
+        var done = [], failed = [];
+        return to.reduce(function (pr, a) {
+          return pr.then(function () {
+            return U.api.post(U.appPath(a) + '/overlays/' + U.enc(c.name), body).then(function () { done.push(a); }, function (e) { failed.push(a + ': ' + e.message); });
+          });
+        }, Promise.resolve()).then(function () {
+          if (S.copy !== c) return;
+          c.busy = false; c.picked = {};
+          if (done.length) U.toast('Copied ' + c.name + ' to ' + done.join(', ') + '.');
+          if (failed.length) U.toast('Not copied to ' + failed.join('; '), { level: 'bad' });
+          copyCheck(); redraw();
+        });
+      }, function (e) { c.busy = false; redraw(); U.toast('Could not read ' + c.name + ': ' + e.message, { level: 'bad' }); });
+    });
+  }
+
   U.templateAddingLabel = function (a) { return a && a.key ? 'template ' + a.key : 'the new template'; };
 
   // thumbnails (GET .../thumbnail): one at a time, a 429 waits and tries again; kept per overlay until it is saved again
@@ -727,6 +813,7 @@
     });
     bindPicker(d);
     bindOvPicker();
+    bindCopy();
   }
 
   // pixels encoded per second over the enabled video outputs, for an assumed 1080p 30 fps source, in 720p 30 fps units
@@ -1111,7 +1198,8 @@
           '<div class="ly-main"><select data-io-ov="' + i + '" aria-label="Overlay ' + (i + 1) + '"' + (changed ? ' class="is-draft"' : '') + '>' + overlayOptions(x.name, x.name ? null : 'Pick an overlay', f.overlays, x.name) + '</select>' +
           '<span class="small muted">' + (changed && was ? 'Saved: ' + U.esc(was.name) : 'Overlay') + '</span></div>' +
           '<div class="ly-acts">' + (i > 0 ? '<button class="btn sm icon ghost" type="button" data-io-up="' + i + '" aria-label="Move ' + U.esc(x.name || 'overlay') + ' down the stack">' + U.icon('up') + '</button>' : '') +
-          '<button class="btn sm icon ghost" type="button" data-io-rm="' + i + '" aria-label="Remove overlay ' + U.esc(x.name || (i + 1)) + '">' + U.icon('close') + '</button></div></div>' +
+          copyButton(x.name) +
+          '<button class="btn sm icon ghost" type="button" data-io-rm="' + i + '" aria-label="Remove overlay ' + U.esc(x.name || (i + 1)) + '">' + U.icon('close') + '</button></div></div>' + copyPanelHtml(x.name) +
           '<div class="lyc-row"><span class="f">On</span><div class="ly-outs">' + c.map(function (e) {
             var on = x.on.indexOf(e.name) >= 0;
             return '<label class="pilltog' + (on ? ' on' : '') + '"><input type="checkbox" data-io-enc="' + i + '" value="' + U.esc(e.name) + '"' + (on ? ' checked' : '') + '>' + U.esc(e.name) + '</label>'; }).join('') + '</div></div>' +
@@ -1136,6 +1224,7 @@
       x.onclick = function () { var i = +x.getAttribute('data-io-up'), a = f.overlays[i]; f.overlays[i] = f.overlays[i - 1]; f.overlays[i - 1] = a; changed(); };
     });
     bindOvPicker();
+    bindCopy();
     loadThumbs();
   }
   // why the in-place form cannot be saved, or null
@@ -1350,7 +1439,7 @@
       }
       if (S.kind === 'new') { var n = el.body.querySelector('[data-d=name]'); if (n && !n.value) n.focus(); }
     },
-    hide: function () { stash(); S.pick = false; S.ovPick = null; },
+    hide: function () { stash(); S.pick = false; S.ovPick = null; S.copy = null; },
     state: function () { if (U.current() === 'template') onState(); },
     app: function () { mem = {}; S.sel = null; S.kind = null; S.draft = null; S.form = null; S.base = null; S.conflict = false; S.lib = null; S.savedNote = null; },
     access: function () { if (U.current() === 'template') { renderHead(); renderBody(); renderUsedBy(); renderBar(); } },
