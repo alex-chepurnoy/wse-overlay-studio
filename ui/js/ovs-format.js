@@ -47,7 +47,9 @@
   /* ---------- the editor's clock ---------- */
   // stream time and a missing target count from when the editor opened (plan 3.3, 3.7); Freeze stops time for editing
   var opened = Date.now(), frozenAt = null, listeners = [];
-  T.start = function () { opened = Date.now(); };
+  // a newly opened overlay starts its own clock: Freeze from the last one would hold its clocks at the old time and,
+  // being before its start, read every stream+N layer as hidden
+  T.start = function () { opened = Date.now(); frozenAt = null; };
   T.now = function () { return frozenAt != null ? frozenAt : Date.now(); };
   T.streamStart = function () { return opened; };
   T.frozen = function () { return frozenAt != null; };
@@ -66,13 +68,10 @@
     return { kind: p.kind, pattern: p.pattern, zone: o.timeZone || '', locale: o.locale || '',
       target: T.needsTarget(p.kind) ? o.target || nominal() : '', endText: T.needsTarget(p.kind) ? o.endText || '' : '' };
   }
-  function keyOf(q) { return [q.kind, q.pattern, q.zone, q.locale, q.target, q.endText].join('\u0001'); }
-  // samples start on a boundary of their step, from the moment the token counts from, so each one is the value shown
-  // for the whole of its step
-  function aligned(q, step, t) {
-    var base = q.kind === 'time' ? 0 : q.kind === 'streamtime' ? opened : Date.parse(q.target) || 0;
-    return base + Math.floor((t - base) / step) * step;
-  }
+  // stream time counts from when the editor opened, so its samples belong to that moment
+  function keyOf(q) { return [q.kind, q.pattern, q.zone, q.locale, q.target, q.endText, q.kind === 'streamtime' ? opened : ''].join('\u0001'); }
+  // a failed answer is asked again after this long, keeping the samples it had
+  var RETRY_MS = 5000;
   function ask(q, t) {
     var k = keyOf(q), e = cache[k];
     if (e && e.pending) return;
@@ -85,25 +84,39 @@
     var w = wanted; wanted = {};
     Object.keys(w).forEach(function (k) {
       var q = w[k].q, now = w[k].t, prev = cache[k];
-      cache[k] = { pending: true, from: prev && prev.from, step: prev && prev.step, samples: prev ? prev.samples : [], error: prev ? prev.error : null };
+      cache[k] = { pending: true, at: prev ? prev.at : [], samples: prev ? prev.samples : [], next: prev ? prev.next : null, error: prev ? prev.error : null };
       var qs = Object.keys(q).filter(function (x) { return q[x] !== ''; }).map(function (x) { return x + '=' + encodeURIComponent(q[x]); });
       qs.push('now=' + now, 'streamStart=' + opened, 'count=120');
       U.api.get('/format?' + qs.join('&')).then(function (r) {
         if (r && r.defaultZone) defaults = { zone: r.defaultZone, locale: r.defaultLocale };
-        var step = r && r.stepMs > 0 ? r.stepMs : 1000;
-        cache[k] = { from: now, step: step, samples: (r && r.samples) || [], error: (r && r.error) || null };
+        var samples = (r && r.samples) || [], step = r && r.stepMs > 0 ? r.stepMs : 1000;
+        // each sample's start, when the text changes in the token's zone (FormatConfig); a module without it samples
+        // one step apart from now
+        var at = r && r.at && r.at.length === samples.length ? r.at : samples.map(function (s, i) { return now + i * step; });
+        var next = r && 'next' in r ? r.next : at.length ? at[at.length - 1] + step : null;
+        cache[k] = { at: at, samples: samples, next: next, error: (r && r.error) || null };
         changed();
-      }, function () { cache[k] = { from: now, step: 1000, samples: [], error: null, failed: true }; });
+      }, function () {
+        // a network blip or a sign-out: the samples already here keep showing, and it asks again shortly
+        var had = cache[k] || {};
+        cache[k] = { at: had.at || [], samples: had.samples || [], next: had.next, error: had.error || null, failedAt: Date.now() };
+        changed();
+      });
     });
   }
   /** A token's value at t, or null until its samples come; asks again before they run out. */
   T.sample = function (p, o, t) {
     var q = params(p, o), k = keyOf(q), e = cache[k];
-    if (!e || (!e.samples.length && !e.error && !e.pending && !e.failed)) { ask(q, aligned(q, 1000, t)); return null; }
+    var resting = e && e.failedAt && Date.now() - e.failedAt < RETRY_MS;
+    if (!e || (!e.samples.length && !e.error && !e.pending && !resting)) { ask(q, t); return null; }
     if (e.error || !e.samples.length) return null;
-    var i = Math.floor((t - e.from) / e.step);
-    if ((i < 0 || i > e.samples.length - 30) && !e.pending && !e.failed) ask(q, aligned(q, e.step, t));
-    return e.samples[Math.max(0, Math.min(i, e.samples.length - 1))];
+    // the last sample that has started by t
+    var i = e.at.length - 1;
+    while (i > 0 && e.at[i] > t) i--;
+    // asked again before the samples run out, or for a time before them (Freeze, a clock set back)
+    var low = t < e.at[0], late = e.next != null && i > e.samples.length - 30;
+    if ((low || late) && !e.pending && !resting) ask(q, t);
+    return e.samples[i];
   };
   /** The validation error the server gave for a token, or null. */
   T.errorOf = function (p, o) { var e = cache[keyOf(params(p, o))]; return e ? e.error : null; };

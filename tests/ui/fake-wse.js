@@ -184,17 +184,27 @@ class FakeWse {
     return undefined;
   }
 
-  // as FormatConfig: count samples one step apart from now, or the error; a pattern holding "bad" is refused. A sample
-  // is the pattern with the second it stands for, so a test can tell the samples apart and see them tick
+  // as FormatConfig: count samples from now, each with the moment it starts to show (each start of the pattern's
+  // smallest unit, in UTC here), "next" after the last, or the error; a pattern holding "bad" is refused. A sample is
+  // the pattern with the number of that unit since 1970, so a test can tell which one shows. formatFail answers that
+  // many asks with a 500 first.
   format(q) {
+    if (this.formatFail > 0) { this.formatFail--; return { status: 500, json: { success: false, message: 'format failed in the fake' } }; }
     const kind = q.get('kind') || 'time', pattern = q.get('pattern') || '', now = Number(q.get('now')), count = Math.min(120, Number(q.get('count') || 1));
     this.formats.push({ kind, pattern, zone: q.get('zone'), locale: q.get('locale'), target: q.get('target'), now, streamStart: Number(q.get('streamStart')) });
-    const out = { defaultZone: 'America/New_York', defaultLocale: 'en-US', kind, pattern, samples: [], error: null };
+    const out = { defaultZone: 'America/New_York', defaultLocale: 'en-US', kind, pattern, samples: [], at: [], next: null, error: null };
     if (/bad/.test(pattern)) { out.error = 'Unknown pattern letter: b'; return out; }
     const plain = pattern.replace(/'[^']*'/g, '');
     const unit = /S|s/.test(plain) ? 1000 : /m/.test(plain) ? 60000 : /[HhKkaB]/.test(plain) ? 3600000 : 86400000;
     out.stepMs = Math.max(1000, unit);
-    for (let i = 0; i < count; i++) out.samples.push(pattern + ' #' + Math.floor((now + i * out.stepMs) / 1000));
+    let at = now;
+    for (let i = 0; i < count; i++) {
+      // stream time counts from the stream's start; everything else by the clock
+      out.samples.push(pattern + ' #' + Math.floor((kind === 'streamtime' ? at - Number(q.get('streamStart')) : at) / unit));
+      out.at.push(at);
+      at = Math.max((Math.floor(at / unit) + 1) * unit, at + 1000);
+    }
+    out.next = at;
     return out;
   }
 

@@ -175,3 +175,80 @@ test('a clock\'s Text tab offers every font even when the list comes after the t
   await font.selectOption('PT Serif');
   expect(obj(await saved(page, wse, 'Mixed'), 'clock').font).toBe('PT Serif');
 });
+
+test('a minute clock changes when the minute does, not a minute after the editor asked', async ({ page, studio }) => {
+  // 45 s into a minute: the sample for 10:00 shows until 10:01:00, then 10:01's
+  const t0 = Date.parse('2027-03-14T10:00:45Z');
+  await page.clock.install({ time: t0 });
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, CLOCK).click();
+  await page.locator('[data-fpreset="HH:mm"]').click();
+  await expect(clockText(page)).toHaveText('HH:mm #' + Math.floor(t0 / 60000));
+  await page.clock.fastForward(20000);
+  await expect(clockText(page), 'at 10:01:05 the new minute shows').toHaveText('HH:mm #' + Math.floor((t0 + 60000) / 60000));
+});
+
+test('a failed sample answer keeps the samples it had and asks again', async ({ page, studio, wse }) => {
+  wse.formatFail = 1;
+  await openOverlay(page, studio, 'Mixed');
+  await expect(clockText(page), 'the first answer failed').toHaveText('{time:HH:mm:ss}');
+  await expect(clockText(page), 'asked again a few seconds later').toHaveText(CLOCK, { timeout: 9000 });
+});
+
+test('stream time counts from each opening, and opening an overlay ends Freeze', async ({ page, studio }) => {
+  const t0 = Date.parse('2027-03-14T10:00:00Z');
+  await page.clock.install({ time: t0 });
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, CLOCK).click();
+  await page.locator('#ovs-fkind').selectOption('streamtime');
+  await expect(clockText(page)).toHaveText(/^H:mm:ss #[0-2]$/);
+  await page.locator('[data-freeze]').click();
+  await expect(page.locator('[data-freeze]')).toHaveAttribute('aria-pressed', 'true');
+  await page.clock.fastForward(600000);
+  // the draft is kept in memory while another overlay is open, and opening it again starts its clock again
+  await page.locator('[data-list]').getByText('Scoreboard', { exact: true }).first().click();
+  await page.locator('[data-list]').getByText('Mixed', { exact: true }).first().click();
+  await expect(page.locator('[data-freeze]'), 'Freeze ended').toHaveAttribute('aria-pressed', 'false');
+  await expect(clockText(page), 'stream time from this opening, not ten minutes on').toHaveText(/^H:mm:ss #[0-2]$/);
+});
+
+test('live values: a token in live text ticks, a renamed layer keeps its value, and data never reads as signed out', async ({ page, studio, wse }) => {
+  // the marker of the Manager's sign-in page, inside live text, is data
+  wse.live.Mixed = { score: { text: 'Now {time:HH:mm:ss}', color: 'red' }, ring: { text: '<!--Redirect to Login--> x' } };
+  await openOverlay(page, studio, 'Mixed');
+  await expect(page.locator('.pg[data-id="score"] text').last(), 'the live text\'s token draws its sample').toHaveText(/^Now HH:mm:ss #\d+$/);
+  await expect(page.locator('.banners [data-banner=signedout]')).toHaveCount(0);
+  // renamed in the draft, the layer still has the value the video shows, and Clear clears it by its saved id
+  // the row shows the live text, ticking
+  await expect(page.locator('[data-layers] .prow[data-id="score"] .lname')).toHaveText(/^Now HH:mm:ss #\d+$/);
+  await page.locator('[data-layers] .prow[data-id="score"]').click();
+  await page.locator('[data-lid]').fill('score2');
+  await page.locator('[data-lid]').press('Enter');
+  await expect(page.locator('[data-livenote]')).toContainText('Live text and color are on air');
+  await page.locator('[data-livenote]').getByRole('button', { name: 'Clear' }).click();
+  await expect(page.locator('[data-livenote]')).toHaveCount(0);
+  expect(wse.posts.filter((p) => p.path.endsWith('/overlays/Mixed/live')).pop().body).toEqual({ clear: 'score' });
+});
+
+test('a live opacity on a web page shows on the canvas', async ({ page, studio, wse }) => {
+  wse.live.Scoreboard = { score: { opacity: 40 } };
+  await openOverlay(page, studio, 'Scoreboard');
+  // selected, a layer shows its saved values; Escape on the canvas leaves it unselected
+  await page.locator('[data-frame]').focus();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => page.locator('.pg[data-id="score"] img').evaluate((e) => e.style.opacity)).toBe('0.4');
+});
+
+test('the zone is taken as Java takes it: offsets yes, a region in the wrong case no', async ({ page, studio }) => {
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, CLOCK).click();
+  const zone = field(page, 'timeZone'), err = page.locator('[data-err-for=timeZone]');
+  await zone.fill('america/new_york');
+  await expect(err).toContainText('America/New_York');
+  await zone.fill('GMT+5');
+  await expect(err).toHaveText('');
+  await zone.fill('UTC+01:00');
+  await expect(err).toHaveText('');
+  await zone.fill('Asia/Kolkata');
+  await expect(err).toHaveText('');
+});

@@ -17,8 +17,10 @@ import com.wowza.wms.rest.WMSConfig;
 
 /**
  * GET .../format?pattern=&kind=&zone=&locale=&target=&now=&streamStart=&count= (plan 3.7): count samples (at most
- * 120) of one token, one per step from now, the step being the larger of the pattern's smallest unit and one second,
- * with the validation error if any. The browser cannot format java.time patterns or the duration grammar in the
+ * 120) of one token from now, each with "at", the moment it starts to show: now, then each moment the text next reads
+ * differently (TextTokens.nextChange, in the token's zone), at least a second apart. "next" is when the text changes
+ * after the last sample, null when it never does. So the page shows each value from the moment the video does, not
+ * from when it asked. "stepMs" is kept for older pages. The validation error, if any. The browser cannot format java.time patterns or the duration grammar in the
  * server's zone, so the page asks here for samples and checks before a save. Every answer carries the server's
  * default zone and locale. Writes nothing; read-only users may call it.
  */
@@ -38,7 +40,10 @@ public class FormatConfig extends VHostResourceBase
 		m.put("kind", kind);
 		m.put("pattern", pattern);
 		List<String> samples = new ArrayList<>();
+		List<Long> at = new ArrayList<>();
 		m.put("samples", samples);
+		m.put("at", at);
+		m.put("next", null);
 		m.put("error", null);
 		try
 		{
@@ -56,15 +61,30 @@ public class FormatConfig extends VHostResourceBase
 			TextTokens.parse(text, locale);
 			long step = TextTokens.sampleStepMs(kind, pattern);
 			m.put("stepMs", step);
+			long t = now;
 			for(int i = 0; i < count; i++)
 			{
-				samples.add(TextTokens.render(text, new TextTokens.Context(now + i * step, zone, locale, target, query.get("endText"), streamStart)));
+				TextTokens.Context ctx = new TextTokens.Context(t, zone, locale, target, query.get("endText"), streamStart);
+				samples.add(TextTokens.render(text, ctx));
+				at.add(t);
+				long next = TextTokens.nextChange(text, ctx);
+				if(next == Long.MAX_VALUE)
+				{
+					break;
+				}
+				// tenths of a second still sample once a second, so 120 samples cover two minutes
+				t = Math.max(next, t + 1000);
+				if(i == count - 1)
+				{
+					m.put("next", t);
+				}
 			}
 		}
 		catch(RuntimeException e)
 		{
 			// a bad pattern, zone, locale, target or number: the reason, and no samples
 			samples.clear();
+			at.clear();
 			m.put("error", e.getMessage());
 		}
 		return m;

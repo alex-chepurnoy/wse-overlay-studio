@@ -256,13 +256,64 @@ public final class ImageLibrary
 		return UPLOADS + "/" + n;
 	}
 
-	/** Deletes an uploaded image; images elsewhere in content/ are not this module's to delete. */
+	/**
+	 * What draws an image: "overlay app/name" for each named overlay in any application of this virtual host with an
+	 * image layer naming it, and "template name.xml" for each transcoder template whose ImagePath points at it.
+	 */
+	public static List<String> users(Path vhostDir, String file) throws IOException
+	{
+		List<String> out = new java.util.ArrayList<>();
+		Path root = ModuleFiles.root(vhostDir);
+		File[] apps = root.toFile().listFiles(File::isDirectory);
+		for(File app: apps == null ? new File[0] : apps)
+		{
+			if(app.getName().equals(ModuleFiles.STREAMS))
+			{
+				continue;
+			}
+			for(String name: OverlayStore.list(app.toPath()))
+			{
+				try
+				{
+					if(OverlayStore.imageFiles(OverlayStore.read(app.toPath(), name)).contains(file))
+					{
+						out.add("overlay " + app.getName() + "/" + name);
+					}
+				}
+				catch(TemplateFiles.Refused | IOException e)
+				{
+					// an overlay that cannot be read names nothing here
+				}
+			}
+		}
+		File[] templates = vhostDir.resolve("transcoder").resolve("templates").toFile().listFiles((d, n) -> n.endsWith(".xml"));
+		for(File x: templates == null ? new File[0] : templates)
+		{
+			String xml = Files.readString(x.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+			if(xml.contains("/content/" + file + "<"))
+			{
+				out.add("template " + x.getName());
+			}
+		}
+		java.util.Collections.sort(out);
+		return out;
+	}
+
+	/**
+	 * Deletes an uploaded image; images elsewhere in content/ are not this module's to delete, and one that an overlay
+	 * or a template of this virtual host draws is refused with what draws it.
+	 */
 	public static void delete(Path vhostDir, String file) throws TemplateFiles.Refused, IOException
 	{
 		String f = safeFile(file);
 		if(!f.startsWith(UPLOADS + "/"))
 		{
 			throw new TemplateFiles.Refused(409, file + " was not uploaded here; it is not deleted.");
+		}
+		List<String> using = users(vhostDir, f);
+		if(!using.isEmpty())
+		{
+			throw new TemplateFiles.Refused(409, f + " is drawn by " + String.join(", ", using) + "; choose another image there first.");
 		}
 		Path p = contentDir(vhostDir).resolve(f).normalize();
 		if(!Files.deleteIfExists(p))

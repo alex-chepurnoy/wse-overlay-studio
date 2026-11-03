@@ -168,7 +168,7 @@
       S.saved = kept.saved; S.draft = kept.draft; S.undo = kept.undo; S.redo = kept.redo; S.known = kept.known; S.layer = kept.layer;
       // the file changed while the draft waited: the draft stays, and Save is held until the producer picks
       if (e && kept.known != null && e.modified !== kept.known) { S.conflict = true; S.theirs = e.modified; }
-      S.live = {}; ticked = {};
+      U.format.start(); S.live = {}; ticked = {};
       renderAll(); startCaptures(); loadLive();
       return Promise.resolve();
     }
@@ -517,7 +517,7 @@
       b.innerHTML = (web ? '<img alt="" hidden>' : U.draw.svg(o, S.draft, 'ovs-' + o.id, { unrotated: true, hidden: true })) + '<span class="pg-name" aria-hidden="true">' + U.esc(o.id) + (draft || edited(o.id) ? ', unsaved' : '') + '</span>' +
         (sel && !ro() ? handlesHtml(o) : '');
       if (web && S.captures[o.id]) { b.querySelector('img').src = S.captures[o.id]; b.querySelector('img').hidden = false; }
-      if (web && o.opacity != null && o.opacity >= 0) b.querySelector('img').style.opacity = String(o.opacity / 100);
+      if (web) { var dop = drawn(o).opacity; if (dop != null && dop >= 0) b.querySelector('img').style.opacity = String(dop / 100); }
       // the text being edited keeps its box above every layer
       if (tedit) frame.insertBefore(b, tedit); else frame.appendChild(b);
       position(b, o, s);
@@ -548,7 +548,12 @@
 
   /* ---------- the live canvas (plan 4.4): samples tick, timing plays, live values show ---------- */
   // the values a feed set on air (3.6), or null
-  function liveOf(o) { var v = o && S.live && S.live[o.id]; return v && Object.keys(v).length ? v : null; }
+  function liveOf(o) { var v = o && S.live && S.live[savedIdOf(o.id)]; return v && Object.keys(v).length ? v : null; }
+  // the id a layer has on the server: a rename waits for the save (plan 3.6), and live values with it
+  function savedIdOf(id) {
+    var from = S.renamed && Object.keys(S.renamed).filter(function (k) { return S.renamed[k] === id; })[0];
+    return from && savedById(from) ? from : id;
+  }
   // what the canvas draws for a layer: its live values on top, except while it is selected for editing
   function drawn(o) {
     var v = liveOf(o);
@@ -569,7 +574,8 @@
   }
   function paintTime(b, o) {
     var st = timeState(o), g = b.querySelector(o.type === 'webPage' ? 'img' : '.lyr-svg');
-    if (g) g.style.opacity = o.type === 'webPage' ? String((o.opacity != null && o.opacity >= 0 ? o.opacity / 100 : 1) * st.alpha) : st.alpha === 1 ? '' : String(st.alpha);
+    var op = drawn(o).opacity;
+    if (g) g.style.opacity = o.type === 'webPage' ? String((op != null && op >= 0 ? op / 100 : 1) * st.alpha) : st.alpha === 1 ? '' : String(st.alpha);
     var tag = b.querySelector('[data-ttag]');
     if (!st.tag) { if (tag) tag.remove(); return; }
     if (!tag) { tag = document.createElement('span'); tag.className = 'pg-tag'; tag.setAttribute('data-ttag', ''); tag.setAttribute('aria-hidden', 'true'); b.appendChild(tag); }
@@ -583,7 +589,7 @@
     if (!frame) return;
     var s = src();
     objects().forEach(function (o) {
-      if (!U.format.moves(o)) return;
+      if (!U.format.moves(drawn(o))) return;
       var b = frame.querySelector('.pg[data-id="' + CSS.escape(o.id) + '"]');
       if (!b) return;
       var st = timeState(o), text = o.type === 'string' ? U.draw.shown(drawn(o)) : '', k = [text, st.alpha.toFixed(2), st.tag];
@@ -613,11 +619,12 @@
     if (err && err.textContent !== why) { err.textContent = why; var pi = el.insp.querySelector('[data-fpattern]'); if (pi) pi.classList.toggle('invalid', !!why); }
   }
   // the layers' live values, read when the overlay opens and every few seconds while it is shown
+  var liveAsked = 0, liveCleared = 0;
   function loadLive() {
-    var name = S.name;
+    var name = S.name, asked = ++liveAsked;
     if (!name || !entry()) return Promise.resolve();
     return U.api.get(ovPath(name) + '/live').then(function (r) {
-      if (S.name !== name) return;
+      if (S.name !== name || asked <= liveCleared) return;
       var was = JSON.stringify(S.live || {}), now = JSON.stringify(r || {});
       S.live = r || {};
       if (was === now) return;
@@ -628,10 +635,12 @@
   }
   function clearLive(id) {
     if (ro()) return;
-    U.api.post(ovPath() + '/live', { clear: id }).then(function () {
-      if (S.live) delete S.live[id];
+    var sid = savedIdOf(id);
+    liveCleared = liveAsked;
+    U.api.post(ovPath() + '/live', { clear: sid }).then(function (r) {
+      if (S.live) delete S.live[sid];
       ticked = {}; renderLayers(); placeBoxes(); renderInspector();
-      U.toast('Cleared the live value of ' + id + '. The video shows its saved values again.');
+      U.toast(r && r.cleared ? 'Cleared the live value of ' + id + '. The video shows its saved values again.' : id + ' had no live value on the server any more.');
     }, function (er) { U.toast('The live value of ' + id + ' could not be cleared: ' + er.message, { level: 'bad' }); });
   }
   // which fields a feed set, in words: "text and color"
@@ -642,17 +651,20 @@
 
   function renderCoords() {
     if (S.placing) {
-      // read out by the canvas area's polite live region
+      // the placing hint, shown here and said through data-say
       el.coords.innerHTML = '<span class="bdg on" data-placehint>Click to place the ' + U.esc(KIND_LABEL[S.placing].toLowerCase()) + ', or drag to draw it. Enter puts it in the center, Escape cancels.</span>';
+      // the readout is not a live region, so a ticking clock's size is not read out every second; the hint is said once
+      if (el.say) el.say.textContent = el.coords.textContent;
       el.outside.hidden = true;
       return;
     }
+    if (el.say) el.say.textContent = '';
     var s = src(), o = S.layer && byId(S.layer), z = o ? size(o) : null;
     // a text's size is measured in its font, so it is shown in whole pixels
     el.coords.innerHTML = '<span class="bdg" title="Source picture">' + s.w + ' x ' + s.h + (s.known ? '' : ', assumed') + '</span>' +
       (o ? '<span class="bdg" data-lcoords title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(layerCoords(o)) + '</span>' : '');
     // Freeze stops time on the canvas for editing a layer that ticks, blinks or fades
-    if (objects().some(U.format.moves)) el.coords.innerHTML += '<button type="button" class="btn sm ghost" data-freeze aria-pressed="' + U.format.frozen() + '" title="Stop the clock on the canvas while you edit. The video keeps time.">' +
+    if (objects().some(function (x) { return U.format.moves(drawn(x)); })) el.coords.innerHTML += '<button type="button" class="btn sm ghost" data-freeze aria-pressed="' + U.format.frozen() + '" title="Stop the clock on the canvas while you edit. The video keeps time.">' +
       (U.format.frozen() ? 'Frozen, resume time' : 'Freeze time') + '</button>';
     var outside = o && s.known && frameFit(o, s) === 'outside';
     el.outside.hidden = !outside;
@@ -1533,7 +1545,15 @@
   var TOP_KEYS = ['font', 'fontSize', 'fontStyle'];
   // a countdown's target, as the module takes it (ObjectConfig.target): a date and time with its offset
   var TARGET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
-  function zoneOk(z) { try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch (e) { return false; } }
+  // a zone as Java's ZoneId.of takes it: an offset such as GMT+5, UTC+01:00 or +05:00, or a region the browser knows
+  // spelled exactly (the browser takes america/new_york, Java does not)
+  function zoneOk(z) {
+    if (/^(Z|UTC|GMT|UT|(UTC|GMT|UT)?[+-]\d{1,2}(:?\d{2})?)$/.test(z)) return true;
+    try {
+      var r = new Intl.DateTimeFormat('en-US', { timeZone: z }).resolvedOptions().timeZone;
+      return !(r !== z && r.toLowerCase() === z.toLowerCase());
+    } catch (e) { return false; }
+  }
   // a time a layer shows or hides at, as the module takes it (ObjectConfig.timingProblem)
   var WHEN = /^(stream\+\d{1,9}(\.\d{1,3})?|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))$/;
   // a text's box on or off, keeping the text where it is: a box starts at the text's extent, a free text at its first line
@@ -1855,14 +1875,14 @@
         '<label class="check small"><input type="checkbox" data-guides>Safe area</label>' +
         '<button type="button" class="btn sm only-1200" data-togglei>' + U.icon('panel') + 'Inspector</button></div>' +
         '<div class="addbar" data-addbar data-write role="toolbar" aria-label="Add a layer"></div>' +
-        '<div class="canvas"><div data-stage></div><div class="canvas-bar"><span class="coords" data-coords></span><span class="spacer"></span><span class="hrow" data-caption></span></div>' +
+        '<div class="canvas"><div data-stage></div><div class="canvas-bar"><span class="coords" data-coords aria-live="off"></span><span class="vh" data-say aria-live="polite"></span><span class="spacer"></span><span class="hrow" data-caption></span></div>' +
         '<p class="small warn-text" data-outside hidden></p></div></div><div data-bar hidden></div>';
       // the page list lives in the list column, under the open overlay; the shell places it there
       var pages = document.createElement('div');
       pages.className = 'lpages';
       pages.innerHTML = '<div data-layers></div>' + addMenuHtml('list', 'lsub-add');
       U.overlayPagesNode = pages;
-      el = { stage: box.querySelector('[data-stage]'), coords: box.querySelector('[data-coords]'), preview: box.querySelector('[data-preview]'), layers: pages.querySelector('[data-layers]'),
+      el = { stage: box.querySelector('[data-stage]'), coords: box.querySelector('[data-coords]'), say: box.querySelector('[data-say]'), preview: box.querySelector('[data-preview]'), layers: pages.querySelector('[data-layers]'),
         pagesAdd: pages.querySelector('[data-rowfor="add:list"]'), caption: box.querySelector('[data-caption]'), outside: box.querySelector('[data-outside]'), title: box.querySelector('[data-title]'), chips: box.querySelector('[data-chips]'),
         listBtn: box.querySelector('[data-showlist]'), bar: box.querySelector('[data-bar]'), insp: insp, grid: U.root.querySelector('[data-grid]') };
       S.name = null; S.draft = S.saved = null; mem = {};

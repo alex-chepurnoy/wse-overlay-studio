@@ -204,6 +204,28 @@ class TextLayerTest
 		assertEquals(List.of(), bad.get("samples"));
 	}
 
+	@Test
+	@SuppressWarnings("unchecked")
+	void formatSamplesStartWhenTheTextChangesInTheTokensZone()
+	{
+		FormatConfig f = new FormatConfig();
+		// 10:00:45 in New York: the first minute sample shows until 10:01:00, not for a minute from when it was asked
+		long asked = java.time.ZonedDateTime.of(2027, 3, 14, 10, 0, 45, 0, java.time.ZoneId.of("America/New_York")).toInstant().toEpochMilli();
+		Map<String, Object> m = (Map<String, Object>)f.doGet(Map.of(), new LinkedHashMap<>(Map.of("pattern", "HH:mm", "zone", "America/New_York", "now", Long.toString(asked), "count", "3")));
+		assertEquals(List.of("10:00", "10:01", "10:02"), m.get("samples"));
+		assertEquals(List.of(asked, asked + 15_000, asked + 75_000), m.get("at"));
+		assertEquals(asked + 135_000, m.get("next"));
+		// an hour clock in a half-hour zone changes at :30 UTC
+		long k = java.time.ZonedDateTime.of(2027, 3, 14, 10, 50, 0, 0, java.time.ZoneId.of("Asia/Kolkata")).toInstant().toEpochMilli();
+		m = (Map<String, Object>)f.doGet(Map.of(), new LinkedHashMap<>(Map.of("pattern", "h a", "zone", "Asia/Kolkata", "now", Long.toString(k), "count", "2")));
+		assertEquals(List.of("10 AM", "11 AM"), m.get("samples"));
+		assertEquals(k + 10 * 60_000, ((List<Long>)m.get("at")).get(1));
+		// a count-up with no target never changes: one sample, and no next
+		m = (Map<String, Object>)f.doGet(Map.of(), new LinkedHashMap<>(Map.of("kind", "countup", "pattern", "H:mm:ss", "now", Long.toString(asked), "count", "5")));
+		assertEquals(1, ((List<?>)m.get("samples")).size());
+		assertNull(m.get("next"));
+	}
+
 	// Golden images, compared exactly: the bundled fonts draw the same on Windows and Linux (spike S3). Rerun with
 	// OVS_WRITE_GOLDENS=1 after an intended change, and look at what was written.
 	static final Map<String, Map<String, Object>> GOLDENS = goldens();
