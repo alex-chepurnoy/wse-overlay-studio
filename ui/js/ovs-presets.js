@@ -52,6 +52,23 @@
       }) }
     ];
   };
+  /** A short name for an overlay made from a preset: its name, or for a date or time what it is (Clock, Date, ...). */
+  P.baseName = function (id) {
+    var p = P.find(id);
+    if (!p) return 'overlay';
+    if (p.token) {
+      if (p.token.kind === 'countdown') return 'Countdown';
+      if (p.token.kind === 'streamtime') return 'Stream-time';
+      return /[HhKkmsSa]/.test(p.token.pattern.replace(/'[^']*'/g, '')) ? 'Clock' : 'Date';
+    }
+    return p.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  };
+  /** The preset in words, for a toast: "the Live badge preset", "the countdown d'd' HH:mm:ss preset". */
+  P.words = function (id) {
+    var p = P.find(id);
+    if (!p) return 'a preset';
+    return 'the ' + (p.token && p.token.kind === 'time' ? 'date and time ' + p.name : p.name) + ' preset';
+  };
   P.find = function (id) {
     var all = [].concat.apply([], P.groups().map(function (g) { return g.items; }));
     return all.filter(function (x) { return x.id === id; })[0] || null;
@@ -114,11 +131,11 @@
   /** The grouped list, each preset a button; a date and time preset shows its sample (filled by fillSamples). */
   P.listHtml = function (selected) {
     return '<div class="prelist" role="radiogroup" aria-label="Presets">' + P.groups().map(function (g) {
-      return '<div class="pre-g"><div class="sec-h">' + U.esc(g.group) + '</div>' + g.items.map(function (x) {
+      return '<div class="pre-g"><div class="sec-h">' + U.esc(g.group) + '</div><div class="pre-items">' + g.items.map(function (x) {
         return '<button type="button" class="pre" role="radio" aria-checked="' + (x.id === selected) + '" data-preset="' + U.esc(x.id) + '">' + U.icon(x.icon) +
           '<span class="pre-t"><span class="pre-n">' + U.esc(x.name) + '</span>' + (x.note ? '<span class="faint">' + U.esc(x.note) + '</span>' : '') +
           (x.token ? '<span class="pre-s mono" data-presample="' + U.esc(x.token.kind + '|' + x.token.pattern) + '"></span>' : '') + '</span></button>';
-      }).join('') + '</div>';
+      }).join('') + '</div></div>';
     }).join('') + '</div>';
   };
   /** Puts the server's sample beside each date and time preset in box; called again as the clock ticks. */

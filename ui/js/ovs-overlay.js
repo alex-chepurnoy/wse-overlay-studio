@@ -688,7 +688,7 @@
     if (o.type === 'string' && U.draw.hasToken(o.text)) S.inspTab = 'format';
     renderEditor();
     focusCanvas();
-    U.toast('Added ' + U.presets.find(id).name.toLowerCase() + ' ' + o.id + ' to the draft. Viewers see it after Save.');
+    U.toast('Added ' + U.presets.words(id) + ' as ' + o.id + '. Viewers see it after Save.');
   }
   // while placing, a banner on the canvas itself says what a click does, with Cancel; it is said once through data-say
   // (the readout under the canvas is not a live region, so a ticking clock's size is not read out every second)
@@ -1355,9 +1355,16 @@
     return '<div class="fld"><span class="f">Text style' + U.tip('Sets the font, size, weight, color and background box for this text. Change any of them after.') + '</span>' +
       '<div class="tstyles" role="group" aria-label="Text styles">' + U.presets.STYLES.map(function (s) { return '<button type="button" class="btn sm" data-tstyle="' + s.id + '">' + U.esc(s.name) + '</button>'; }).join('') + '</div></div>';
   }
+  // the style's font is loaded first, so a free text's top is kept with the font's own measurements, not a fallback's
   function applyStyle(o, id) {
-    var fields = U.presets.style(id, src().h), top = freeText(o) ? shownY(o) : null;
+    var fields = U.presets.style(id, src().h);
     if (!fields) return;
+    var st = String(fields.fontStyle || ''), css = (st.indexOf('italic') >= 0 ? 'italic ' : '') + (st.indexOf('bold') >= 0 ? '700 ' : '400 ') + fields.fontSize + 'px "' + fields.font + '"';
+    var ready = document.fonts && document.fonts.load ? document.fonts.load(css).catch(function () { return null; }) : Promise.resolve();
+    ready.then(function () { if (byId(o.id) === o) setStyle(o, id, fields); });
+  }
+  function setStyle(o, id, fields) {
+    var top = freeText(o) ? shownY(o) : null;
     snapshot();
     // a style replaces the box look as a whole: a background, padding or corners it does not set go
     ['background', 'padding', 'radius'].forEach(function (k) { if (!(k in fields)) delete o[k]; });
@@ -2038,7 +2045,7 @@
     replaceNew(function () { resetNew(); N.start = 'preset'; N.preset = id; N.name = suggestName(id); U.go('new-overlay:'); });
   };
   function suggestName(id) {
-    var p = U.presets.find(id), base = p ? p.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : 'overlay', n = base, i = 2;
+    var base = U.presets.baseName(id), n = base, i = 2;
     while ((U.overlays || []).some(function (o) { return o.name === n; })) n = base + '-' + i++;
     return n;
   }
@@ -2148,7 +2155,7 @@
   }
   U.screens['new-overlay'] = {
     init: function (box) { nbox = box; },
-    show: function () { if (U.readOnly) { U.go('home:'); return; } renderNew(); if (N.start === 'page' && N.url) testSoon(); var n = nbox.querySelector('#ovs-nn'); if (n) n.focus(); },
+    show: function () { if (U.readOnly) { U.go('home:'); return; } U.format.start(); renderNew(); if (N.start === 'page' && N.url) testSoon(); var n = nbox.querySelector('#ovs-nn'); if (n) n.focus(); },
     hide: function () { if (N.testTimer) { N.testTimer.stop(); N.testTimer = null; } },
     app: function () { resetNew(); },
     save: function () { createOverlay(); },

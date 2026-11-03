@@ -404,6 +404,8 @@
 /* presets (plan 4.3): a grouped list, each with its icon and, for a date or time, a sample */
 .ovs-plugin .prelist { display: grid; gap: var(--s-3); width: 100%; }
 .ovs-plugin .pre-g { display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%; }
+/* one column in the panel, as many as fit in New overlay's wider form */
+.ovs-plugin .pre-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
 .ovs-plugin .pre { display: flex; align-items: center; gap: var(--s-2); width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .ovs-plugin .pre svg { width: 16px; height: 16px; flex: none; color: var(--text-2); }
 .ovs-plugin .pre[aria-checked="true"] { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }

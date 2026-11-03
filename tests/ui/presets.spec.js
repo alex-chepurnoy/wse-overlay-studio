@@ -107,3 +107,47 @@ test('a text style sets the font, size, weight, color and box of the selected te
   const o = (await saved(page, wse, 'Mixed')).find((x) => x.id === 'score');
   expect(o).toMatchObject({ font: 'Fira Sans Condensed', fontStyle: 'plain', fontSize: 32, color: 'rgb(220,220,220)', background: 'rgb(0,0,0,180)', padding: 10 });
 });
+
+test('a date or time preset suggests what it is as the name, and its toast names the preset', async ({ page, studio }) => {
+  await studio.open();
+  await page.locator('[data-tab=overlays]').click();
+  await page.locator('[data-list]').getByRole('button', { name: 'New' }).click();
+  await page.locator('[data-start="preset"]').click();
+  const name = page.locator('#ovs-nn');
+  for (const [id, want] of [['date:0', 'Clock'], ['date:3', 'Date'], ['date:9', 'Countdown'], ['date:11', 'Stream-time']]) {
+    await page.locator('[data-preset="' + id + '"]').click();
+    await expect(name).toHaveValue(want);
+  }
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('[data-list]').getByText('Scoreboard', { exact: true }).first().click();
+  await page.locator('[data-rowfor="add:list"]').click();
+  await page.getByRole('menuitem', { name: 'From a preset...' }).click();
+  await page.locator('[data-insp] [data-preset="date:1"]').click();
+  await expect(page.locator('.toast').last()).toContainText('Added the date and time h:mm:ss a preset as clock-1.');
+});
+
+test('the presets sit in columns in New overlay and in one column in the panel', async ({ page, studio }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await studio.open();
+  await page.locator('[data-tab=overlays]').click();
+  await page.locator('[data-list]').getByRole('button', { name: 'New' }).click();
+  await page.locator('[data-start="preset"]').click();
+  const cols = (sel) => page.locator(sel).first().evaluate((g) => getComputedStyle(g).gridTemplateColumns.split(' ').length);
+  expect(await cols('[data-screen="new-overlay"] .pre-items')).toBeGreaterThan(1);
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('[data-list]').getByText('Scoreboard', { exact: true }).first().click();
+  await page.locator('[data-rowfor="add:list"]').click();
+  await page.getByRole('menuitem', { name: 'From a preset...' }).click();
+  expect(await cols('[data-insp] .pre-items')).toBe(1);
+});
+
+test('stream time in New overlay\'s samples counts from opening it', async ({ page, studio }) => {
+  await page.clock.install({ time: Date.parse('2027-03-14T10:00:00Z') });
+  await studio.open();
+  await page.locator('[data-tab=overlays]').click();
+  await page.locator('[data-list]').getByText('Scoreboard', { exact: true }).first().click();
+  await page.clock.fastForward(600000);
+  await page.locator('[data-list]').getByRole('button', { name: 'New' }).click();
+  await page.locator('[data-start="preset"]').click();
+  await expect(page.locator('[data-preset="date:11"] [data-presample]')).toHaveText(/^H:mm:ss #[0-2]$/);
+});
