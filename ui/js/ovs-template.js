@@ -4,8 +4,8 @@
  */
 /* Overlay Studio template editor: every transcoder template on the server. A master template, made here, opens in the
    builder: the hardware on top, then a Decode box (the source, and the overlays drawn on it before scaling) and an
-   Encode box (the outputs, the overlays drawn on chosen outputs, and the adaptive groups). One switched on in place
-   gets the overlay form; a
+   Encode box (the outputs, the overlays drawn on chosen outputs, and the adaptive groups). A template carries up to
+   four overlays (plan 3.9), each on the input or on chosen outputs. One switched on in place gets the overlay form; a
    stream's own copy of a master is shown read-only with Update from its master; any other is shown read-only with its
    verdict, "Use with an overlay", and "New master from this one". Edits stay in a draft kept in memory per template
    until Save. */
@@ -28,7 +28,19 @@
   function find(name) { return all().filter(function (t) { return t.name === name; })[0]; }
   // a master or any other template, or a stream's own copy of one
   function findAny(name) { var t = U.templateEntry(name); return t && !t.error ? t : null; }
-  function group(t) { return t.vif ? 'na' : (t.overlay || t.managed) ? 'mine' : 'other'; }
+  function group(t) { return t.vif ? 'na' : (tplSlots(t).length || t.managed) ? 'mine' : 'other'; }
+  // the overlays a template carries, as the validator reads them, in slot order: {name, encodes, slot}, encodes empty
+  // for every output (drawn on the input)
+  var MAX_OVERLAYS = 4;
+  function tplSlots(t) {
+    var s = t.overlays && t.overlays.length ? t.overlays : t.overlay ? [{ name: t.overlay, encodes: t.overlayEncodes || [], slot: 1 }] : [];
+    return s.slice().sort(function (a, b) { return a.slot - b.slot; });
+  }
+  // the overlays an output of t carries, by name
+  function carriedOn(t, e) {
+    if (!e.canCarryOverlay) return [];
+    return tplSlots(t).filter(function (x) { return !(x.encodes || []).length || x.encodes.indexOf(e.name) >= 0; }).map(function (x) { return x.name; });
+  }
   function size(h) { return SIZES.filter(function (s) { return s[0] === h; })[0]; }
   function carriers(t) { return (t.encodes || []).filter(function (e) { return e.canCarryOverlay; }); }
   function verdict(t) {
@@ -56,17 +68,17 @@
   }
   var FPS = 30; // frames per second assumed for keyframes in seconds when the source's is not known
   function base() {
-    return { name: '', kind: 'video', enabled: true, overlay: true, height: 720, width: 1280, fit: 'fit-height', region: null, skip: 0,
+    return { name: '', kind: 'video', enabled: true, height: 720, width: 1280, fit: 'fit-height', region: null, skip: 0,
       codec: 'H.264', profile: 'high', videoBitrate: 3000000, rateControl: 'default', peakBitrate: 0, speed: 'default', keyFollow: false, keyInterval: 60,
       hdrToSdr: false, audio: 'aac', audioBitrate: 96000, channels: 0, sampleRate: 0, captions: true, params: [] };
   }
-  function out(h, overlay) {
+  function out(h) {
     var s = size(h) || [h, h + 'p', 3000000, 'high'], o = base();
-    o.name = s[1]; o.height = h; o.width = Math.round(h * 16 / 9 / 2) * 2; o.videoBitrate = s[2]; o.profile = s[3]; o.overlay = overlay !== false;
+    o.name = s[1]; o.height = h; o.width = Math.round(h * 16 / 9 / 2) * 2; o.videoBitrate = s[2]; o.profile = s[3];
     return o;
   }
-  function original() { var o = base(); o.name = 'source'; o.kind = 'passthrough'; o.overlay = false; o.audio = 'passthru'; o.audioBitrate = 0; return o; }
-  function audioOnly() { var o = base(); o.name = 'audio'; o.kind = 'audio'; o.overlay = false; return o; }
+  function original() { var o = base(); o.name = 'source'; o.kind = 'passthrough'; o.audio = 'passthru'; o.audioBitrate = 0; return o; }
+  function audioOnly() { var o = base(); o.name = 'audio'; o.kind = 'audio'; return o; }
   var PRESETS = [
     ['Original + overlay copy', function () { var o = out(0); o.name = 'overlay'; o.height = 0; o.videoBitrate = 4000000; o.profile = 'main'; o.audio = 'passthru'; o.audioBitrate = 0; return [original(), o]; }],
     ['1080p, 720p, 360p', function () { return [out(1080), out(720), out(360)]; }],
@@ -79,20 +91,22 @@
     var vids = outs.filter(function (o) { return o.enabled && o.kind !== 'audio'; });
     return vids.length > 1 ? [{ name: 'abr', members: vids.map(function (o) { return { output: o.name, only: '' }; }) }] : [];
   }
-  function blank(overlay) {
+  // a new template starts with no overlay: they are added from the Overlays sections (plan 4.5)
+  function blank() {
     var outs = PRESETS[2][1]();
-    return { isNew: true, name: '', overlay: overlay || '', hardware: 'cpu', deinterlace: false, gpuId: -1, minFrameRate: 0, outputs: outs, groups: defaultGroups(outs), images: [], preset: 2 };
+    return { isNew: true, name: '', overlays: [], hardware: 'cpu', deinterlace: false, gpuId: -1, minFrameRate: 0, outputs: outs, groups: defaultGroups(outs), images: [], preset: 2 };
   }
   // for the task's step 2: a preset's outputs, and the spec of a new template carrying one overlay
   U.presetOutputs = function (i) { return PRESETS[i][1](); };
   U.templateSpecFor = function (name, overlay, preset) {
-    var d = blank(overlay);
+    var d = blank();
     d.name = name; d.outputs = PRESETS[preset][1](); d.groups = defaultGroups(d.outputs); d.preset = preset;
+    // its one overlay on the input, so every video output shows it
+    if (overlay) d.overlays = [{ name: overlay, stage: 'input', outputs: [] }];
     return spec(d);
   };
   // what the editor shows for an existing template, from the validator's reading in the live state
   function fromTemplate(t) {
-    var listed = t.overlayEncodes || [];
     var outs = (t.encodes || []).map(function (e) {
       var codec = String(e.codec || ''), kind = /^passthru$/i.test(codec) ? 'passthrough' : /^disable/i.test(codec) ? 'audio' : 'video';
       var ac = String(e.audioCodec || '').toLowerCase(), o = base();
@@ -112,10 +126,10 @@
       // the parameters the plain controls stand for are not listed again as expert ones
       var own = { 'mainconcept.bit_rate_mode': 1, 'mainconcept.max_bit_rate': 1, 'mainconcept.performance_level': 1 };
       o.params = Object.keys(e.parameters || {}).filter(function (k) { return !own[k]; }).map(function (k) { return { name: k, value: e.parameters[k] }; });
-      o.overlay = !!t.overlay && e.canCarryOverlay && (!listed.length || listed.indexOf(e.name) >= 0);
       return o;
     });
-    return { isNew: false, name: t.name, overlay: t.overlay || '', hardware: t.hardware || 'cpu', deinterlace: !!t.deinterlace, gpuId: num(t.gpuId, -1),
+    var ovs = tplSlots(t).map(function (x) { return { name: x.name, stage: (x.encodes || []).length ? 'outputs' : 'input', outputs: (x.encodes || []).slice() }; });
+    return { isNew: false, name: t.name, overlays: inStageOrder(ovs), hardware: t.hardware || 'cpu', deinterlace: !!t.deinterlace, gpuId: num(t.gpuId, -1),
       minFrameRate: parseFloat(t.minFrameRate) || 0,
       images: (t.images || []).map(function (l) {
         return { file: l.file, where: l.where === 'outputs' ? 'outputs' : 'all', outputs: (l.outputs || []).slice(), x: num(l.x, 0), y: num(l.y, 0), width: num(l.width, 0),
@@ -125,9 +139,25 @@
         return { name: g.name, members: (g.members || []).map(function (m) { return { output: m.output, only: m.only || '' }; }) };
       }) };
   }
+  // Decode overlays first, then Encode ones, each stage keeping its own order: list order is slot order (plan 3.9)
+  function inStageOrder(list) {
+    return list.filter(function (x) { return x.stage !== 'outputs'; }).concat(list.filter(function (x) { return x.stage === 'outputs'; }));
+  }
+  // whether an overlay entry draws on output o (a video output)
+  function carries(x, o) { return x.stage !== 'outputs' || x.outputs.indexOf(o.name) >= 0; }
+  // the output names an entry is saved with: none for the input, and none when it is on every video output, which
+  // the module saves on the input too
+  function encodesOf(x, vids) {
+    if (x.stage !== 'outputs') return [];
+    var on = x.outputs.filter(function (n) { return vids.indexOf(n) >= 0; });
+    return on.length === vids.length ? [] : on;
+  }
   function spec(d) {
     var vids = d.outputs.filter(function (o) { return o.kind === 'video' && o.enabled; }).map(function (o) { return o.name; });
-    return { name: d.name, hardware: d.hardware, overlay: d.overlay || null, deinterlace: d.deinterlace, gpuId: d.gpuId, minFrameRate: d.minFrameRate || 0,
+    // slot 1 is carried by the outputs marked overlay, as the module reads it; slots 2 to 4 name their outputs
+    var ovs = (d.overlays || []).filter(function (x) { return x.name; }), first = ovs[0];
+    return { name: d.name, hardware: d.hardware, overlay: first ? first.name : null,
+      overlays: ovs.slice(1).map(function (x, i) { return { name: x.name, encodes: encodesOf(x, vids), slot: i + 2 }; }), deinterlace: d.deinterlace, gpuId: d.gpuId, minFrameRate: d.minFrameRate || 0,
       images: (d.images || []).map(function (l) {
         return { file: l.file, where: l.where, outputs: l.where === 'outputs' ? l.outputs.filter(function (n) { return vids.indexOf(n) >= 0; }) : [], x: l.x, y: l.y,
           width: l.width, height: l.height, align: l.align, opacity: l.opacity, refresh: l.refresh };
@@ -136,7 +166,7 @@
         .filter(function (g) { return g.members.length; }),
       outputs: d.outputs.map(function (o) {
         var v = o.kind === 'video';
-        return { name: o.name, kind: o.kind, enabled: o.enabled, overlay: !!d.overlay && v && o.overlay, height: o.height, width: o.width, fit: o.fit, region: v ? o.region : null,
+        return { name: o.name, kind: o.kind, enabled: o.enabled, overlay: !!first && v && carries(first, o), height: o.height, width: o.width, fit: o.fit, region: v ? o.region : null,
           skip: v ? o.skip : 0, codec: o.codec, profile: o.profile, videoBitrate: o.videoBitrate, rateControl: v && o.codec === 'H.264' ? o.rateControl : 'default',
           peakBitrate: o.rateControl === 'vbr' ? (o.peakBitrate || Math.round(o.videoBitrate * 1.5)) : 0, speed: v && o.codec === 'H.264' ? o.speed : 'default',
           keyFollow: o.keyFollow, keyInterval: o.keyInterval, hdrToSdr: v && o.hdrToSdr, audio: o.audio, audioBitrate: o.audioBitrate, channels: o.channels,
@@ -158,7 +188,7 @@
     if (!name) {
       S.sel = null; S.kind = 'new'; S.form = null; S.known = null;
       var k = mem[''];
-      S.draft = k ? k.draft : blank(((U.overlays || [])[0] || {}).name);
+      S.draft = k ? k.draft : blank();
       // a new template counts as unsaved work once it has a name or differs from where it started
       S.base = k ? k.base : JSON.stringify(spec(S.draft));
       return;
@@ -214,7 +244,7 @@
       return;
     }
     if (!t) { el.head.innerHTML = ''; return; }
-    var origin = S.kind === 'copy' ? 'Stream copy of ' + U.esc(U.copyBase(t)) : t.shipped ? 'Ships with WSE' : inPlace(t) ? 'Your template, overlays switched on here' : t.managed || t.overlay ? 'Master template' : t.vif ? 'Video Intelligence' : 'Not made here';
+    var origin = S.kind === 'copy' ? 'Stream copy of ' + U.esc(U.copyBase(t)) : t.shipped ? 'Ships with WSE' : inPlace(t) ? 'Your template, overlays switched on here' : t.managed || tplSlots(t).length ? 'Master template' : t.vif ? 'Video Intelligence' : 'Not made here';
     el.head.innerHTML = '<h2>' + U.esc(t.name) + '</h2><span class="bdg' + (S.kind === 'builder' ? ' on' : '') + '">' + origin + '</span><span class="mono faint">' + U.esc(t.template) + '</span>';
   }
   // who uses a master is in the list column beside it, with its copies and whether they still match
@@ -268,10 +298,13 @@
     el.body.innerHTML = '<p class="muted">Pick a template in the list.</p>';
   }
 
-  function overlayOptions(cur, none) {
-    var names = (U.overlays || []).map(function (o) { return o.name; });
+  // the application's overlays; with taken, those the template carries already are shown but cannot be picked again
+  function overlayOptions(cur, none, taken, own) {
+    var names = (U.overlays || []).map(function (o) { return o.name; }), have = (taken || []).map(function (x) { return x.name; });
     if (cur && names.indexOf(cur) < 0) names.unshift(cur);
-    return (none ? '<option value="">' + none + '</option>' : '') + names.map(function (n) { return '<option' + (n === cur ? ' selected' : '') + '>' + U.esc(n) + '</option>'; }).join('');
+    return (none ? '<option value="">' + none + '</option>' : '') + names.map(function (n) {
+      var used = n !== own && have.indexOf(n) >= 0;
+      return '<option value="' + U.esc(n) + '"' + (n === cur ? ' selected' : '') + (used ? ' disabled' : '') + '>' + U.esc(n) + (used ? ' (already in this template)' : '') + '</option>'; }).join('');
   }
   function sizeLabel(o) {
     if (o.kind === 'passthrough') return 'Original';
@@ -311,8 +344,10 @@
     return '<span class="res" aria-hidden="true"><i style="width:' + Math.round(64 * k) + 'px;height:' + Math.round(36 * k) + 'px"></i></span>';
   }
   // one line per output; Details opens the full card for that output only
+  // the overlays drawn on output o
+  function onOutput(d, o) { return o.kind === 'video' ? (d.overlays || []).filter(function (x) { return x.name && carries(x, o); }) : []; }
   function row(o, i, d) {
-    var v = o.kind === 'video', lit = d.overlay && v && o.overlay && o.enabled;
+    var v = o.kind === 'video', lit = v && o.enabled && onOutput(d, o).length > 0;
     var chips = v ? [U.esc(videoSummary(o))].concat(o.skip ? [fpsLabel(o.skip)] : []) : [o.kind === 'audio' ? 'Audio only' : 'As it arrives'];
     if (o.kind !== 'audio') chips.push(audioText(o) === 'off' ? 'No audio' : 'Audio ' + audioText(o));
     if (v) chips.push('<i class="hwc-s">' + U.icon('chip') + U.esc(outHw(d, o)) + '</i>');
@@ -326,7 +361,7 @@
   }
   function card(o, i, d) {
     if (!S.openOut || !S.openOut.has(o)) return row(o, i, d);
-    var v = o.kind === 'video', lit = d.overlay && v && o.overlay && o.enabled;
+    var v = o.kind === 'video', lit = v && o.enabled && onOutput(d, o).length > 0;
     var head = '<div class="oc-top"><input type="text" value="' + U.esc(o.name) + '" data-o="name" aria-label="Output name" spellcheck="false">' +
       '<label class="oc-on" title="Output on"><input type="checkbox" data-o="enabled"' + (o.enabled ? ' checked' : '') + '><span class="sr">Output on</span></label>' +
       '<button class="btn sm" type="button" data-oexp aria-expanded="true">Close</button>' +
@@ -396,9 +431,11 @@
 
   function summary(d) {
     var on = d.outputs.filter(function (o) { return o.enabled; });
-    var ov = on.filter(function (o) { return d.overlay && o.kind === 'video' && o.overlay; });
     return '<span class="bdg">' + on.length + (on.length === 1 ? ' output' : ' outputs') + '</span>' +
-      (d.overlay ? '<span class="bdg' + (ov.length ? '' : ' warn') + '">' + (ov.length ? ov.length + ' with ' + U.esc(d.overlay) : 'No output draws ' + U.esc(d.overlay)) + '</span>' : '') +
+      (d.overlays || []).filter(function (x) { return x.name; }).map(function (x) {
+        var n = on.filter(function (o) { return o.kind === 'video' && carries(x, o); }).length;
+        return '<span class="bdg' + (n ? '' : ' warn') + '">' + (n ? n + ' with ' + U.esc(x.name) : 'No output draws ' + U.esc(x.name)) + '</span>';
+      }).join('') +
       (d.groups.length ? '<span class="bdg" title="Adaptive group names players open">' + d.groups.map(function (g) { return 'ngrp:_' + U.esc(g.name); }).join(', ') + '</span>' : '');
   }
 
@@ -416,30 +453,34 @@
 
   // where a layer is drawn. Decode's Overlays: on the input, once and before scaling, so every video output shows it,
   // in source pixels. Encode's Overlays: after scaling, only on the outputs picked, in each output's pixels. A template
-  // carries one overlay, which can hold several pages; the module derives its place from the outputs it is on,
-  // all of them being the input, so in Encode with every output picked it is saved on the input.
-  function urlStage(d) { var v = videoOutputs(d); return !v.length || (!d.urlSome && v.every(function (o) { return o.overlay; })) ? 'input' : 'outputs'; }
+  // carries up to four overlays, each with its own place; one in Encode with every output picked is saved on the
+  // input, where it draws the same. With no video output there is nothing to draw on, and it shows in Decode.
+  function ovStage(d, x) { return videoOutputs(d).length ? x.stage : 'input'; }
   function imgStage(l) { return l.where === 'outputs' ? 'outputs' : 'input'; }
   var IN_TIP = 'Drawn once on the source picture, before scaling, so every video output shows it. Offsets and sizes are in source pixels.';
   var OUT_TIP = 'Drawn after scaling, only on the outputs you pick, so outputs can differ. Offsets and sizes are in each output\'s pixels.';
-  var KINDS_TIP = ' An overlay is web pages captured live; one per template, and it can hold several pages. An image is a PNG, JPEG, GIF or BMP file in the server\'s content folder, drawn under the overlay.';
+  var KINDS_TIP = ' An overlay is made in the Overlays tab and holds up to 64 layers: web pages, text, clocks, shapes and images. A template carries up to four, so combine several layers in one overlay. An image here is a PNG, JPEG, GIF or BMP file in the server\'s content folder, drawn under the overlays.';
   function outPicks(attr, i, vids, isOn) {
     return '<div class="ly-outs">' + vids.map(function (o) {
       return '<label class="pilltog' + (isOn(o) ? ' on' : '') + '"><input type="checkbox" ' + attr + '="' + i + '" value="' + U.esc(o.name) + '"' + (isOn(o) ? ' checked' : '') + '>' + U.esc(o.name) + '</label>'; }).join('') + '</div>';
   }
-  function urlCard(d, t, stage, vids) {
-    var picked = vids.filter(function (o) { return o.overlay; }).length;
-    var b = S.base && !d.isNew ? JSON.parse(S.base) : null, ovChanged = b && (b.overlay || '') !== (d.overlay || '');
-    return '<div class="lyc lyr lyu"><div class="lyc-top"><div class="ly-thumb">' + U.icon('web') + '</div>' +
-      '<div class="ly-main"><select id="ovs-b-ov" data-d="overlay" aria-label="Overlay"' + (ovChanged ? ' class="is-draft"' : '') + '>' + overlayOptions(d.overlay) + '</select>' +
-      '<span class="small muted">Overlay' + (ovChanged ? '; saved: ' + U.esc(b.overlay || 'none') : '') + '</span></div>' +
-      '<div class="ly-acts"><button type="button" class="btn sm ghost" data-write data-go="new-overlay:">' + U.icon('plus') + 'New</button>' +
-      '<button class="btn sm icon ghost" type="button" data-urlrm aria-label="Remove the overlay">' + U.icon('close') + '</button></div></div>' +
-      (t && t.overlay && t.overlay === d.overlay && !(U.overlays || []).some(function (o) { return o.name === t.overlay; }) ? '<div class="note bad"><span class="dot bad"></span><div>Overlay <strong>' + U.esc(t.overlay) + '</strong> does not exist in ' + U.esc(U.app) + '.</div></div>' : '') +
-      (stage === 'outputs' ? '<div class="lyc-row"><span class="f">On</span>' + outPicks('data-urlout', 0, vids, function (o) { return o.overlay; }) + '</div>' +
-        (picked === vids.length && vids.length ? '<span class="bdg">Every output picked: saved on the input, in Decode</span>' : !picked ? '<span class="bdg warn">Pick at least one output</span>' : '') : '') +
-      (d.hardware !== 'cpu' ? '<p class="hint">On ' + U.esc((HW.filter(function (x) { return x[0] === d.hardware; })[0] || HW[0])[1]) + ', each frame is copied off the card to draw it, which costs more than without one.</p>' : '') + '</div>';
+  // one overlay the template carries: which overlay, where it draws, and its place in the stage's stacking order
+  function overlayCard(d, x, i, stage, vids) {
+    var picked = vids.filter(function (o) { return x.outputs.indexOf(o.name) >= 0; }).length;
+    var same = d.overlays.filter(function (y) { return ovStage(d, y) === stage; }), k = same.indexOf(x);
+    var other = stage === 'input' ? 'outputs' : 'input', canMove = vids.length > 1 || stage === 'outputs';
+    var missing = x.name && !(U.overlays || []).some(function (o) { return o.name === x.name; });
+    return '<div class="lyc lyr lyu" data-ov="' + i + '"><div class="lyc-top"><div class="ly-thumb">' + U.icon('overlay') + '</div>' +
+      '<div class="ly-main"><select data-ovname="' + i + '" aria-label="Overlay ' + (i + 1) + '">' + overlayOptions(x.name, x.name ? null : 'Pick an overlay', d.overlays, x.name) + '</select>' +
+      '<span class="small muted">Overlay' + (same.length > 1 ? ', ' + (k === 0 ? 'drawn under the others here' : k === same.length - 1 ? 'drawn on top here' : 'drawn ' + ordinal(k + 1) + ' here') : '') + '</span></div>' +
+      '<div class="ly-acts">' + (k > 0 ? '<button class="btn sm icon ghost" type="button" data-ovup="' + i + '" aria-label="Move ' + U.esc(x.name || 'overlay') + ' down the stack" title="Draw it under the one before">' + U.icon('up') + '</button>' : '') +
+      (canMove ? '<button class="btn sm ghost" type="button" data-ovmove="' + i + '" title="' + (other === 'input' ? 'Draw it on the input, so every video output shows it' : 'Draw it on chosen outputs only') + '">' + U.icon(other === 'input' ? 'input' : 'outputs') + (other === 'input' ? 'To Decode' : 'To outputs') + '</button>' : '') +
+      '<button class="btn sm icon ghost" type="button" data-ovrm="' + i + '" aria-label="Remove overlay ' + U.esc(x.name || (i + 1)) + '">' + U.icon('close') + '</button></div></div>' +
+      (missing ? '<div class="note bad"><span class="dot bad"></span><div>Overlay <strong>' + U.esc(x.name) + '</strong> does not exist in ' + U.esc(U.app) + '. Overlays are saved per application.</div></div>' : '') +
+      (stage === 'outputs' ? '<div class="lyc-row"><span class="f">On</span>' + outPicks('data-ovout', i, vids, function (o) { return x.outputs.indexOf(o.name) >= 0; }) + '</div>' +
+        (picked === vids.length && vids.length ? '<span class="bdg">Every output picked: saved on the input, in Decode</span>' : !picked ? '<span class="bdg warn">Pick at least one output</span>' : '') : '') + '</div>';
   }
+  function ordinal(n) { return ['first', 'second', 'third', 'fourth'][n - 1] || n + 'th'; }
   function imageCard(d, l, i, stage, vids) {
     var e = libEntry(l.file), pv = e && e.preview;
     var same = (d.images || []).filter(function (x) { return imgStage(x) === stage; }), first = same[0] === l;
@@ -456,25 +497,26 @@
       '<label>Opacity %<input type="number" data-ly-k="opacity" min="0" max="100" value="' + l.opacity + '"></label></div>' +
       '<label class="check"><input type="checkbox" data-ly-k="refresh"' + (l.refresh ? ' checked' : '') + '>Reload when the file changes</label></details></div>';
   }
-  // one Overlays section: its add buttons, the image picker when opened here, then the overlay and the images drawn here
+  // one Overlays section: its add buttons, the image picker when opened here, then the overlays and the images drawn
+  // here, overlays over images (S1: within a stage the module's slots draw over the template's images)
   function overlaysHtml(d, t, stage) {
-    var vids = videoOutputs(d), st = urlStage(d), full = (d.images || []).length >= MAX_IMAGES;
-    var items = (d.overlay && st === stage ? urlCard(d, t, stage, vids) : '') +
-      (d.images || []).map(function (l, i) { return imgStage(l) === stage ? imageCard(d, l, i, stage, vids) : ''; }).join('');
+    var vids = videoOutputs(d), full = (d.images || []).length >= MAX_IMAGES, ovFull = d.overlays.length >= MAX_OVERLAYS;
+    var cards = d.overlays.map(function (x, i) { return ovStage(d, x) === stage ? overlayCard(d, x, i, stage, vids) : ''; }).join('');
+    var items = cards + (d.images || []).map(function (l, i) { return imgStage(l) === stage ? imageCard(d, l, i, stage, vids) : ''; }).join('');
     // nothing to draw on: what is there can still be removed
     if (!vids.length) return '<div class="hrow ly-add"><span class="small faint">No video output to draw on</span></div>' + items;
-    // the overlay is on outputs only when some of two or more carry it; with one, it is the input
-    var url = stage === 'outputs' && vids.length < 2 ? (d.overlay && st === stage ? '' : '<span class="small faint">With one video output, the overlay goes in Decode</span>')
-      : !d.overlay ? ((U.overlays || []).length ? '<button class="btn sm ghost" type="button" data-addurl="' + stage + '">' + U.icon('plus') + 'Overlay</button>'
-        : '<button class="btn sm ghost" type="button" data-write data-go="new-overlay:">' + U.icon('plus') + 'Overlay</button>')
-      : st !== stage ? '<button class="btn sm ghost" type="button" data-urlmove="' + stage + '" title="A template carries one overlay">' + U.icon(stage === 'input' ? 'input' : 'outputs') + 'Move the overlay here</button>' : '';
-    return '<div class="hrow ly-add">' + url + '<button class="btn sm ghost" type="button" data-addimg="' + stage + '"' + (full ? ' disabled title="At most ' + MAX_IMAGES + ' images in a template"' : '') + ' aria-expanded="' + (S.pick === stage) + '">' + U.icon('plus') + 'Image</button>' +
-      (items || S.pick === stage ? '' : '<span class="small faint">None</span>') + '</div>' + (S.pick === stage ? pickerHtml() : '') + items;
+    // an overlay is on outputs only when some of two or more carry it; with one, it is the input
+    var add = stage === 'outputs' && vids.length < 2 ? '<span class="small faint">With one video output, overlays go in Decode</span>'
+      : !(U.overlays || []).length ? '<button class="btn sm ghost" type="button" data-write data-go="new-overlay:">' + U.icon('plus') + 'Overlay</button>'
+      : '<button class="btn sm ghost" type="button" data-addov="' + stage + '"' + (ovFull ? ' disabled title="At most ' + MAX_OVERLAYS + ' overlays in a template. Combine several layers in one overlay in the Overlays tab."' : '') + '>' + U.icon('plus') + 'Overlay</button>';
+    var hw = cards && d.hardware !== 'cpu' ? '<p class="hint">On ' + U.esc((HW.filter(function (x) { return x[0] === d.hardware; })[0] || HW[0])[1]) + ', each frame is copied off the card to draw an overlay, which costs more than without one.</p>' : '';
+    return '<div class="hrow ly-add">' + add + '<button class="btn sm ghost" type="button" data-addimg="' + stage + '"' + (full ? ' disabled title="At most ' + MAX_IMAGES + ' images in a template"' : '') + ' aria-expanded="' + (S.pick === stage) + '">' + U.icon('plus') + 'Image</button>' +
+      (items || S.pick === stage ? '' : '<span class="small faint">None</span>') + '</div>' + (S.pick === stage ? pickerHtml() : '') + items + hw;
   }
   // what is drawn where, as badges: the input row of the ladder, and each output row
   function layerBadges(d, o) {
-    var b = [], st = urlStage(d);
-    if (d.overlay && (o ? st === 'outputs' && o.overlay : st === 'input')) b.push(d.overlay);
+    var b = [];
+    d.overlays.forEach(function (x) { if (x.name && (o ? ovStage(d, x) === 'outputs' && carries(x, o) : ovStage(d, x) === 'input')) b.push(x.name); });
     (d.images || []).forEach(function (l) { if (o ? l.where === 'outputs' && l.outputs.indexOf(o.name) >= 0 : l.where !== 'outputs') b.push(l.file); });
     return b.map(function (n) { return '<span class="lbadge">' + U.icon('overlay') + U.esc(n) + '</span>'; }).join('');
   }
@@ -486,11 +528,20 @@
     d.images.push({ file: file, where: outs ? 'outputs' : 'all', outputs: outs ? videoOutputs(d).slice(0, 1).map(function (o) { return o.name; }) : [], x: 16, y: 16, width: 0, height: 0,
       align: 'right,top', opacity: 100, refresh: false });
   }
-  // the overlay on one stage: the input is every video output, outputs starts with the first one
-  function placeUrl(d, stage) {
-    var v = videoOutputs(d);
-    d.urlSome = stage === 'outputs';
-    v.forEach(function (o, k) { o.overlay = stage === 'input' || k === 0; });
+  // an overlay on one stage: the input is every video output, outputs starts with the first one; it goes last in
+  // that stage, so on top of what is there
+  function placeOverlay(d, x, stage) {
+    var i = d.overlays.indexOf(x);
+    if (i >= 0) d.overlays.splice(i, 1);
+    x.stage = stage;
+    x.outputs = stage === 'outputs' ? (x.outputs.length ? x.outputs : videoOutputs(d).slice(0, 1).map(function (o) { return o.name; })) : [];
+    d.overlays.push(x);
+    d.overlays = inStageOrder(d.overlays);
+  }
+  // the first overlay of the application the template does not carry yet
+  function nextOverlay(d) {
+    var have = d.overlays.map(function (x) { return x.name; });
+    return ((U.overlays || []).filter(function (o) { return have.indexOf(o.name) < 0; })[0] || {}).name || '';
   }
   function bindPicker(d) {
     var stage = S.pick;
@@ -507,14 +558,32 @@
     });
   }
   function bindLayers(d) {
-    el.body.querySelectorAll('[data-addurl]').forEach(function (b) {
-      b.onclick = function () { d.overlay = ((U.overlays || [])[0] || {}).name || ''; placeUrl(d, b.getAttribute('data-addurl')); rerender(); };
+    el.body.querySelectorAll('[data-addov]').forEach(function (b) {
+      b.onclick = function () {
+        if (d.overlays.length >= MAX_OVERLAYS) return;
+        var x = { name: nextOverlay(d), stage: 'input', outputs: [] };
+        placeOverlay(d, x, b.getAttribute('data-addov'));
+        rerender();
+        var s = el.body.querySelector('[data-ovname="' + d.overlays.indexOf(x) + '"]');
+        if (s) s.focus({ preventScroll: true });
+      };
     });
-    el.body.querySelectorAll('[data-urlmove]').forEach(function (b) { b.onclick = function () { placeUrl(d, b.getAttribute('data-urlmove')); rerender(); }; });
-    var urm = el.body.querySelector('[data-urlrm]');
-    if (urm) urm.onclick = function () { d.overlay = ''; d.urlSome = false; rerender(); };
-    el.body.querySelectorAll('[data-urlout]').forEach(function (c) {
-      c.onchange = function () { var o = videoOutputs(d).filter(function (x) { return x.name === c.value; })[0]; if (o) o.overlay = c.checked; d.urlSome = true; rerender(); };
+    el.body.querySelectorAll('[data-ovname]').forEach(function (s) { s.onchange = function () { d.overlays[+s.getAttribute('data-ovname')].name = s.value; rerender(); }; });
+    el.body.querySelectorAll('[data-ovmove]').forEach(function (b) {
+      b.onclick = function () { var x = d.overlays[+b.getAttribute('data-ovmove')]; placeOverlay(d, x, ovStage(d, x) === 'input' ? 'outputs' : 'input'); rerender(); };
+    });
+    el.body.querySelectorAll('[data-ovrm]').forEach(function (b) { b.onclick = function () { d.overlays.splice(+b.getAttribute('data-ovrm'), 1); rerender(); }; });
+    el.body.querySelectorAll('[data-ovout]').forEach(function (c) {
+      c.onchange = function () { var x = d.overlays[+c.getAttribute('data-ovout')]; x.outputs = x.outputs.filter(function (n) { return n !== c.value; }); if (c.checked) x.outputs.push(c.value); rerender(); };
+    });
+    // under the overlay before it in the same stage: a lower slot draws first (plan 3.9)
+    el.body.querySelectorAll('[data-ovup]').forEach(function (b) {
+      b.onclick = function () {
+        var i = +b.getAttribute('data-ovup'), st = ovStage(d, d.overlays[i]), j = i - 1;
+        while (j >= 0 && ovStage(d, d.overlays[j]) !== st) j--;
+        if (j < 0) return;
+        var t = d.overlays[i]; d.overlays[i] = d.overlays[j]; d.overlays[j] = t; rerender();
+      };
     });
     el.body.querySelectorAll('[data-lyalign]').forEach(function (b) {
       b.onclick = function () { d.images[+b.closest('[data-ly]').getAttribute('data-ly')].align = b.getAttribute('data-lyalign'); rerender(); };
@@ -569,7 +638,7 @@
     var unit = 1280 * 720 * 30, cpus = U.serverInfo && U.serverInfo.cpus, x = Math.round(px / unit * 10) / 10;
     var why = 'About ' + Math.round(px / 1e6) + ' megapixels a second to encode, for a 1080p 30 fps source plus decoding it once' + (d.hardware === 'cpu' ? '' : ', on the ' + ({ nvidia: 'NVIDIA GPU', intel: 'Intel Quick Sync', netint: 'NETINT VPU' })[d.hardware]) + '.' +
       (cpus ? ' This server has ' + cpus + ' CPU core' + (cpus > 1 ? 's' : '') + '.' : '') +
-      (d.hardware !== 'cpu' && d.overlay ? ' With the overlay on, frames are copied off the card to draw it, so this costs more than without it.' : '') +
+      (d.hardware !== 'cpu' && d.overlays.length ? ' With an overlay on, frames are copied off the card to draw it, so this costs more than without it.' : '') +
       ' An estimate: what a core holds depends on the codec, the speed setting and the picture.';
     var pct = Math.min(100, Math.round(x / 6 * 100));
     return '<span class="load" title="Estimated encode load, in 720p 30 fps outputs">Encode load<span class="load-bar"><i style="width:' + pct + '%"></i></span>' + x + ' x 720p30</span>' + U.tip(why);
@@ -594,7 +663,8 @@
       '<span class="spacer"></span>' + loadText(d) + '</div>' +
       // presets replace every output, so they are offered only while the template is new
       (d.isNew ? '<div class="tb-line"><span class="f">Start from</span><div class="tb-val presets">' + PRESETS.map(function (p, i) {
-        return '<button type="button" class="pill" data-preset="' + i + '" aria-pressed="' + (d.preset === i) + '">' + p[0] + '</button>'; }).join('') + '</div></div>' : '') +
+        return '<button type="button" class="pill" data-preset="' + i + '" aria-pressed="' + (d.preset === i) + '">' + p[0] + '</button>'; }).join('') +
+        (d.preset === 0 ? '<span class="hint" data-presethint>Add an overlay for the overlay output.</span>' : '') + '</div></div>' : '') +
       '<div class="b-sum hrow">' + summary(d) + '</div>' +
       '<div class="oc-list">' + d.outputs.map(function (o, i) { return card(o, i, d); }).join('') +
       '<div class="oc-add"><button class="btn sm" type="button" data-add="video">' + U.icon('plus') + 'Output</button>' +
@@ -615,7 +685,6 @@
         if (f.type === 'checkbox') d[k] = f.checked;
         else if (f.type === 'number') d[k] = num(f.value, d[k]);
         else d[k] = f.value;
-        if (k === 'overlay' && d.overlay && !d.urlSome && !d.outputs.some(function (o) { return o.kind === 'video' && o.overlay; })) d.outputs.forEach(function (o) { if (o.kind === 'video') o.overlay = true; });
         rerender();
       });
     });
@@ -623,7 +692,8 @@
       b.onclick = function () {
         var i = +b.getAttribute('data-preset'), before = JSON.stringify({ outputs: d.outputs, groups: d.groups, preset: d.preset });
         d.outputs = PRESETS[i][1](); d.preset = i; d.groups = defaultGroups(d.outputs);
-        if (!d.overlay) d.outputs.forEach(function (o) { o.overlay = false; });
+        // outputs picked by name are gone with the old outputs
+        d.overlays.forEach(function (x) { x.outputs = x.outputs.filter(function (n) { return d.outputs.some(function (o) { return o.name === n; }); }); });
         rerender();
         U.toast('Outputs replaced with ' + PRESETS[i][0] + '.', { undo: function () {
           if (S.draft !== d) return;
@@ -657,6 +727,7 @@
         d.outputs.splice(i, 1); d.preset = null;
         d.groups.forEach(function (g) { g.members = g.members.filter(function (m) { return m.output !== o.name; }); });
         (d.images || []).forEach(function (l) { l.outputs = l.outputs.filter(function (n) { return n !== o.name; }); });
+        d.overlays.forEach(function (x) { x.outputs = x.outputs.filter(function (n) { return n !== o.name; }); });
         rerender();
       };
       var ap = c.querySelector('[data-addparam]');
@@ -666,15 +737,16 @@
       c.querySelectorAll('[data-region]').forEach(function (f) { f.onchange = function () { o.region[f.getAttribute('data-region')] = Math.max(0, num(f.value, 0)); rerender(); }; });
       c.querySelectorAll('[data-o]').forEach(function (f) {
         var k = f.getAttribute('data-o');
+        // typing a name keeps the field as it is; leaving it redraws what names the output, the pickers on cards
+        if (k === 'name') f.addEventListener('change', rerender);
         f.addEventListener(k === 'name' ? 'input' : 'change', function () {
           d.preset = null;
           if (k === 'name') {
             var old = o.name; o.name = f.value.trim();
-            d.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.output === old) m.output = o.name; }); });
-            (d.images || []).forEach(function (l) { l.outputs = l.outputs.map(function (n) { return n === old ? o.name : n; }); });
+            renamed(d, old, o.name);
             renderSummary(); renderBar(); U.changed(); return;
           }
-          if (k === 'enabled' || k === 'overlay' || k === 'keyFollow' || k === 'hdrToSdr' || k === 'captions') o[k] = f.checked;
+          if (k === 'enabled' || k === 'keyFollow' || k === 'hdrToSdr' || k === 'captions') o[k] = f.checked;
           else if (k === 'regionOn') o.region = f.checked ? { x: 0, y: 0, w: 1280, h: 720 } : null;
           else if (k === 'kbps') o.videoBitrate = num(f.value, 0) * 1000;
           else if (k === 'peak') o.peakBitrate = num(f.value, 0) * 1000;
@@ -689,7 +761,7 @@
             if (f.value === 'custom') o.height = o.height && !size(o.height) ? o.height : 1440;
             else {
               var old2 = size(o.height), h = +f.value, s = size(h);
-              if (old2 && o.name === old2[1]) { var nn = s ? s[1] : 'full'; d.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.output === o.name) m.output = nn; }); }); o.name = nn; }
+              if (old2 && o.name === old2[1]) { var nn = s ? s[1] : 'full'; renamed(d, o.name, nn); o.name = nn; }
               if (s && (!old2 || o.videoBitrate === old2[2])) { o.videoBitrate = s[2]; o.profile = o.codec === 'H.264' ? s[3] : o.profile; }
               o.height = h; o.width = Math.round(h * 16 / 9 / 2) * 2;
             }
@@ -720,6 +792,12 @@
       rerender();
     };
   }
+  // an output renamed: what names it follows
+  function renamed(d, old, nu) {
+    d.groups.forEach(function (g) { g.members.forEach(function (m) { if (m.output === old) m.output = nu; }); });
+    (d.images || []).forEach(function (l) { l.outputs = l.outputs.map(function (n) { return n === old ? nu : n; }); });
+    d.overlays.forEach(function (x) { x.outputs = x.outputs.map(function (n) { return n === old ? nu : n; }); });
+  }
   // a selector for the focused builder control, so a re-render can put focus back on it
   function focusKey() {
     var a = document.activeElement;
@@ -727,8 +805,8 @@
     if (a.id) return '#' + CSS.escape(a.id);
     var attrs = Array.prototype.filter.call(a.attributes, function (x) { return /^data-/.test(x.name) || (x.name === 'value' && a.type === 'checkbox'); });
     if (!attrs.length) return null;
-    var c = a.closest('.oc[data-i]'), ly = a.closest('[data-ly]');
-    return (c ? '.oc[data-i="' + c.getAttribute('data-i') + '"] ' : ly ? '[data-ly="' + ly.getAttribute('data-ly') + '"] ' : '') +
+    var c = a.closest('.oc[data-i]'), ly = a.closest('[data-ly]'), ov = a.closest('[data-ov]');
+    return (c ? '.oc[data-i="' + c.getAttribute('data-i') + '"] ' : ly ? '[data-ly="' + ly.getAttribute('data-ly') + '"] ' : ov ? '[data-ov="' + ov.getAttribute('data-ov') + '"] ' : '') +
       a.tagName.toLowerCase() + attrs.map(function (x) { return '[' + x.name + '="' + CSS.escape(x.value) + '"]'; }).join('');
   }
   function rerender() {
@@ -752,7 +830,7 @@
     var low = have.filter(function (h) { return h > 0; }).reduce(function (m, h) { return Math.min(m, h); }, Infinity);
     var next = SIZES.filter(function (s) { return have.indexOf(s[0]) < 0 && s[0] < low; })[0] || SIZES.filter(function (s) { return have.indexOf(s[0]) < 0; })[0];
     if (!next) { U.toast('Every standard size is there already. Change a size on a card, or pick Other height.'); return; }
-    var o = out(next[0], !!d.overlay);
+    var o = out(next[0]);
     o.name = unique(d, o.name);
     var at = d.outputs.length;
     while (at > 0 && d.outputs[at - 1].kind === 'audio') at--;
@@ -796,8 +874,19 @@
       if (gseen[gn.toLowerCase()] || seen[gn.toLowerCase()]) return 'Group ' + gn + ' has the name of another group or output.';
       gseen[gn.toLowerCase()] = 1;
     }
-    if (d.overlay && !d.outputs.some(function (o) { return o.enabled && o.kind === 'video' && o.overlay; })) return 'No output carries the overlay.';
-    var vids = videoOutputs(d).map(function (o) { return o.name; });
+    var vids = videoOutputs(d).map(function (o) { return o.name; }), named = {};
+    if (d.overlays.length > MAX_OVERLAYS) return 'A template carries at most ' + MAX_OVERLAYS + ' overlays. Combine several layers in one overlay in the Overlays tab.';
+    for (var x = 0; x < d.overlays.length; x++) {
+      var ov = d.overlays[x];
+      if (!ov.name) return 'Pick an overlay for each overlay card, or remove the empty one.';
+      if (named[ov.name]) return 'Overlay ' + ov.name + ' is in this template twice; a template carries each overlay once.';
+      named[ov.name] = 1;
+      if (!vids.length) return 'No video output to draw overlay ' + ov.name + ' on.';
+      if (ovStage(d, ov) === 'outputs' && !ov.outputs.some(function (n) { return vids.indexOf(n) >= 0; })) return 'Overlay ' + ov.name + ' is on chosen outputs, and none is chosen.';
+    }
+    // the "Original + overlay copy" preset makes its second output for an overlay
+    var copyOut = d.preset === 0 && d.outputs[1];
+    if (copyOut && !onOutput(d, copyOut).length) return 'Add an overlay for the overlay output, or pick another start.';
     for (var l = 0; l < (d.images || []).length; l++) {
       var im = d.images[l];
       if (im.where === 'outputs' && !im.outputs.some(function (n) { return vids.indexOf(n) >= 0; })) return 'Image ' + im.file + ' is on chosen outputs, and none is chosen.';
@@ -822,38 +911,32 @@
   /* ---------- another template: read-only, with "Use with an overlay" and "New master from this one" ---------- */
   function outputsTable(t) {
     var outs = fromTemplate(t).outputs;
-    return '<div><div class="sec-h">Outputs</div><table class="tbl"><thead><tr><th>Output</th><th>Picture</th><th>Video</th><th>Audio</th><th>Carries the overlay</th></tr></thead><tbody>' +
+    return outputsHtml(t);
+  }
+  // a template's outputs, read-only, with the overlays each carries
+  function outputsHtml(t) {
+    var outs = fromTemplate(t).outputs;
+    return '<div><div class="sec-h">Outputs</div><table class="tbl"><thead><tr><th>Output</th><th>Picture</th><th>Video</th><th>Audio</th><th>Carries</th></tr></thead><tbody>' +
       (t.encodes || []).map(function (e) {
-        var o = outs.filter(function (x) { return x.name === e.name; })[0];
+        var o = outs.filter(function (x) { return x.name === e.name; })[0], on = carriedOn(t, e);
         var video = /^passthru$/i.test(e.codec || '') ? 'Passes through' : /^disable/i.test(e.codec || '') ? 'None' : U.esc(e.codec || '') + (o && o.videoBitrate ? ', ' + kbps(o.videoBitrate) : '');
-        return '<tr><td><b>' + U.esc(e.name) + '</b>' + (e.enabled ? '' : ' <span class="faint">off</span>') + '</td><td class="muted">' + U.esc(o ? sizeLabel(o) : '') + '</td><td>' + video + '</td><td>' + U.esc(e.audioCodec || '') + '</td>' +
-          '<td>' + (/^passthru$/i.test(e.codec || '') ? '<span class="tgl-text">Not encoded</span>' : '<span class="tgl-text">' + (o && o.overlay ? 'Carries ' + U.esc(t.overlay) : 'No') + '</span>') + '</td></tr>';
+        return '<tr data-carries="' + U.esc(e.name) + '"><td><b>' + U.esc(e.name) + '</b>' + (e.enabled ? '' : ' <span class="faint">off</span>') + '</td><td class="muted">' + U.esc(o ? sizeLabel(o) : '') + '</td><td>' + video + '</td><td>' + U.esc(e.audioCodec || '') + '</td>' +
+          '<td>' + (/^passthru$/i.test(e.codec || '') ? '<span class="tgl-text">Not encoded</span>' : '<span class="tgl-text">' + (on.length ? U.esc(on.join(', ')) : 'No overlay') + '</span>') + '</td></tr>';
       }).join('') + '</tbody></table>' + U.roNote() + '</div>';
   }
   function renderOther(t) {
     var v = verdict(t), can = carriers(t).length > 0 && !ro() && group(t) === 'other';
-    var outs = fromTemplate(t).outputs;
     var h = '<div class="note ' + (v.cls === 'on' ? 'on' : v.cls === 'warn' ? 'warn' : '') + '"><span class="dot ' + (v.cls === 'on' ? 'on' : v.cls === 'warn' ? 'warn' : '') + '"></span><div><b>' + v.text + '.</b> ' + v.long + '</div></div>' +
-      '<div><div class="sec-h">Outputs</div><table class="tbl"><thead><tr><th>Output</th><th>Picture</th><th>Video</th><th>Audio</th><th>Carries the overlay</th></tr></thead><tbody>' +
-      (t.encodes || []).map(function (e) {
-        var o = outs.filter(function (x) { return x.name === e.name; })[0];
-        var video = /^passthru$/i.test(e.codec || '') ? 'Passes through' : /^disable/i.test(e.codec || '') ? 'None' : U.esc(e.codec || '') + (o && o.videoBitrate ? ', ' + kbps(o.videoBitrate) : '');
-        return '<tr><td><b>' + U.esc(e.name) + '</b>' + (e.enabled ? '' : ' <span class="faint">off</span>') + '</td><td class="muted">' + U.esc(o ? sizeLabel(o) : '') + '</td><td>' + video + '</td><td>' + U.esc(e.audioCodec || '') + '</td>' +
-          '<td>' + (/^passthru$/i.test(e.codec || '') ? '<span class="tgl-text">Not encoded</span>' : '<span class="tgl-text">' + (o && o.overlay ? 'Carries ' + U.esc(t.overlay) : 'No') + '</span>') + '</td></tr>';
-      }).join('') + '</tbody></table>' + U.roNote() + '</div>';
+      outputsHtml(t);
     if (can) h += useHtml(t);
     else if (!ro() && group(t) === 'other') h += '<p class="small muted">It can still be used on a stream as it is, from the stream view.</p>';
     el.body.innerHTML = h;
     if (can) bindUse(t);
   }
-  // a new template built from t; one without an overlay gets the first overlay on every video output
+  // a new template built from t, with the overlays t carries and no others
   function copyOf(t) {
     var d = fromTemplate(t);
     d.isNew = true; d.name = freeName(t.name + '-overlay');
-    if (!d.overlay) {
-      d.overlay = ((U.overlays || [])[0] || {}).name || '';
-      d.outputs.forEach(function (o) { o.overlay = !!d.overlay && o.kind === 'video'; });
-    }
     return d;
   }
   function freeName(b) { return unique({ outputs: all().map(function (x) { return { name: x.name }; }) }, b); }
@@ -902,28 +985,68 @@
   }
 
   /* ---------- a customer's template changed in place: only its overlay and outputs ---------- */
-  function savedForm(t) { return { overlay: t.overlay || '', encodes: (t.overlayEncodes || []).slice().sort() }; }
+  // the overlays it carries, each with the outputs that carry it, by name: every carrying output when it is on all
+  function savedForm(t) {
+    var c = carriers(t).map(function (e) { return e.name; });
+    return { overlays: tplSlots(t).map(function (x) { return { name: x.name, on: ((x.encodes || []).length ? x.encodes.slice() : c.slice()).sort() }; }) };
+  }
   function renderOverlayOnly(t) {
-    var c = carriers(t), f = S.form || savedForm(t), b = S.base ? JSON.parse(S.base) : savedForm(t);
+    var c = carriers(t), f = S.form || (S.form = savedForm(t)), b = S.base ? JSON.parse(S.base) : savedForm(t);
+    var every = function (x) { return x.on.length === c.length; };
     if (ro()) {
-      el.body.innerHTML = '<dl class="kv"><dt>Overlay</dt><dd>' + U.esc(b.overlay || 'None') + '</dd><dt>Outputs that carry it</dt><dd>' + U.esc(b.encodes.length ? b.encodes.join(', ') : 'Every output') + '</dd></dl>' + U.roNote();
+      el.body.innerHTML = '<dl class="kv">' + (b.overlays.length ? b.overlays.map(function (x) { return '<dt>' + U.esc(x.name) + '</dt><dd>' + U.esc(every(x) ? 'Every output' : x.on.join(', ')) + '</dd>'; }).join('') : '<dt>Overlays</dt><dd>None</dd>') + '</dl>' + U.roNote();
       return;
     }
-    el.body.innerHTML = '<div class="fld" style="max-width:280px"><label class="f" for="ovs-io-ov">Overlay drawn by this template</label><select id="ovs-io-ov" data-io-ov' + (f.overlay !== b.overlay ? ' class="is-draft"' : '') + '>' + overlayOptions(f.overlay, 'None') + '</select>' +
-      '<div class="hint">' + (f.overlay !== b.overlay ? 'Saved: ' + U.esc(b.overlay || 'None') + '. ' : '') + 'Live on save for streams that load this file.</div></div>' +
-      '<div class="fld"><span class="f">Outputs that carry it</span><div class="hrow">' + c.map(function (e) {
-        return '<label class="check"><input type="checkbox" data-io-enc="' + U.esc(e.name) + '"' + (!f.encodes.length || f.encodes.indexOf(e.name) >= 0 ? ' checked' : '') + '>' + U.esc(e.name) + '</label>'; }).join('') + '</div></div>' +
+    var full = f.overlays.length >= MAX_OVERLAYS;
+    el.body.innerHTML = '<div class="sec-h">Overlays drawn by this template' + U.tip('Up to ' + MAX_OVERLAYS + '; a later one draws over an earlier one on the same output. Live on save for streams that load this file.') + '</div>' +
+      '<div class="stack io-list">' + f.overlays.map(function (x, i) {
+        var was = b.overlays[i], changed = !was || was.name !== x.name;
+        return '<div class="lyc lyr lyu" data-io="' + i + '"><div class="lyc-top"><div class="ly-thumb">' + U.icon('overlay') + '</div>' +
+          '<div class="ly-main"><select data-io-ov="' + i + '" aria-label="Overlay ' + (i + 1) + '"' + (changed ? ' class="is-draft"' : '') + '>' + overlayOptions(x.name, x.name ? null : 'Pick an overlay', f.overlays, x.name) + '</select>' +
+          '<span class="small muted">' + (changed && was ? 'Saved: ' + U.esc(was.name) : 'Overlay') + '</span></div>' +
+          '<div class="ly-acts">' + (i > 0 ? '<button class="btn sm icon ghost" type="button" data-io-up="' + i + '" aria-label="Move ' + U.esc(x.name || 'overlay') + ' down the stack">' + U.icon('up') + '</button>' : '') +
+          '<button class="btn sm icon ghost" type="button" data-io-rm="' + i + '" aria-label="Remove overlay ' + U.esc(x.name || (i + 1)) + '">' + U.icon('close') + '</button></div></div>' +
+          '<div class="lyc-row"><span class="f">On</span><div class="ly-outs">' + c.map(function (e) {
+            var on = x.on.indexOf(e.name) >= 0;
+            return '<label class="pilltog' + (on ? ' on' : '') + '"><input type="checkbox" data-io-enc="' + i + '" value="' + U.esc(e.name) + '"' + (on ? ' checked' : '') + '>' + U.esc(e.name) + '</label>'; }).join('') + '</div></div>' +
+          (!x.on.length ? '<span class="bdg warn">Pick at least one output</span>' : '') + '</div>';
+      }).join('') + '</div>' +
+      '<div class="hrow ly-add">' + ((U.overlays || []).length ? '<button class="btn sm ghost" type="button" data-io-add' + (full ? ' disabled title="At most ' + MAX_OVERLAYS + ' overlays in a template. Combine several layers in one overlay in the Overlays tab."' : '') + '>' + U.icon('plus') + 'Overlay</button>'
+        : '<button class="btn sm ghost" type="button" data-write data-go="new-overlay:">' + U.icon('plus') + 'Overlay</button>') +
+      (f.overlays.length ? '' : '<span class="small faint">None</span>') + '</div>' +
       '<p class="small muted">Its outputs are changed where it was written, for example in WSE Manager. To build on it here, use New template from this one in the menu.</p>';
-    var sel = el.body.querySelector('[data-io-ov]');
-    function read() {
-      var picked = Array.prototype.map.call(el.body.querySelectorAll('[data-io-enc]:checked'), function (x) { return x.getAttribute('data-io-enc'); }).sort();
-      S.form = { overlay: sel.value, encodes: picked.length === c.length ? [] : picked };
-      S.savedNote = null;
-      renderBar(); U.changed();
-      sel.classList.toggle('is-draft', S.form.overlay !== b.overlay);
+    function changed() { S.savedNote = null; renderOverlayOnly(t); renderBar(); U.changed(); }
+    el.body.querySelectorAll('[data-io-ov]').forEach(function (s) { s.onchange = function () { f.overlays[+s.getAttribute('data-io-ov')].name = s.value; changed(); }; });
+    el.body.querySelectorAll('[data-io-enc]').forEach(function (x) {
+      x.onchange = function () {
+        var o = f.overlays[+x.getAttribute('data-io-enc')];
+        o.on = o.on.filter(function (n) { return n !== x.value; });
+        if (x.checked) o.on.push(x.value);
+        o.on.sort(); changed();
+      };
+    });
+    el.body.querySelectorAll('[data-io-rm]').forEach(function (x) { x.onclick = function () { f.overlays.splice(+x.getAttribute('data-io-rm'), 1); changed(); }; });
+    el.body.querySelectorAll('[data-io-up]').forEach(function (x) {
+      x.onclick = function () { var i = +x.getAttribute('data-io-up'), a = f.overlays[i]; f.overlays[i] = f.overlays[i - 1]; f.overlays[i - 1] = a; changed(); };
+    });
+    var add = el.body.querySelector('[data-io-add]');
+    if (add) add.onclick = function () {
+      var have = f.overlays.map(function (x) { return x.name; });
+      f.overlays.push({ name: ((U.overlays || []).filter(function (o) { return have.indexOf(o.name) < 0; })[0] || {}).name || '', on: c.map(function (e) { return e.name; }).sort() });
+      changed();
+    };
+  }
+  // why the in-place form cannot be saved, or null
+  function formProblem(f) {
+    var seen = {};
+    for (var i = 0; i < f.overlays.length; i++) {
+      var x = f.overlays[i];
+      if (!x.name) return 'Pick an overlay for each overlay, or remove the empty one.';
+      if (seen[x.name]) return 'Overlay ' + x.name + ' is in this template twice; a template carries each overlay once.';
+      seen[x.name] = 1;
+      if (!x.on.length) return 'Overlay ' + x.name + ': pick at least one output.';
     }
-    sel.onchange = read;
-    el.body.querySelectorAll('[data-io-enc]').forEach(function (x) { x.onchange = read; });
+    return f.overlays.length > MAX_OVERLAYS ? 'A template carries at most ' + MAX_OVERLAYS + ' overlays.' : null;
   }
 
   /* ---------- changes, the save bar, saving ---------- */
@@ -946,12 +1069,13 @@
   function describe() {
     if (S.kind === 'new') return ['new template ' + (S.draft.name || '(no name yet)')];
     var a = S.base ? JSON.parse(S.base) : {}, b = JSON.parse(currentJson() || '{}'), out = [];
-    if (S.form) {
-      if (a.overlay !== b.overlay) out.push('overlay ' + (b.overlay || 'none'));
-      if (JSON.stringify(a.encodes) !== JSON.stringify(b.encodes)) out.push('outputs carrying it');
-      return out;
-    }
-    if ((a.overlay || '') !== (b.overlay || '')) out.push('overlay ' + (b.overlay || 'none'));
+    if (S.form) return overlayWords(a.overlays, b.overlays);
+    // each overlay with the outputs it is on, none for every output, whichever slot it is saved in
+    var place = function (sp) {
+      var vids = (sp.outputs || []).filter(function (o) { return o.kind === 'video' && o.enabled; }), on = vids.filter(function (o) { return o.overlay; }).map(function (o) { return o.name; });
+      return [{ name: sp.overlay, on: on.length === vids.length ? [] : on }].concat((sp.overlays || []).map(function (x) { return { name: x.name, on: x.encodes }; })).filter(function (x) { return x.name; });
+    };
+    out = overlayWords(place(a), place(b));
     if (a.hardware !== b.hardware) out.push('hardware ' + b.hardware);
     var ao = a.outputs || [], bo = b.outputs || [];
     bo.forEach(function (o) {
@@ -960,13 +1084,25 @@
       var w = {};
       Object.keys(o).forEach(function (k) { if (k !== 'overlay' && JSON.stringify(o[k]) !== JSON.stringify(s[k])) w[WORDS[k] || k] = 1; });
       if (Object.keys(w).length) out.push(o.name + ' ' + Object.keys(w).join(', '));
-      if (o.overlay !== s.overlay && b.overlay && a.overlay) out.push(o.name + (o.overlay ? ' gets ' : ' drops ') + b.overlay);
     });
     ao.forEach(function (s) { if (!bo.some(function (o) { return o.name === s.name; })) out.push('remove ' + s.name); });
     if (JSON.stringify(a.images) !== JSON.stringify(b.images)) out.push('images');
     if (JSON.stringify(a.groups) !== JSON.stringify(b.groups)) out.push('adaptive groups');
     if (a.deinterlace !== b.deinterlace || a.gpuId !== b.gpuId || a.minFrameRate !== b.minFrameRate) out.push('decode');
     return out.length ? out : ['unsaved edits'];
+  }
+  // overlays added, removed, moved to other outputs or reordered, in words; a and b are [{name, on}]
+  function overlayWords(a, b) {
+    var out = [], an = a.map(function (x) { return x.name; }), bn = b.map(function (x) { return x.name; });
+    b.forEach(function (x) {
+      var was = a[an.indexOf(x.name)];
+      if (!was) out.push('add overlay ' + x.name);
+      else if (JSON.stringify(was.on) !== JSON.stringify(x.on)) out.push('where ' + x.name + ' draws');
+    });
+    an.forEach(function (n) { if (bn.indexOf(n) < 0) out.push('remove overlay ' + n); });
+    var kept = function (l, other) { return l.filter(function (n) { return other.indexOf(n) >= 0; }).join(); };
+    if (kept(an, bn) !== kept(bn, an)) out.push('overlay order');
+    return out;
   }
   function impact() {
     if (S.kind === 'new') return 'Writes transcoder/templates/' + (S.draft.name || '<name>') + '.xml. No stream uses it until you use it on a stream or add it to the template order.';
@@ -979,7 +1115,7 @@
     if (!el.bar || U.current() !== 'template') return;
     var n = changes();
     U.saveBar(el.bar, { changes: n ? describe() : [], impact: impact(), conflict: S.conflict, saving: S.saving,
-      problem: S.draft && n ? problem(S.draft) : null, saveLabel: S.kind === 'new' ? 'Create template' : 'Save', saved: S.savedNote,
+      problem: !n ? null : S.draft ? problem(S.draft) : S.form ? formProblem(S.form) : null, saveLabel: S.kind === 'new' ? 'Create template' : 'Save', saved: S.savedNote,
       onSave: save, onDiscard: discard,
       onTheirs: function () { S.conflict = false; delete mem[S.sel]; var t = find(S.sel); S.known = t.modified; loadFrom(t); renderBody(); renderBar(); U.changed(); },
       onMine: function () { S.conflict = false; S.known = S.theirs; renderBar(); U.toast('Keeping your version. Save replaces the one saved in the other session.'); } });
@@ -1008,10 +1144,10 @@
       label = S.draft.name;
       req = isNew ? U.api.post(vh() + '/templates', body) : U.api.post(vh() + '/templates/' + U.enc(label) + '/spec', body);
     } else {
-      var f = S.form;
-      if (f.overlay && !el.body.querySelector('[data-io-enc]:checked')) { U.toast('No output picked: tick at least one.', { level: 'bad' }); return Promise.resolve(false); }
+      var f = S.form, bad = formProblem(f), every = carriers(t).length;
+      if (bad) { U.toast(bad, { level: 'bad' }); return Promise.resolve(false); }
       label = t.name;
-      req = U.api.post(vh() + '/templates/' + U.enc(label) + '/overlay', { overlay: f.overlay || null, encodes: f.encodes });
+      req = U.api.post(vh() + '/templates/' + U.enc(label) + '/overlay', { overlays: f.overlays.map(function (x, i) { return { name: x.name, encodes: x.on.length === every ? [] : x.on, slot: i + 1 }; }) });
     }
     S.saving = true; renderBar();
     var copies = isNew ? [] : U.streamsUsing(label).filter(function (s) { return s.own; });
