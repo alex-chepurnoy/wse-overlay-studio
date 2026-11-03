@@ -107,6 +107,15 @@ class OverlayStudioBridgeTest
 		MockHttpServletRequest r = new MockHttpServletRequest(method, "/enginemanager/overlaystudio-api/rest" + path);
 		r.setContextPath("/enginemanager");
 		r.setQueryString(query);
+		// the parameters as the servlet decodes them from the query
+		if(query != null)
+		{
+			for(String p: query.split("&"))
+			{
+				int eq = p.indexOf('=');
+				r.addParameter(java.net.URLDecoder.decode(eq < 0 ? p : p.substring(0, eq), StandardCharsets.UTF_8), eq < 0 ? "" : java.net.URLDecoder.decode(p.substring(eq + 1), StandardCharsets.UTF_8));
+			}
+		}
 		// a Host the browser chose: never the target
 		r.setServerName("evil.example");
 		r.setServerPort(9);
@@ -155,23 +164,36 @@ class OverlayStudioBridgeTest
 		}
 	}
 
-	@Test
-	void theSecurityTokenAndTheMethodOverrideAreNotForwarded()
+	// the parameters as the servlet decoded them, in order
+	private static java.util.Map<String, String[]> params(String... kv)
 	{
-		assertEquals("", OverlayStudioBridge.forwardedQuery(null));
-		assertEquals("a=1&b=2", OverlayStudioBridge.forwardedQuery("wowzaSecurityToken=abc&a=1&method=DELETE&b=2"));
-		assertEquals("a=1", OverlayStudioBridge.forwardedQuery("a=1&wowzaSecurity%54oken=abc&%6Dethod=PUT"), "an encoded name is the same name");
-		assertEquals("methods=x&tokens=y", OverlayStudioBridge.forwardedQuery("methods=x&tokens=y&wowzaSecurityToken"));
+		java.util.Map<String, String[]> m = new java.util.LinkedHashMap<>();
+		for(int i = 0; i < kv.length; i += 2)
+		{
+			m.put(kv[i], new String[] { kv[i + 1] });
+		}
+		return m;
 	}
 
 	@Test
-	void theQueryIsEncodedOnceMoreForWseWhichDecodesItTwice()
+	void theSecurityTokenAndTheMethodOverrideAreNotForwarded()
 	{
-		// WSE decodes once before its resource decodes the form: what the module reads is what the page encoded
-		assertEquals("pattern=h%253Amm%2520a", OverlayStudioBridge.forwardedQuery("pattern=h%3Amm%20a"));
-		assertEquals("pattern=h%253Amm%2520a", OverlayStudioBridge.forwardedQuery("pattern=h%3Amm+a"), "a + is a space in a form");
-		assertEquals("pattern=h%252Ba&x=100%2525", OverlayStudioBridge.forwardedQuery("pattern=h%2Ba&x=100%25"));
-		assertEquals("raw=true&count=120", OverlayStudioBridge.forwardedQuery("raw=true&count=120"), "a plain value is unchanged");
+		assertEquals("", OverlayStudioBridge.forwardedQuery(params()));
+		assertEquals("a=1&b=2", OverlayStudioBridge.forwardedQuery(params("wowzaSecurityToken", "abc", "a", "1", "method", "DELETE", "b", "2")));
+		assertEquals("methods=x&tokens=y", OverlayStudioBridge.forwardedQuery(params("methods", "x", "tokens", "y", "wowzaSecurityToken", "")));
+	}
+
+	@Test
+	void eachValueIsEncodedOnceFromWhatTheServletDecoded()
+	{
+		// a space, a plus, a percent, an ampersand and a quote reach the module as the page sent them
+		assertEquals("pattern=h%3Amm%3Ass+a&kind=time", OverlayStudioBridge.forwardedQuery(params("pattern", "h:mm:ss a", "kind", "time")));
+		assertEquals("pattern=h%2Ba&x=100%25&y=a%26b%3Dc", OverlayStudioBridge.forwardedQuery(params("pattern", "h+a", "x", "100%", "y", "a&b=c")));
+		assertEquals("pattern=HH+%27o%7Dclock%27&zone=Europe%2FParis", OverlayStudioBridge.forwardedQuery(params("pattern", "HH 'o}clock'", "zone", "Europe/Paris")));
+		assertEquals("t=%C3%A9t%C3%A9", OverlayStudioBridge.forwardedQuery(params("t", "\u00e9t\u00e9")), "UTF-8");
+		java.util.Map<String, String[]> two = new java.util.LinkedHashMap<>();
+		two.put("a", new String[] { "1", "2" });
+		assertEquals("a=1&a=2", OverlayStudioBridge.forwardedQuery(two), "a repeated name keeps every value");
 	}
 
 	@Test

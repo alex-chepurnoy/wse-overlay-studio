@@ -13,8 +13,10 @@ import java.net.HttpURLConnection;
 import java.net.PasswordAuthentication;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -137,7 +139,7 @@ public class OverlayStudioBridge
 		int status;
 		try
 		{
-			c = (HttpURLConnection)url(a, path, forwardedQuery(req.getQueryString())).toURL().openConnection();
+			c = (HttpURLConnection)url(a, path, forwardedQuery(req.getParameterMap())).toURL().openConnection();
 			c.setAuthenticator(new Authenticator()
 			{
 				@Override
@@ -263,31 +265,24 @@ public class OverlayStudioBridge
 	}
 
 	/**
-	 * The query to forward: everything but the Manager's security token and the method override, encoded once more.
-	 * WSE's REST server decodes the query before its resource reads it as a form, which decodes it again, so a value
-	 * sent once encoded loses a level: "h%3Amm%20a" reaches it as a raw space and is answered 404, and "%2B" arrives
-	 * as a space. Each "%" is sent as "%25" and a "+" (a space in a form) as "%2520", so the module reads the value
-	 * the page sent (verified on WSE 4.12.1, 2026-11-03).
+	 * The query to forward: every parameter but the Manager's security token and the method override, each value
+	 * encoded once from what the servlet decoded. The raw query string is not forwarded: the Manager hands it to the
+	 * bridge already decoded, so a space in a value ("h:mm:ss a") reached WSE raw and was answered 404, and an encoded
+	 * "+" arrived as a space (seen on WSE 4.12.1, 2026-11-03). A space goes as "+", which WSE's form reading takes back.
 	 */
-	static String forwardedQuery(String q)
+	static String forwardedQuery(Map<String, String[]> params)
 	{
-		if(q == null || q.isEmpty())
-		{
-			return "";
-		}
 		StringBuilder b = new StringBuilder();
-		for(String p: q.split("&"))
+		for(Map.Entry<String, String[]> e: params.entrySet())
 		{
-			if(p.isEmpty())
+			if(e.getKey().equals(TOKEN) || e.getKey().equals(METHOD))
 			{
 				continue;
 			}
-			String name = decode(p.contains("=") ? p.substring(0, p.indexOf('=')) : p);
-			if(name.equals(TOKEN) || name.equals(METHOD))
+			for(String v: e.getValue() == null || e.getValue().length == 0 ? new String[] { "" } : e.getValue())
 			{
-				continue;
+				b.append(b.length() == 0 ? "" : "&").append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8)).append('=').append(URLEncoder.encode(v, StandardCharsets.UTF_8));
 			}
-			b.append(b.length() == 0 ? "" : "&").append(p.replace("%", "%25").replace("+", "%2520"));
 		}
 		return b.toString();
 	}
