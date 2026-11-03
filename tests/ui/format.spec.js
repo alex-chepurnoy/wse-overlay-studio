@@ -161,3 +161,17 @@ test('a live value shows on the canvas with its badge, the saved values while se
   await expect(r.locator('[data-livebadge]')).toHaveCount(0);
   expect(wse.posts.filter((p) => p.path.endsWith('/overlays/Mixed/live')).pop().body).toEqual({ clear: 'score' });
 });
+
+test('a clock\'s Text tab offers every font even when the list comes after the tab is opened', async ({ page, studio, wse }) => {
+  // a clock opens on its Format tab; the Text tab is clicked before the server's font list has come
+  wse.fontsDelay = 1500;
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, CLOCK).click();
+  await page.getByRole('tab', { name: 'Text' }).click();
+  await expect(page.getByRole('tab', { name: 'Text' }), 'the tab keeps the focus').toBeFocused();
+  const font = field(page, 'font');
+  await expect(font.locator('option'), 'the bundled, Java and server fonts').toHaveCount(10, { timeout: 5000 });
+  await expect(font).toHaveValue('Fira Mono');
+  await font.selectOption('PT Serif');
+  expect(obj(await saved(page, wse, 'Mixed'), 'clock').font).toBe('PT Serif');
+});

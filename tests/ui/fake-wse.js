@@ -83,6 +83,8 @@ class FakeWse {
     if (req.method() === 'POST' && url.searchParams.get('wowzaSecurityToken') !== this.token) {
       return route.fulfill({ status: 403, contentType: 'text/plain', body: 'CSRF token missing or wrong' });
     }
+    // a slow font list, as on a server whose fonts take a moment to register
+    if (this.fontsDelay && p.endsWith('/fonts')) await new Promise((res) => setTimeout(res, this.fontsDelay));
     const r = this.answer(method, p, url.searchParams, body);
     if (r === undefined) {
       this.unknown.push(method + ' ' + p);

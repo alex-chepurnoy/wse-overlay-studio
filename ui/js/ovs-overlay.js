@@ -180,7 +180,7 @@
       if (S.name !== name) return;
       S.saved = normalize(o); S.draft = clone(S.saved); S.renamed = {}; S.placing = null;
       var top = sorted()[0]; S.layer = top ? top.id : null;
-      U.format.start(); S.live = {}; ticked = {};
+      U.format.start(); S.live = {}; ticked = {}; loadFonts();
       renderAll();
       startCaptures();
       loadLive();
@@ -1317,8 +1317,19 @@
     fontsAsked = true;
     U.api.get('/fonts').then(function (r) {
       fonts = r || {};
-      if (U.current() === 'overlay' && el.insp && el.insp.querySelector('select[data-f=font]') && !el.insp.contains(document.activeElement)) renderInspector();
+      fillFontLists();
     }, function () { /* the field offers the layer's own font until a later page load */ });
+  }
+  // the font fields fill in where they are once the list comes: a whole new panel would wait for the focus to leave
+  // it, and a clock's Text tab, opened from its Format tab, keeps the focus on the tab
+  function fillFontLists() {
+    if (U.current() !== 'overlay' || !el.insp) return;
+    el.insp.querySelectorAll('select[data-f=font]').forEach(function (s) {
+      // an open list is not changed under the pointer; it fills when it closes
+      if (s === document.activeElement) { s.addEventListener('blur', fillFontLists, { once: true }); return; }
+      var v = s.value;
+      s.innerHTML = fontOptions(v, function (x, text) { return '<option value="' + U.esc(x) + '"' + (x === v ? ' selected' : '') + '>' + U.esc(text) + '</option>'; });
+    });
   }
   function fontOptions(v, opt) {
     var groups = fonts ? [['Bundled with Overlay Studio', (fonts.bundled || []).map(function (b) { return b.family; })], ['Java', fonts.logical || []], ['On this server', fonts.system || []]] : [];
