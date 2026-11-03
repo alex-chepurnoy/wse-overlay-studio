@@ -605,6 +605,7 @@
       if (nm) nm.textContent = U.draw.name(drawn(o));
     });
     refreshFormat();
+    if (S.presetPick) U.presets.fillSamples(el.insp);
   }
   // the Format tab's samples and its pattern check follow the clock and the server's answers
   function refreshFormat() {
@@ -668,6 +669,27 @@
     el.outside.hidden = !outside;
     if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' is outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '): nothing of it shows. Move it under Place.';
   }
+  // the preset list in the panel: a choice adds that layer at its place on the frame (the background stream's size,
+  // else 1920 x 1080) and selects it
+  function renderPresetPick() {
+    el.insp.innerHTML = '<div class="pnl-h"><div><h3>Add from a preset</h3><span class="small faint">' + U.esc(S.name) + '</span></div></div>' +
+      '<section>' + U.presets.listHtml(null) + '<div class="hrow" style="margin-top:12px"><span class="spacer"></span><button type="button" class="btn" data-precancel>Cancel</button></div></section>';
+    U.presets.fillSamples(el.insp);
+    el.insp.querySelectorAll('[data-preset]').forEach(function (b) { b.onclick = function () { addPreset(b.getAttribute('data-preset')); }; });
+    el.insp.querySelector('[data-precancel]').onclick = function () { S.presetPick = false; renderInspector(); };
+  }
+  function addPreset(id) {
+    var s = src(), o = U.presets.layer(id, { w: s.w, h: s.h }, function (x) { return !!byId(x); }), top = sorted()[0];
+    if (!o) return;
+    o.zOrder = top ? (top.zOrder || 0) + 1 : 1;
+    snapshot();
+    S.draft.objects.push(o);
+    S.presetPick = false; S.layer = o.id;
+    if (o.type === 'string' && U.draw.hasToken(o.text)) S.inspTab = 'format';
+    renderEditor();
+    focusCanvas();
+    U.toast('Added ' + U.presets.find(id).name.toLowerCase() + ' ' + o.id + ' to the draft. Viewers see it after Save.');
+  }
   // while placing, a banner on the canvas itself says what a click does, with Cancel; it is said once through data-say
   // (the readout under the canvas is not a live region, so a ticking clock's size is not read out every second)
   function placeBanner() {
@@ -706,7 +728,7 @@
   // keepFocus: the canvas keeps (or takes) the focus, with the layer as its active descendant
   function select(id, keepFocus) {
     endEdit();
-    S.layer = id; S.adding = false; S.imgPick = false;
+    S.layer = id; S.adding = false; S.imgPick = false; S.presetPick = false;
     renderLayers(); renderInspector(); placeBoxes();
     if (keepFocus) focusCanvas();
   }
@@ -1141,6 +1163,7 @@
     var o = S.layer && byId(S.layer), d = S.draft, sv = o ? savedById(o.id) || {} : {};
     if (!d) { el.insp.innerHTML = ''; return; }
     if (S.adding) { renderAddPage(); return; }
+    if (S.presetPick && !ro()) { renderPresetPick(); return; }
     var h = '';
     if (!o) {
       h = '<div class="pnl-h"><div><h3>No layer selected</h3><span class="small faint">' + U.esc(S.name) + '</span></div></div>' +
@@ -1211,6 +1234,7 @@
     var kd = el.insp.querySelector('[data-kind]');
     if (kd && o) kd.onchange = function () { changeKind(o.id, kd.value); };
     el.insp.querySelectorAll('[data-liveclear]').forEach(function (b) { b.onclick = function () { clearLive(b.getAttribute('data-liveclear')); }; });
+    el.insp.querySelectorAll('[data-tstyle]').forEach(function (b) { b.onclick = function () { if (o) applyStyle(o, b.getAttribute('data-tstyle')); }; });
     if (o && S.inspTab === 'format') bindFormat(o);
     var bx = el.insp.querySelector('details[data-boxadv]');
     if (bx) bx.addEventListener('toggle', function () { S.boxOpen = bx.open; });
@@ -1325,9 +1349,28 @@
       refreshFormat();
     });
   }
+  // text styles: settings for the selected text, not starts (plan 4.3)
+  function stylesHtml() {
+    if (ro()) return '';
+    return '<div class="fld"><span class="f">Text style' + U.tip('Sets the font, size, weight, color and background box for this text. Change any of them after.') + '</span>' +
+      '<div class="tstyles" role="group" aria-label="Text styles">' + U.presets.STYLES.map(function (s) { return '<button type="button" class="btn sm" data-tstyle="' + s.id + '">' + U.esc(s.name) + '</button>'; }).join('') + '</div></div>';
+  }
+  function applyStyle(o, id) {
+    var fields = U.presets.style(id, src().h), top = freeText(o) ? shownY(o) : null;
+    if (!fields) return;
+    snapshot();
+    // a style replaces the box look as a whole: a background, padding or corners it does not set go
+    ['background', 'padding', 'radius'].forEach(function (k) { if (!(k in fields)) delete o[k]; });
+    Object.keys(fields).forEach(function (k) { o[k] = fields[k]; });
+    if (top !== null) o.y = storedY(o, top);
+    ticked = {};
+    renderLayers(); renderInspector(); placeBoxes(); markEdited(); renderBar(); renderCaption(); U.changed();
+    var b = el.insp.querySelector('[data-tstyle="' + id + '"]'); if (b) b.focus();
+    U.toast('Applied the ' + U.presets.STYLES.filter(function (s) { return s.id === id; })[0].name + ' style to ' + o.id + '.');
+  }
   function textTabHtml(o, sv) {
     loadFonts();
-    return of(o, sv, 'text') + '<div class="grid2">' + of(o, sv, 'font') + of(o, sv, 'fontSize') + of(o, sv, 'fontStyle') + of(o, sv, 'align') + '</div>' + of(o, sv, 'textColor') +
+    return stylesHtml() + of(o, sv, 'text') + '<div class="grid2">' + of(o, sv, 'font') + of(o, sv, 'fontSize') + of(o, sv, 'fontStyle') + of(o, sv, 'align') + '</div>' + of(o, sv, 'textColor') +
       '<details class="adv" data-boxadv' + (S.boxOpen ? ' open' : '') + '><summary>Box and outline</summary>' + of(o, sv, 'box') +
       '<div class="grid2">' + of(o, sv, 'background') + of(o, sv, 'padding') + of(o, sv, 'outlineColor') + of(o, sv, 'outlineWidth') + of(o, sv, 'radius') + of(o, sv, 'lineHeight') + '</div>' +
       of(o, sv, 'autoFit') + '</details>';
@@ -1640,7 +1683,7 @@
   // the one way to add a layer, each kind with its icon: under the layer list and in the empty inspector (said by
   // Alex, 2026-11-03: the bar over the canvas repeated it and did nothing visible when clicked)
   function addMenuHtml(where, cls) {
-    return U.rowMenuHtml('add:' + where, 'Add a layer', [kindItem('page'), kindItem('text'), kindItem('datetime'), '-'].concat(shapeItems()).concat(['-', kindItem('image')]),
+    return U.rowMenuHtml('add:' + where, 'Add a layer', [kindItem('page'), kindItem('text'), kindItem('datetime'), '-'].concat(shapeItems()).concat(['-', kindItem('image'), '-', ['preset', 'From a preset...', false, false, 'grid']]),
       { html: U.icon('plus') + 'Add layer', cls: cls });
   }
   U.rowActions.add = function (where, kind) { addKind(kind); };
@@ -1650,6 +1693,8 @@
     if (el.pagesAdd) U.openRowMenu(el.pagesAdd);
   }
   function addKind(kind) {
+    // the preset list opens in the panel (plan 4.3)
+    if (kind === 'preset' && !ro() && S.draft) { stopPlacing(); endEdit(); S.adding = false; S.presetPick = true; renderInspector(); var f = el.insp.querySelector('[data-preset]'); if (f) f.focus(); return; }
     if (ro() || !S.draft || !KIND_LABEL[kind]) return;
     // a web page asks for its address first, and appears at the usual spot once added
     if (kind === 'page') { stopPlacing(); startAdd(); return; }
@@ -1909,6 +1954,7 @@
       };
       U.listen(window, 'resize', function () { if (U.current() === 'overlay') placeBoxes(); });
       U.every(250, tick);
+      U.every(1000, function () { if (U.current() === 'new-overlay' && N.start === 'preset' && nbox) U.presets.fillSamples(nbox); });
       U.every(5000, function () { if (U.current() === 'overlay' && S.draft) return loadLive(); });
       U.format.onChange(function () { if (U.current() === 'overlay' && S.draft) { ticked = {}; tick(); } });
       el.coords.addEventListener('click', function (e) {
@@ -1978,16 +2024,31 @@
   };
 
   /* ---------- New overlay: name, a starting point, and a test capture before anything is written ---------- */
-  var N = { name: '', start: 'page', url: '', vw: 1280, vh: 720, test: null, testTimer: null, testSeq: 0, creating: false };
+  var N = { name: '', start: 'page', url: '', vw: 1280, vh: 720, preset: null, test: null, testTimer: null, testSeq: 0, creating: false };
   var nbox = null;
-  U.newOverlayFrom = function (from) { N.start = 'copy:' + from; N.name = from + '-copy'; U.go('new-overlay:'); };
+  // a New overlay draft someone has typed into is asked about before another start replaces it (plan 4.1)
+  function newDirty() { return !!(N.name || N.url || N.preset); }
+  function replaceNew(then) {
+    if (!newDirty()) { then(); return; }
+    U.confirm('Replace the new overlay you started?', '<p>New overlay holds ' + U.esc(N.name || 'an unnamed overlay') + ', not created yet. Starting another replaces it.</p>', 'Replace it').then(function (ok) { if (ok) then(); });
+  }
+  U.newOverlayFrom = function (from) { replaceNew(function () { resetNew(); N.start = 'copy:' + from; N.name = from + '-copy'; U.go('new-overlay:'); }); };
+  /** New overlay with a preset chosen and a name suggested, as the Templates picker opens it (plan 4.5). */
+  U.newOverlayPreset = function (id) {
+    replaceNew(function () { resetNew(); N.start = 'preset'; N.preset = id; N.name = suggestName(id); U.go('new-overlay:'); });
+  };
+  function suggestName(id) {
+    var p = U.presets.find(id), base = p ? p.name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : 'overlay', n = base, i = 2;
+    while ((U.overlays || []).some(function (o) { return o.name === n; })) n = base + '-' + i++;
+    return n;
+  }
   function nameProblem(n) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(n) || n.indexOf('..') >= 0) return 'Name: letters, digits, dot, dash and underscore.';
     if ((U.overlays || []).some(function (o) { return o.name === n; })) return 'An overlay with this name exists.';
     return null;
   }
   function renderNew() {
-    var starts = [['page', 'One page', 'Start from a single web page, tested before it is created']].concat((U.overlays || []).map(function (o) {
+    var starts = [['page', 'One page', 'Start from a single web page, tested before it is created'], ['preset', 'A preset', 'A ready layer: a badge, a lower third, a clock, a shape']].concat((U.overlays || []).map(function (o) {
       return ['copy:' + o.name, 'Copy of ' + o.name, (o.pages || 0) + ' layer' + (o.pages === 1 ? '' : 's') + ', same positions and keys'];
     })).concat([['empty', 'Empty', 'Add layers in the editor']]);
     if (!starts.some(function (s) { return s[0] === N.start; })) N.start = 'page';
@@ -2000,6 +2061,7 @@
       (N.start === 'page' ? '<div><div class="fld"><label class="f" for="ovs-nu">First page URL</label><input id="ovs-nu" type="url" data-n="url" value="' + U.esc(N.url) + '" placeholder="https://" autocomplete="off" spellcheck="false">' +
         '<div class="hint">' + U.esc(F.url.help) + '</div></div><div class="grid2"><div class="fld"><label class="f" for="ovs-nw">Browser width (px)</label><input id="ovs-nw" type="number" data-n="vw" value="' + N.vw + '"></div>' +
         '<div class="fld"><label class="f" for="ovs-nh">Browser height (px)</label><input id="ovs-nh" type="number" data-n="vh" value="' + N.vh + '"></div></div><div data-test></div></div>' : '') +
+      (N.start === 'preset' ? '<div>' + U.presets.listHtml(N.preset) + '<div class="err" data-perr></div></div>' : '') +
       '<p class="small muted">A new overlay reaches no viewer until a template names it. After creating it, pick it in a template, or in "Overlay on this stream" on a stream.</p>' +
       '<div class="hrow"><span class="spacer"></span><button type="button" class="btn" data-ncancel>Cancel</button><button type="button" class="btn primary" data-ncreate' + (N.creating ? ' disabled' : '') + '>Create overlay</button></div></div></div>';
     nbox.querySelectorAll('[data-n]').forEach(function (i) {
@@ -2012,11 +2074,23 @@
       });
     });
     nbox.querySelectorAll('[data-start]').forEach(function (b) { b.onclick = function () { N.start = b.getAttribute('data-start'); renderNew(); if (N.start === 'page') testSoon(); }; });
+    nbox.querySelectorAll('[data-preset]').forEach(function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-preset'), was = N.preset && suggestName(N.preset);
+        N.preset = id;
+        // a name suggested from the last preset follows the new one; a typed name stays
+        if (!N.name || N.name === was) N.name = suggestName(id);
+        renderNew();
+        var x = nbox.querySelector('[data-preset="' + CSS.escape(id) + '"]'); if (x) x.focus();
+        U.changed();
+      };
+    });
+    U.presets.fillSamples(nbox);
     nbox.querySelector('[data-ncancel]').onclick = function () { resetNew(); U.changed(); U.go((U.overlays || []).length ? 'overlay:' + U.overlays[0].name : 'home:'); };
     nbox.querySelector('[data-ncreate]').onclick = createOverlay;
     renderTest();
   }
-  function resetNew() { N.name = ''; N.start = 'page'; N.url = ''; N.vw = 1280; N.vh = 720; N.test = null; if (N.testTimer) { N.testTimer.stop(); N.testTimer = null; } }
+  function resetNew() { N.name = ''; N.start = 'page'; N.url = ''; N.vw = 1280; N.vh = 720; N.preset = null; N.test = null; if (N.testTimer) { N.testTimer.stop(); N.testTimer = null; } }
   function renderTest() {
     var box = nbox && nbox.querySelector('[data-test]');
     if (!box) return;
@@ -2050,6 +2124,8 @@
     }, 500);
   }
   function createOverlay() {
+    // a preset suggests the name, so it is asked for first
+    if (N.start === 'preset' && !N.preset) { nbox.querySelector('[data-perr]').textContent = 'Choose a preset, or start Empty.'; return; }
     var why = nameProblem(N.name), err = nbox.querySelector('[data-nerr]');
     if (why) { err.textContent = why; nbox.querySelector('#ovs-nn').focus(); return; }
     if (N.start === 'page' && (urlProblem(N.url) || !(N.vw >= 16 && N.vh >= 16))) { renderTest(); var u = nbox.querySelector('#ovs-nu'); if (u) u.focus(); if (!N.url) nbox.querySelector('[data-test]').innerHTML = '<p class="err">Enter the first page\'s address, or start Empty.</p>'; return; }
@@ -2060,6 +2136,8 @@
     get.then(function (from) {
       body = from ? normalize(from) : base;
       if (N.start === 'page') body.objects = [U.newPage('page1', N.url, N.vw, N.vh)];
+      // New overlay has no background stream: presets land on 1920 x 1080 (plan 4.3)
+      if (N.start === 'preset') { var pl = U.presets.layer(N.preset, { w: 1920, h: 1080 }, function () { return false; }); pl.zOrder = 1; body.objects = [pl]; }
       return U.api.post(ovPath(name), body);
     }).then(function () {
       N.creating = false;

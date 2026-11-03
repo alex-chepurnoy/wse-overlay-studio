@@ -200,7 +200,7 @@
         var open = v.screen === 'overlay' && v.id === o.name;
         if (!open && !matches(o.name + ' ' + sub)) return;
         h.push(item('overlay:' + o.name, o.error ? 'bad' : live.length ? 'on' : '', U.esc(o.name), U.esc(sub), unsavedFor('overlay:' + o.name), open, null,
-          U.rowMenuHtml('overlay:' + o.name, 'Actions for ' + o.name, [['add:page', 'Add web page'], ['add:text', 'Add text'], ['add:datetime', 'Add date and time'], ['add:shape', 'Add shape...'], ['add:image', 'Add image'], '-',
+          U.rowMenuHtml('overlay:' + o.name, 'Actions for ' + o.name, [['add:page', 'Add web page'], ['add:text', 'Add text'], ['add:datetime', 'Add date and time'], ['add:shape', 'Add shape...'], ['add:image', 'Add image'], ['add:preset', 'Add from a preset...'], '-',
           ['dup', 'Duplicate...'], '-', ['del', 'Delete overlay...', true]])));
         // the open overlay's layers sit under it, with the Add menu last
         if (open) h.push('<li class="lsub-host" data-ovpages></li>');
