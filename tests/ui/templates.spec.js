@@ -182,6 +182,7 @@ test('the Add menu opens a picker of the overlays holding that kind, with thumbn
   await expect(pick.locator('[data-ovpname]')).toHaveCount(3);
   await expect(pick.locator('[data-ovpname="Scoreboard"]')).toBeDisabled();
   await expect(pick.locator('[data-ovpname="Scoreboard"]')).toContainText('Already in this template');
+  await expect(pick.locator('[data-ovpname="LowerThird"]')).toContainText('web page (1 layer)');
   await pick.locator('[data-ovkind="webPage"]').click();
   await expect(pick.getByRole('button', { name: /New web page overlay/ })).toBeVisible();
   await pick.locator('[data-ovpname="LowerThird"]').click();
@@ -235,4 +236,13 @@ test('Image (fixed) in the Add menu opens the image library picker', async ({ pa
   await page.locator('[data-rowfor="tpladd:input"]').click();
   await page.getByRole('menuitem', { name: 'Image (fixed)' }).click();
   await expect(screen(page).locator('.ly-picker input[name=ovs-img]')).toHaveCount(2);
+});
+
+test('an overlay with no layers says so in the picker', async ({ page, studio, wse }) => {
+  wse.overlays.Blank = { objects: [] };
+  await openTemplate(page, studio, 'scoreboard-cpu');
+  await page.locator('[data-rowfor="tpladd:input"]').click();
+  await page.getByRole('menuitem', { name: 'All overlays' }).click();
+  await expect(page.locator('[data-ovpick] [data-ovpname="Blank"]')).toContainText('No layers yet');
+  await expect(page.locator('[data-ovpick] [data-ovpname="Blank"]')).not.toContainText('0 layers');
 });

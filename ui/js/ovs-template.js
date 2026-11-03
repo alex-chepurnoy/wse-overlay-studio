@@ -597,7 +597,8 @@
   function contents(o) {
     var k = o.kinds || [];
     var w = KINDS.filter(function (x) { return k.indexOf(x[0]) >= 0; }).map(function (x) { return KIND_WORDS[x[0]]; });
-    return (w.length ? w.join(', ') : 'no layers') + ' (' + (o.pages || 0) + ' layer' + (o.pages === 1 ? '' : 's') + ')';
+    if (!o.pages) return 'No layers yet';
+    return (w.length ? w.join(', ') : 'other layers') + ' (' + o.pages + ' layer' + (o.pages === 1 ? '' : 's') + ')';
   }
   function bindOvPicker() {
     var p = el.body.querySelector('[data-ovpick]');
