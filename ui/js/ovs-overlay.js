@@ -604,6 +604,7 @@
       if (lc) lc.textContent = layerCoords(o);
       var nm = moved && el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] .lname');
       if (nm) nm.textContent = U.draw.name(drawn(o));
+      if (moved) refreshRowProblems(o);
     });
     refreshFormat();
     if (S.presetPick) U.presets.fillSamples(el.insp);
@@ -765,7 +766,27 @@
     return out;
   }
   // the stream is not 1920 x 1080, so layers placed for 1080p can be scaled to it
-  function canFit() { var s = src(); return s.known && (s.w !== 1920 || s.h !== 1080); }
+  // Fit to this stream is for an overlay made for 1920 x 1080 shown on a smaller stream: its layers reach well past
+  // this frame and fit 1920 x 1080. One made on this stream, with a layer just over its edge, is not offered it.
+  function canFit() {
+    var s = src(), r = 0, b = 0;
+    if (!s.known || (s.w === 1920 && s.h === 1080) || ro()) return false;
+    objects().forEach(function (o) { var z = area(o); r = Math.max(r, z.x + z.w); b = Math.max(b, z.y + z.h); });
+    return (r > s.w * 1.1 || b > s.h * 1.1) && r <= 1920 * 1.05 && b <= 1080 * 1.05;
+  }
+  // a row's problem chips, and Fit to this stream on the first row outside the frame
+  function rowProblemsHtml(o) {
+    var first = objects().filter(function (x) { return problemsOf(x).some(function (p) { return p.outside; }); })[0];
+    return problemsOf(o).filter(function (p) { return p.row; }).map(function (p) {
+      return '<span class="bdg warn" data-rowprob title="' + U.esc(p.text) + '">' + U.esc(p.row) + '</span>' +
+        (p.outside && first === o && canFit() ? '<button type="button" class="btn sm ghost" data-fitstream title="Scale every layer from 1920 x 1080 to this stream">Fit to this stream</button>' : '');
+    }).join('');
+  }
+  // the chips follow a text whose width changes (a clock's sample), without drawing the row anew
+  function refreshRowProblems(o) {
+    var box = el.layers && el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] [data-rowprobs]'), h = box && rowProblemsHtml(o);
+    if (box && box.innerHTML !== h) box.innerHTML = h;
+  }
   /** Fit to this stream (4.2a): every layer's position and size scaled by the stream's size over 1920 x 1080. */
   function fitToStream() {
     var s = src();
@@ -1061,8 +1082,7 @@
         '<div style="min-width:0"><div class="nm">' + (web ? '<span class="dot ' + pageDot(o.id) + '" data-pdot></span>' + U.esc(o.id) : '<span class="lname">' + U.esc(U.draw.name(o)) + '</span>') +
         (!ro() && edited(o.id) && savedById(o.id) ? '<span class="chip-draft" data-edited>Unsaved</span>' : '') + (hidden(o.id) ? '<span class="bdg" data-hiddenmark title="Hidden on this canvas only. Viewers still see it.">Hidden here</span>' : '') + (web ? pageTag(o.id) : '') +
         (U.format.noTarget(o) ? '<span class="bdg warn" data-notarget>No target set</span>' : '') +
-        problemsOf(o).filter(function (p) { return p.row; }).map(function (p) { return '<span class="bdg warn" data-rowprob title="' + U.esc(p.text) + '">' + U.esc(p.row) + '</span>' +
-          (p.outside && canFit() && !ro() ? '<button type="button" class="btn sm ghost" data-fitstream title="Scale every layer from 1920 x 1080 to this stream">Fit to this stream</button>' : ''); }).join('') +
+        '<span class="rowprobs" data-rowprobs>' + rowProblemsHtml(o) + '</span>' +
         (liveOf(o) ? '<span class="bdg live" data-livebadge title="A feed set its ' + U.esc(liveWords(liveOf(o))) + ' on air">Live' + (liveOf(o).text != null ? ': ' + U.esc(String(liveOf(o).text).split('\n')[0].slice(0, 24)) : '') + '</span>' +
           (ro() ? '' : '<button type="button" class="btn sm ghost" data-liveclear="' + U.esc(o.id) + '" aria-label="Clear the live value of ' + U.esc(o.id) + '">Clear</button>') : '') + '</div>' +
         '<div class="sub">' + U.esc(web ? host(o.url) : kind.charAt(0).toUpperCase() + kind.slice(1) + ', ' + o.id) + '</div></div>' +

@@ -102,3 +102,12 @@ test('an overlay at 64 layers adds no more, and says why', async ({ page, studio
   await expect(page.locator('.toast').last()).toContainText('An overlay holds at most 64 layers');
   await expect(page.locator('[data-placehint]')).toHaveCount(0);
 });
+
+test('an overlay made for its stream, with a layer just over the edge, is not offered Fit to this stream', async ({ page, studio, wse }) => {
+  // a 1900 x 1060 stream, and one text pushed past its right edge: nothing reaches past 110% of the frame
+  streamSize(wse, 1900, 1060);
+  layer(wse, 'Mixed', 'score').x = 1880;
+  await openOverlay(page, studio, 'Mixed');
+  await expect(page.locator('.prow[data-id="score"] [data-rowprob]')).toHaveText('Outside the frame');
+  await expect(page.locator('[data-layers] [data-fitstream]')).toHaveCount(0);
+});
