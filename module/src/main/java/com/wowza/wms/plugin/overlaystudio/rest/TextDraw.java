@@ -174,6 +174,25 @@ final class TextDraw
 		return l;
 	}
 
+	/**
+	 * Where a text draws at now, for the draft render's check (plan 4.4): {x, y, w, h, advance}, its box or its lines'
+	 * extent with the padding, as draw lays them out, and its widest line; null when there are no fonts.
+	 */
+	static double[] checkBox(ObjectConfig o, double scaled, long now, long streamStart)
+	{
+		Layout l = layoutFor(o, resolved(o, now, streamStart), scaled);
+		if(l == null)
+		{
+			return null;
+		}
+		float pad = (float)(ObjectConfig.num(o.padding) * scaled), x = o.getX(scaled), y = o.getY(scaled);
+		if(isBox(o))
+		{
+			return new double[] { x, y, o.getW(scaled), o.getH(scaled), l.maxWidth() };
+		}
+		return new double[] { x - pad, y - l.ascent() - pad, l.maxWidth() + 2 * pad, l.height() + 2 * pad, l.maxWidth() };
+	}
+
 	static void draw(ObjectConfig o, Graphics2D g, double scaled, long now, long streamStart)
 	{
 		String text = resolved(o, now, streamStart);

@@ -415,6 +415,10 @@
 .ovs-plugin [data-prob] { margin-top: 2px; }
 .ovs-plugin .rowprobs { display: contents; }
 .ovs-plugin .tstyles { display: flex; flex-wrap: wrap; gap: 4px; }
+/* the server check under the canvas (plan 4.4), and the server's drawing over it when asked for */
+.ovs-plugin .checkline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-2); }
+.ovs-plugin .checkline .bdg { height: auto; min-height: 20px; white-space: normal; padding: 2px 6px; }
+.ovs-plugin .frame .serverimg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 4; pointer-events: none; }
 .ovs-plugin .placebanner { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: var(--s-2);
   max-width: calc(100% - 20px); padding: 6px 6px 6px 12px; border-radius: var(--r-md); background: rgba(17, 24, 39, .88); color: #fff; font-size: 13px; cursor: default; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
 .ovs-plugin .frame.placing, .ovs-plugin .frame.placing .pg { cursor: crosshair; }
@@ -428,7 +432,7 @@
 .ovs-plugin .frame .guide { position: absolute; background: #ff2bd6; pointer-events: none; z-index: 4; }
 .ovs-plugin .frame .guide.v { top: 0; bottom: 0; width: 1px; }
 .ovs-plugin .frame .guide.h { left: 0; right: 0; height: 1px; }
-.ovs-plugin .frame .tedit { position: absolute; z-index: 5; min-width: 10em; min-height: 1.6em; margin: 0; padding: 2px 4px; box-sizing: border-box; border: 2px solid var(--focus); border-radius: var(--r-sm);
+.ovs-plugin .frame .tedit { font-kerning: none; position: absolute; z-index: 5; min-width: 10em; min-height: 1.6em; margin: 0; padding: 2px 4px; box-sizing: border-box; border: 2px solid var(--focus); border-radius: var(--r-sm);
   background: rgba(0, 0, 0, .72); color: #fff; line-height: 1.2; resize: none; overflow: hidden; white-space: pre; }
 .ovs-plugin .pnl-h .lid { font: inherit; font-size: 15px; font-weight: 600; width: 100%; max-width: 22ch; padding: 2px 6px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: inherit; }
 .ovs-plugin .pnl-h .lid:hover, .ovs-plugin .pnl-h .lid:focus { border-color: var(--border); background: var(--surface); }

@@ -35,7 +35,8 @@ public final class OverlayRender
 	private static final ObjectMapper JSON = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
 	/** What was drawn, and whether a page frame went into it (a thumbnail with one goes stale). */
-	public record Result(BufferedImage image, boolean pages)
+	/** The picture, whether a page was drawn into it, and each drawn layer's box at source scale (checkBox). */
+	public record Result(BufferedImage image, boolean pages, List<Map<String, Object>> boxes)
 	{
 	}
 
@@ -100,6 +101,7 @@ public final class OverlayRender
 		g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 		g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
 		boolean pages = false;
+		List<Map<String, Object>> boxes = new ArrayList<>();
 		try
 		{
 			for(ObjectConfig obj: objs)
@@ -111,6 +113,22 @@ public final class OverlayRender
 					continue;
 				}
 				obj.draw(g, scale, false, obj.timingAlpha(now, streamStart), now, streamStart);
+				// the page compares where each layer draws, at source scale, with its own canvas (plan 4.4)
+				double[] b = obj.inShowWindow(now, streamStart) ? obj.checkBox(1, now, streamStart) : null;
+				if(b != null)
+				{
+					Map<String, Object> m = new LinkedHashMap<>();
+					m.put("id", obj.getId());
+					m.put("x", b[0]);
+					m.put("y", b[1]);
+					m.put("w", b[2]);
+					m.put("h", b[3]);
+					if(b.length > 4)
+					{
+						m.put("advance", b[4]);
+					}
+					boxes.add(m);
+				}
 			}
 		}
 		finally
@@ -122,14 +140,14 @@ public final class OverlayRender
 		int opacity = cfg.getOpacity();
 		if(opacity < 0 || opacity >= 100)
 		{
-			return new Result(layer, pages);
+			return new Result(layer, pages, boxes);
 		}
 		BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D og = out.createGraphics();
 		og.setComposite(AlphaComposite.SrcOver.derive(opacity / 100f));
 		og.drawImage(layer, 0, 0, null);
 		og.dispose();
-		return new Result(out, pages);
+		return new Result(out, pages, boxes);
 	}
 
 	/** A text layer whose countdown or count-up has no target to count to. */

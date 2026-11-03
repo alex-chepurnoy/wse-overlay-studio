@@ -41,6 +41,11 @@ class FakeWse {
     // live values by overlay, then layer id, as LiveValues.get answers; the /format requests the page made
     this.live = {};
     this.formats = [];
+    // the draft renders the page asked for, and what a test sets them to answer
+    this.renders = [];
+    this.textBoxes = {};
+    this.renderShift = {};
+    this.renderFail = 0;
     this.modified = {};
     Object.keys(this.overlays).forEach((n) => { this.modified[n] = 1767225600000; });
     const starters = read('templates.json');
@@ -158,6 +163,27 @@ class FakeWse {
         this.revision++;
         return { success: true };
       }
+    }
+    // the draft render (NamedOverlayRenderConfig): a picture and where each layer draws at source scale. The fake
+    // measures no text: a text's box comes from textBoxes[id] when a test sets one. renderShift[id] moves a box;
+    // renderFail answers that many renders with its status (429 by default)
+    if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays\/([^/]+)\/render$/.exec(r)) && method === 'POST') {
+      this.renders.push(body);
+      if (this.renderFail > 0) { this.renderFail--; return { status: this.renderFailStatus || 429, json: { success: false, message: 'Too many draft renders a second' } }; }
+      const boxes = [];
+      for (const o of (body.overlay && body.overlay.objects) || []) {
+        let b = null;
+        const span = (xs, ys) => ({ x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) });
+        if (o.type === 'rectangle' || o.type === 'ellipse') b = { x: o.x, y: o.y, w: Math.max(0, o.w), h: Math.max(0, o.h) };
+        else if (o.type === 'line') b = span([o.x, o.x2], [o.y, o.y2]);
+        else if (o.type === 'triangle') b = span([o.x, o.x2, o.x3], [o.y, o.y2, o.y3]);
+        else if (o.type === 'string' && this.textBoxes[o.id]) b = Object.assign({}, this.textBoxes[o.id]);
+        if (!b) continue;
+        const sh = this.renderShift[o.id] || {};
+        Object.keys(sh).forEach((k) => { b[k] += sh[k]; });
+        boxes.push(Object.assign({ id: o.id }, b));
+      }
+      return { width: 640, height: 360, sourceWidth: 1920, sourceHeight: 1080, pagesLeftOut: 0, png: PNG_16x9, boxes };
     }
     if ((m = /^\/vhosts\/_defaultVHost_\/applications\/([^/]+)\/overlays\/([^/]+)\/preview$/.exec(r)) && method === 'POST') {
       // a draft page captured as it would draw, before it is saved

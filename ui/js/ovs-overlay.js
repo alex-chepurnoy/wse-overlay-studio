@@ -180,7 +180,7 @@
       if (S.name !== name) return;
       S.saved = normalize(o); S.draft = clone(S.saved); S.renamed = {}; S.placing = null;
       var top = sorted()[0]; S.layer = top ? top.id : null;
-      U.format.start(); S.live = {}; ticked = {}; loadFonts();
+      U.format.start(); S.live = {}; ticked = {}; loadFonts(); chk.state = null; chk.png = null; chk.show = false; checkSoon();
       renderAll();
       startCaptures();
       loadLive();
@@ -1173,7 +1173,95 @@
     renderLayers(); placeBoxes(); renderBar(); renderCaption(); U.changed();
   }
   // the edited marks follow the draft without rebuilding the list
+  /* ---------- the server check (plan 4.4) ---------- */
+  // 600 ms after the last edit the server draws the draft at one frozen moment, and where each layer draws there is
+  // compared with where it draws here: text by its widest line (3%) and its box (8 px), shapes and images by 2 px.
+  // Boxes, not pixels: antialiasing differs on every edge even when the text looks the same (spike S4).
+  var chk = { timer: null, seq: 0, state: null, png: null, show: false };
+  function checkSoon() {
+    if (chk.timer) clearTimeout(chk.timer);
+    chk.timer = setTimeout(runCheck, 600);
+  }
+  // the overlay as a save would send it
+  function draftBody() {
+    var body = {};
+    OVERLAY_KEYS.forEach(function (k) { if (S.draft[k] !== undefined) body[k] = S.draft[k]; });
+    body.objects = S.draft.objects;
+    return body;
+  }
+  function runCheck() {
+    chk.timer = null;
+    if (U.current() !== 'overlay' || !S.draft) return;
+    var drawnHere = objects().filter(function (o) { return o.type !== 'webPage'; });
+    if (!drawnHere.length) { setCheck(null); return; }
+    if (ro()) { setCheck({ kind: 'na', text: 'Server check needs write access.' }); return; }
+    // stream time and stream+N count from the moment the canvas counts from, so both read the same
+    var now = U.format.now(), start = U.format.streamStart(), seq = ++chk.seq, name = S.name;
+    setCheck({ kind: 'busy', text: 'Checking against the server\'s drawing...' }, true);
+    U.api.post(ovPath() + '/render', { overlay: draftBody(), width: 640, now: now, streamStart: start }).then(function (r) {
+      if (seq !== chk.seq || S.name !== name) return;
+      chk.png = r && r.png;
+      var diffs = compare((r && r.boxes) || [], now);
+      setCheck(diffs.length ? { kind: 'bad', text: 'Differs from the server\'s drawing: ' + diffs.slice(0, 3).join('; ') + (diffs.length > 3 ? '; and ' + (diffs.length - 3) + ' more' : '') + '.' } :
+        { kind: 'ok', text: 'Matches the server\'s drawing.' });
+    }, function (e) {
+      if (seq !== chk.seq) return;
+      chk.png = null;
+      setCheck({ kind: 'na', text: 'Server check unavailable' + (e && e.status === 429 ? ': too many checks a second' : '') + '. It runs again on the next edit.' });
+    });
+  }
+  // what differs, in words, layer by layer; a layer the server did not draw (a missing picture, no fonts) is left out
+  function compare(boxes, now) {
+    var server = {}, out = [];
+    boxes.forEach(function (b) { server[b.id] = b; });
+    objects().forEach(function (o) {
+      if (o.type === 'webPage' || U.format.timing(o, now).state !== 'on') return;
+      var s = server[o.id];
+      if (!s) return;
+      var text = o.type === 'string' ? U.format.render(o, now) : null;
+      // a token whose sample for that moment is not here yet is not compared
+      if (text !== null && U.draw.hasToken(text)) return;
+      var p = U.draw.checkBox(o, S.draft, text);
+      if (!p) return;
+      var tol = o.type === 'string' ? 8 : 2, said = [], px = function (v) { return Math.round(Math.abs(v)) + ' px '; };
+      if (o.type === 'string' && s.advance > 0 && Math.abs(p.advance - s.advance) > 0.03 * s.advance) said.push('is ' + px(p.advance - s.advance) + (s.advance < p.advance ? 'narrower' : 'wider'));
+      var dx = s.x - p.x, dy = s.y - p.y, dr = (s.x + s.w) - (p.x + p.w), db = (s.y + s.h) - (p.y + p.h);
+      if (Math.abs(dx) > tol) said.push('starts ' + px(dx) + (dx > 0 ? 'further right' : 'further left'));
+      else if (Math.abs(dr) > tol) said.push('ends ' + px(dr) + (dr > 0 ? 'further right' : 'further left'));
+      if (Math.abs(dy) > tol) said.push('starts ' + px(dy) + (dy > 0 ? 'lower' : 'higher'));
+      else if (Math.abs(db) > tol) said.push('ends ' + px(db) + (db > 0 ? 'lower' : 'higher'));
+      if (said.length) out.push(o.id + ' ' + said.join(', ') + ' on the server');
+    });
+    return out;
+  }
+  // the check line: what the check found, announced once; Show the server's drawing lays its picture over the canvas
+  function setCheck(c, quiet) {
+    var was = chk.state && chk.state.text;
+    chk.state = c;
+    if (!c) chk.show = false;
+    paintCheck();
+    if (c && !quiet && c.text !== was && el.say && !S.placing) el.say.textContent = c.text;
+  }
+  function paintCheck() {
+    if (!el.checkLine) return;
+    var c = chk.state;
+    el.checkLine.hidden = !c;
+    if (!c) return;
+    el.check.className = 'bdg' + (c.kind === 'ok' ? ' on' : c.kind === 'bad' ? ' warn' : '');
+    el.check.textContent = c.text;
+    var can = !!chk.png && (c.kind === 'ok' || c.kind === 'bad');
+    if (!can) chk.show = false;
+    el.checkShow.hidden = !can;
+    el.checkShow.setAttribute('aria-pressed', String(chk.show));
+    el.checkShow.textContent = chk.show ? 'Hide the server\'s drawing' : 'Show the server\'s drawing';
+    var f = frameEl(), img = f && f.querySelector('[data-serverimg]');
+    if (chk.show && f) {
+      if (!img) { img = document.createElement('img'); img.className = 'serverimg'; img.setAttribute('data-serverimg', ''); img.alt = 'The server\'s drawing of the draft'; f.appendChild(img); }
+      img.src = 'data:image/png;base64,' + chk.png;
+    } else if (img) img.remove();
+  }
   function markEdited() {
+    checkSoon();
     el.layers.querySelectorAll('.prow').forEach(function (l) {
       var id = l.getAttribute('data-id'), nm = l.querySelector('.nm'), mark = nm.querySelector('[data-edited]');
       var on = edited(id) && !!savedById(id);
@@ -2092,6 +2180,7 @@
         '<label class="check small"><input type="checkbox" data-guides>Safe area</label>' +
         '<button type="button" class="btn sm only-1200" data-togglei>' + U.icon('panel') + 'Inspector</button></div>' +
         '<div class="canvas"><div data-stage></div><div class="canvas-bar"><span class="coords" data-coords aria-live="off"></span><span class="vh" data-say aria-live="polite"></span><span class="spacer"></span><span class="hrow" data-caption></span></div>' +
+        '<div class="checkline" data-checkline hidden><span data-check></span><button type="button" class="btn sm ghost" data-checkshow aria-pressed="false" hidden>Show the server\'s drawing</button></div>' +
         '<p class="small warn-text" data-outside hidden></p></div></div><div data-bar hidden></div>';
       // the page list lives in the list column, under the open overlay; the shell places it there
       var pages = document.createElement('div');
@@ -2100,6 +2189,7 @@
       U.overlayPagesNode = pages;
       el = { stage: box.querySelector('[data-stage]'), coords: box.querySelector('[data-coords]'), say: box.querySelector('[data-say]'), preview: box.querySelector('[data-preview]'), layers: pages.querySelector('[data-layers]'),
         pagesAdd: pages.querySelector('[data-rowfor="add:list"]'), caption: box.querySelector('[data-caption]'), outside: box.querySelector('[data-outside]'), title: box.querySelector('[data-title]'), chips: box.querySelector('[data-chips]'),
+        checkLine: box.querySelector('[data-checkline]'), check: box.querySelector('[data-check]'), checkShow: box.querySelector('[data-checkshow]'),
         listBtn: box.querySelector('[data-showlist]'), bar: box.querySelector('[data-bar]'), insp: insp, grid: U.root.querySelector('[data-grid]') };
       S.name = null; S.draft = S.saved = null; mem = {};
       el.preview.onchange = function () { setPreview(el.preview.value); };
@@ -2111,6 +2201,7 @@
       };
       U.listen(window, 'resize', function () { if (U.current() === 'overlay') placeBoxes(); });
       U.every(250, tick);
+      el.checkShow.onclick = function () { chk.show = !chk.show; paintCheck(); };
       U.every(1000, function () { if (U.current() === 'new-overlay' && N.start === 'preset' && nbox) U.presets.fillSamples(nbox); });
       U.every(5000, function () { if (U.current() === 'overlay' && S.draft) return loadLive(); });
       U.format.onChange(function () { if (U.current() === 'overlay' && S.draft) { ticked = {}; tick(); } });
