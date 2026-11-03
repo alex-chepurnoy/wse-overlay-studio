@@ -421,7 +421,8 @@
 .ovs-plugin .pg .lyr-svg .img-wait { stroke: rgba(255, 255, 255, .7); stroke-dasharray: 6 4; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .ovs-plugin .thumb.kind { display: grid; place-items: center; background: var(--surface-2); color: var(--text-2); }
 .ovs-plugin .thumb.kind svg { width: 16px; height: 16px; }
-.ovs-plugin .prow .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* the name keeps some room; the chips after it wrap to a second line rather than squeeze it away */
+.ovs-plugin .prow .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: min(100%, 6em); }
 
 /* ---------- overlay editor ---------- */
 .ovs-plugin .ed-h { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; min-height: 48px; }
@@ -432,7 +433,7 @@
 .ovs-plugin .prow[aria-selected="true"] { background: var(--gray-100); box-shadow: inset 2px 0 0 var(--accent); }
 .ovs-plugin .prow.drop { box-shadow: inset 0 2px 0 var(--focus); }
 .ovs-plugin .prow .grip-h { color: var(--text-3); cursor: grab; font-size: 11px; letter-spacing: -2px; user-select: none; }
-.ovs-plugin .prow .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.ovs-plugin .prow .nm { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; overflow-wrap: anywhere; }
 .ovs-plugin .prow .sub { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ovs-plugin .prow .acts { display: flex; gap: 2px; }
 .ovs-plugin .thumb { width: 40px; height: 23px; border-radius: var(--r-sm); background: conic-gradient(#bbb 25%, #ddd 0 50%, #bbb 0 75%, #ddd 0) 0 0/8px 8px; overflow: hidden; }

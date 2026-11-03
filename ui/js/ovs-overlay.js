@@ -592,6 +592,9 @@
       ticked[o.id] = k;
       var moved = !was || was[0] !== text;
       if (moved && o.type !== 'webPage') { position(b, o, s); b.setAttribute('aria-label', boxLabel(o)); } else paintTime(b, o);
+      // a text's size follows its sample; only the readout's text changes, so a focused Freeze keeps its focus
+      var lc = moved && o.id === S.layer && el.coords.querySelector('[data-lcoords]');
+      if (lc) lc.textContent = layerCoords(o);
       var nm = moved && el.layers.querySelector('.prow[data-id="' + CSS.escape(o.id) + '"] .lname');
       if (nm) nm.textContent = U.draw.name(drawn(o));
     });
@@ -647,7 +650,7 @@
     var s = src(), o = S.layer && byId(S.layer), z = o ? size(o) : null;
     // a text's size is measured in its font, so it is shown in whole pixels
     el.coords.innerHTML = '<span class="bdg" title="Source picture">' + s.w + ' x ' + s.h + (s.known ? '' : ', assumed') + '</span>' +
-      (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + shownY(o) + ' &middot; ' + Math.round(z.w) + ' x ' + Math.round(z.h) + '</span>' : '');
+      (o ? '<span class="bdg" data-lcoords title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(layerCoords(o)) + '</span>' : '');
     // Freeze stops time on the canvas for editing a layer that ticks, blinks or fades
     if (objects().some(U.format.moves)) el.coords.innerHTML += '<button type="button" class="btn sm ghost" data-freeze aria-pressed="' + U.format.frozen() + '" title="Stop the clock on the canvas while you edit. The video keeps time.">' +
       (U.format.frozen() ? 'Frozen, resume time' : 'Freeze time') + '</button>';
@@ -655,6 +658,8 @@
     el.outside.hidden = !outside;
     if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' is outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '): nothing of it shows. Move it under Place.';
   }
+  // where the selected layer is and how big it draws, for the readout under the canvas
+  function layerCoords(o) { var z = size(drawn(o)); return o.id + ' at ' + (o.x || 0) + ', ' + shownY(o) + ' · ' + Math.round(z.w) + ' x ' + Math.round(z.h); }
   var FIT = { outside: 'Outside the frame', past: 'Past title safe', inside: 'Inside title safe' };
   // the Place tab's chip follows the layer as it moves, without rebuilding the panel
   function updateFit() {

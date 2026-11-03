@@ -70,6 +70,8 @@ test('a countdown with no target says so, draws faded from a sample, and takes a
   await expect(page.locator('[data-fpattern]'), 'a duration starts from its first format').toHaveValue('H:mm:ss');
   await expect(clockText(page)).toHaveText(/^H:mm:ss #\d+$/);
   await expect(row(page, /H:mm:ss #/).locator('[data-notarget]')).toHaveText('No target set');
+  const name = await row(page, /H:mm:ss #/).locator('.lname').boundingBox();
+  expect(name.width, 'the chips wrap rather than squeeze the name away').toBeGreaterThan(40);
   await expect(page.locator('[data-notargetnote]')).toBeVisible();
   await expect(page.locator('.pg[data-id="clock"] [data-ttag]')).toHaveText('No target set');
   await expect(page.locator('.pg[data-id="clock"] .lyr-svg')).toHaveCSS('opacity', '0.5');

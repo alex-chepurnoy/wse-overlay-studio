@@ -262,7 +262,13 @@ public class OverlayStudioBridge
 		return true;
 	}
 
-	/** The query to forward: everything but the Manager's security token and the method override. */
+	/**
+	 * The query to forward: everything but the Manager's security token and the method override, encoded once more.
+	 * WSE's REST server decodes the query before its resource reads it as a form, which decodes it again, so a value
+	 * sent once encoded loses a level: "h%3Amm%20a" reaches it as a raw space and is answered 404, and "%2B" arrives
+	 * as a space. Each "%" is sent as "%25" and a "+" (a space in a form) as "%2520", so the module reads the value
+	 * the page sent (verified on WSE 4.12.1, 2026-11-03).
+	 */
 	static String forwardedQuery(String q)
 	{
 		if(q == null || q.isEmpty())
@@ -281,7 +287,7 @@ public class OverlayStudioBridge
 			{
 				continue;
 			}
-			b.append(b.length() == 0 ? "" : "&").append(p);
+			b.append(b.length() == 0 ? "" : "&").append(p.replace("%", "%25").replace("+", "%2520"));
 		}
 		return b.toString();
 	}

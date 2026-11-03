@@ -165,6 +165,16 @@ class OverlayStudioBridgeTest
 	}
 
 	@Test
+	void theQueryIsEncodedOnceMoreForWseWhichDecodesItTwice()
+	{
+		// WSE decodes once before its resource decodes the form: what the module reads is what the page encoded
+		assertEquals("pattern=h%253Amm%2520a", OverlayStudioBridge.forwardedQuery("pattern=h%3Amm%20a"));
+		assertEquals("pattern=h%253Amm%2520a", OverlayStudioBridge.forwardedQuery("pattern=h%3Amm+a"), "a + is a space in a form");
+		assertEquals("pattern=h%252Ba&x=100%2525", OverlayStudioBridge.forwardedQuery("pattern=h%2Ba&x=100%25"));
+		assertEquals("raw=true&count=120", OverlayStudioBridge.forwardedQuery("raw=true&count=120"), "a plain value is unchanged");
+	}
+
+	@Test
 	void onlyAPostMayAskForPutOrDelete()
 	{
 		assertEquals("GET", OverlayStudioBridge.effectiveMethod(request("GET", MODULE, null)));
