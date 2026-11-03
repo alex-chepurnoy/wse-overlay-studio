@@ -181,3 +181,24 @@ test.describe('a phone-width window', () => {
     await expect(page.locator('.ltabs')).toBeHidden();
   });
 });
+
+test('a Manager session that ends says so, keeps what the page shows, and clears once signed in again', async ({ page, studio, wse }) => {
+  await studio.open();
+  await openTab(page, 'overlays');
+  await expect(page.locator('[data-list]')).toContainText('Scoreboard');
+  wse.signedOut = true;
+  const banner = page.locator('.banners [data-banner=auth]');
+  await expect(banner, 'the next poll meets the Manager sign-in page').toContainText('You are signed out of WSE Manager.', { timeout: 6000 });
+  await expect(banner.getByRole('button', { name: 'Sign in again' })).toBeVisible();
+  await expect(page.locator('[data-list]'), 'the sign-in page is not read as an empty server').toContainText('Scoreboard');
+  await expect(page.locator('.banners')).not.toContainText('bridge is not loaded');
+  wse.signedOut = false;
+  await expect(banner, 'the next answer clears it').toHaveCount(0, { timeout: 6000 });
+});
+
+test('opened while the Manager session has ended, it says signed out, not that the bridge is missing', async ({ page, studio, wse }) => {
+  wse.signedOut = true;
+  await page.goto('http://wse.test/enginemanager/overlay-studio');
+  await expect(page.locator('.banners [data-banner=auth]')).toContainText('You are signed out of WSE Manager.');
+  await expect(page.locator('.banners')).not.toContainText('bridge is not loaded');
+});

@@ -120,10 +120,11 @@ test('timing plays on the canvas: outside its show window a layer is faint and s
   await field(page, 'hideAt').fill('2020-01-01T00:00:00-05:00');
   await expect(tag).toHaveText(/^Hidden since Jan 1, 2020/);
   await field(page, 'hideAt').fill('');
-  // a blink goes faint while the layer is selected, rather than away
+  // a blink goes faint while the layer is selected, rather than away; checked every 100 ms, so a check never keeps
+  // landing on the same half of a one-second blink
   await field(page, 'blinkSeconds').fill('1');
-  await expect.poll(() => drawing.evaluate((e) => e.style.opacity), { timeout: 3000 }).toBe('0.25');
-  await expect.poll(() => drawing.evaluate((e) => e.style.opacity), { timeout: 3000 }).toBe('');
+  await expect.poll(() => drawing.evaluate((e) => e.style.opacity), { timeout: 3000, intervals: [100] }).toBe('0.25');
+  await expect.poll(() => drawing.evaluate((e) => e.style.opacity), { timeout: 3000, intervals: [100] }).toBe('');
   const o = obj(await saved(page, wse, 'Mixed'), 'ring');
   expect(o.blinkSeconds).toBe(1);
   expect([o.showFrom, o.hideAt], 'a cleared time is not set, not the text null').toEqual([undefined, undefined]);

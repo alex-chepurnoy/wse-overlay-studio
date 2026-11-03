@@ -25,6 +25,10 @@ function read(name) {
   return JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
 }
 
+// the start of what WSE Manager sends once its session has ended
+const SIGN_IN = ['<!--Redirect to Login-->', '<!--Leave above comment for UI to redirect properly -->', '<!DOCTYPE html>',
+  '<html><head><title>Wowza Streaming Engine Manager</title></head><body>Sign In</body></html>'].join('\n');
+
 class FakeWse {
   constructor(opts = {}) {
     this.opts = Object.assign({ bridge: true, write: true, serviceRunning: true }, opts);
@@ -74,6 +78,8 @@ class FakeWse {
       try { body = JSON.parse(req.postData()); } catch (e) { body = req.postData(); }
     }
     this.requests.push({ method, path: p + url.search, body });
+    // the Manager's session has ended: it answers every call with its sign-in page, as a 200
+    if (this.signedOut) return route.fulfill({ status: 200, contentType: 'text/html', body: SIGN_IN });
     if (req.method() === 'POST' && url.searchParams.get('wowzaSecurityToken') !== this.token) {
       return route.fulfill({ status: 403, contentType: 'text/plain', body: 'CSRF token missing or wrong' });
     }
