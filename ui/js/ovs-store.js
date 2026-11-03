@@ -85,27 +85,33 @@
   U.templateOfStream = function (row) { return row && row.template ? U.templateEntry(String(row.template).replace(/\.xml$/i, '')) : null; };
   // the template a stream's own copy was made from, or the shared template it loads
   U.baseOfStream = function (row) { return row ? (row.own ? U.copyBase(row) : (row.template ? String(row.template).replace(/\.xml$/i, '') : null)) : null; };
+  // the overlays a template or a stream's row names, in slot order (plan 3.9): [{name, encodes, slot}], encodes empty
+  // for every output
+  U.slotsOf = function (x) { return ((x && x.overlays) || []).slice().sort(function (a, b) { return a.slot - b.slot; }); };
+  U.overlayNames = function (x) { return U.slotsOf(x).map(function (o) { return o.name; }); };
+  // the names a stream or template has that are not saved overlays of this application
+  U.missingOverlays = function (x) { return U.overlayNames(x).filter(function (n) { return !U.overlayEntry(n); }); };
   // streams publishing now that show an overlay; what a Save changes on air
   U.liveShowing = function (overlay) {
-    return (U.appStreams || []).filter(function (s) { return s.publishing && s.overlay === overlay; }).map(function (s) { return s.name; });
+    return (U.appStreams || []).filter(function (s) { return s.publishing && U.overlayNames(s).indexOf(overlay) >= 0; }).map(function (s) { return s.name; });
   };
-  U.usersOfOverlay = function (overlay) { return (U.appStreams || []).filter(function (s) { return s.overlay === overlay; }); };
+  U.usersOfOverlay = function (overlay) { return (U.appStreams || []).filter(function (s) { return U.overlayNames(s).indexOf(overlay) >= 0; }); };
   // streams that load a template: directly through the template order, or through an own copy made from it
   U.streamsUsing = function (name) {
     return (U.appStreams || []).filter(function (s) { return (!s.own && s.template === name + '.xml') || (s.own && U.copyBase(s) === name); });
   };
-  // the outputs a template builds, and whether each is configured to carry its overlay
+  // the outputs a template builds, and the overlays each is configured to carry
   U.outputsOf = function (t) {
     if (!t) return [];
-    var listed = t.overlayEncodes || [];
+    var slots = U.slotsOf(t);
     return (t.encodes || []).map(function (e) {
       var pass = /^passthru$/i.test(String(e.codec || '')), audio = /^disable/i.test(String(e.codec || ''));
-      return { name: e.name, enabled: !!e.enabled, passthrough: pass, audio: audio,
-        carries: !!t.overlay && !!e.canCarryOverlay && !!e.enabled && (!listed.length || listed.indexOf(e.name) >= 0) };
+      var on = e.canCarryOverlay && e.enabled ? slots.filter(function (x) { return !(x.encodes || []).length || x.encodes.indexOf(e.name) >= 0; }).map(function (x) { return x.name; }) : [];
+      return { name: e.name, enabled: !!e.enabled, passthrough: pass, audio: audio, carries: on.length > 0, overlays: on };
     }).filter(function (o) { return o.enabled; });
   };
   // what one output says when nothing is measured yet: configuration only, labeled as such
   U.configuredText = function (o) {
-    return o.passthrough ? 'Passthrough, no overlay' : o.audio ? 'Audio only' : o.carries ? 'Carries the overlay' : 'No overlay';
+    return o.passthrough ? 'Passthrough, no overlay' : o.audio ? 'Audio only' : o.carries ? 'Carries ' + ((o.overlays || []).length ? o.overlays.join(', ') : 'an overlay') : 'No overlay';
   };
 })();

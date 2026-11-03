@@ -455,7 +455,7 @@
     placeBoxes(); renderCaption();
   }
   // the stream behind the layers is only a background: whether viewers see this overlay on it is the template's doing
-  function onAirHere() { var r = S.preview && U.streamRow(S.preview); return !!(r && r.publishing && r.overlay === S.name); }
+  function onAirHere() { var r = S.preview && U.streamRow(S.preview); return !!(r && r.publishing && U.overlayNames(r).indexOf(S.name) >= 0); }
   function renderCaption() {
     var dirty = !ro() && changes() > 0, air = onAirHere();
     el.caption.innerHTML = !S.preview ? '<span class="bdg">Blank frame</span>' :

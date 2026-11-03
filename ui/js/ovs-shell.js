@@ -162,7 +162,7 @@
       '<span class="dot ' + dot + '"></span><span style="min-width:0"><span class="t">' + t + '</span>' + (s ? '<span class="s">' + s + '</span>' : '') + '</span><span>' + (meta || '') + '</span></button>' + (menu || '') + '</li>';
   }
   function matches(text) { var q = (search[U.view.tab] || '').toLowerCase(); return !q || text.toLowerCase().indexOf(q) >= 0; }
-  U.attention = function (s) { return s.publishing && (!!s.restartNeeded || !!(s.overlay && !U.overlayEntry(s.overlay))); };
+  U.attention = function (s) { return s.publishing && (!!s.restartNeeded || U.missingOverlays(s).length > 0); };
   // the unsaved work, read once per list render rather than once per row: each read compares every open draft
   var unsavedNow = null;
   function unsavedFor(go) { return (unsavedNow || {})[go] ? '<span class="chip-draft">Unsaved</span>' : ''; }
@@ -186,7 +186,7 @@
     } else if (tab === 'streams') {
       U.streams().forEach(function (s) {
         var base = U.baseOfStream(s), tname = s.template ? String(s.template).replace(/\.xml$/i, '') : null;
-        var sub = (s.publishing ? '' : 'Not publishing, ') + (s.overlay ? s.overlay : 'No overlay') + (tname ? ', ' + (s.own && base ? 'copy of ' + base : tname) : ', no template') +
+        var sub = (s.publishing ? '' : 'Not publishing, ') + (U.overlayNames(s).join(', ') || 'No overlay') + (tname ? ', ' + (s.own && base ? 'copy of ' + base : tname) : ', no template') +
           (s.restartNeeded ? ', restart pending' : '') + (s.added ? ', added here' : '');
         if (!matches(s.name + ' ' + sub)) return;
         h.push(item('stream:' + s.name, s.publishing ? 'live' : '', U.esc(s.name), U.esc(sub), unsavedFor('stream:' + s.name), v.screen === 'stream' && v.id === s.name, null,
@@ -212,7 +212,7 @@
       var nt = unsavedFor('template:');
       if ((v.screen === 'template' && !v.id) || nt) h.push(item('template:', '', 'New master template', 'Not created yet', nt, v.screen === 'template' && !v.id));
       var list = (U.templates || []).filter(function (t) { return t && !t.error && !U.copyBase(t) && !t.vif; });
-      var mine = list.filter(function (t) { return t.overlay || t.managed; }), other = list.filter(function (t) { return !(t.overlay || t.managed); });
+      var mine = list.filter(function (t) { return U.overlayNames(t).length || t.managed; }), other = list.filter(function (t) { return !(U.overlayNames(t).length || t.managed); });
       function copyItem(c) {
         var s = rowsByName[c.name], sel = v.screen === 'template' && v.id === c.name, behind = c.copyCurrent === false, base = U.copyBase(c);
         return item('template:' + c.name, s && s.publishing ? 'live' : '', U.icon('sub') + U.esc(c.name), behind ? '<span class="warn-text">Differs from ' + U.esc(base) + '</span>' : 'Copy for stream ' + U.esc(c.name) + (s && s.publishing ? ', publishing' : ''), '', sel, null,
@@ -223,10 +223,10 @@
         var users = U.streamsUsing(t.name), live = users.filter(function (s) { return s.publishing; });
         var copies = copiesOf[t.name] || [];
         var behind = copies.filter(function (c) { return c.copyCurrent === false; }).length;
-        var sub = (t.overlay ? t.overlay : 'No overlay') + (master ? ', ' + copies.length + ' stream cop' + (copies.length === 1 ? 'y' : 'ies') + (behind ? ', ' + behind + ' differ' + (behind === 1 ? 's' : '') : '') : t.shipped ? ', ships with WSE' : '');
+        var sub = (U.overlayNames(t).join(', ') || 'No overlay') + (master ? ', ' + copies.length + ' stream cop' + (copies.length === 1 ? 'y' : 'ies') + (behind ? ', ' + behind + ' differ' + (behind === 1 ? 's' : '') : '') : t.shipped ? ', ships with WSE' : '');
         if (!matches(t.name + ' ' + sub + ' ' + copies.map(function (c) { return c.name; }).join(' '))) return '';
         return item('template:' + t.name, live.length ? 'on' : '', U.esc(t.name), U.esc(sub), unsavedFor('template:' + t.name), v.screen === 'template' && v.id === t.name, null,
-          U.rowMenuHtml('template:' + t.name, 'Actions for ' + t.name, master ? [['use', 'Use on a stream...', false, !t.overlay], ['dup', 'Duplicate...'], '-', ['del', 'Delete template...', true, !t.managed]] : [['dup', 'New master from this one']])) +
+          U.rowMenuHtml('template:' + t.name, 'Actions for ' + t.name, master ? [['use', 'Use on a stream...', false, !U.overlayNames(t).length], ['dup', 'Duplicate...'], '-', ['del', 'Delete template...', true, !t.managed]] : [['dup', 'New master from this one']])) +
           copies.map(copyItem).join('');
       }
       var a = mine.map(function (t) { return tplItem(t, true); }).join(''), b = other.map(function (t) { return tplItem(t, false); }).join('');

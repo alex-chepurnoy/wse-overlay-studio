@@ -355,13 +355,13 @@ class FakeWse {
     const streams = this.streams.map((s) => {
       const row = Object.assign({}, s, { viewers: s.publishing ? (s.name === 'cam1' ? 3 : 0) : 0 });
       const t = s.template && this.templates[s.template.replace(/\.xml$/, '')];
-      if (t) Object.assign(row, { vif: t.vif, overlay: t.overlay, usable: t.usable, description: t.description });
+      if (t) Object.assign(row, { vif: t.vif, overlays: t.overlays || [], overlay: t.overlay, usable: t.usable, description: t.description });
       return row;
     });
     const overlays = Object.keys(this.overlays).sort().map((n) => ({
       name: n, pages: (this.overlays[n].objects || []).length, modified: this.modified[n], kinds: kindsOf(this.overlays[n]),
       imageFiles: imageFilesOf(this.overlays[n]), hash: hashOf(this.overlays[n]),
-      templates: Object.keys(this.templates).filter((t) => this.templates[t].overlay === n),
+      templates: Object.keys(this.templates).filter((t) => (this.templates[t].overlays || []).some((x) => x.name === n)),
       showingOn: this.streams.filter((s) => s.publishing && this.overlayOf(s) === n).map((s) => s.name)
     }));
     return { revision, overlays, templates, streams, appTemplates: this.apps[0].templates, liveStreamTranscoder: 'transcoder' };
@@ -373,12 +373,16 @@ class FakeWse {
     // the shape of OverlayStudioModule.streamStatus
     if (!tpl) return { stream: s.name, configured: false, overlayIndex: null, transcoder: { state: 'not-started', decoderWidth: null, decoderHeight: null, encodes: [] }, template: null, overlayFrom: { source: null, name: null, missing: false }, draw: null };
     const pass = (e) => e.codec === 'PassThru';
+    const slotsOn = (e) => (tpl.overlays || []).filter((x) => !(x.encodes || []).length || x.encodes.includes(e.name)).map((x) => x.slot);
     return {
       stream: s.name, configured: true, overlayIndex: 16,
       transcoder: { state: 'running', decoderWidth: 1920, decoderHeight: 1080,
-        encodes: (tpl.encodes || []).map((e) => ({ name: e.name, outputStream: e.streamName.replace('${SourceStreamName}', s.name), width: 1280, height: 720, passThrough: pass(e), overlay: !pass(e), slots: pass(e) ? [] : [1] })) },
+        encodes: (tpl.encodes || []).map((e) => ({ name: e.name, outputStream: e.streamName.replace('${SourceStreamName}', s.name), width: 1280, height: 720, passThrough: pass(e), overlay: !pass(e) && slotsOn(e).length > 0, slots: pass(e) ? [] : slotsOn(e) })) },
       template: { loaded: s.template, own: s.template === s.name + '.xml', list: '${SourceStreamName}.xml,transrate.xml', outputsChanged: false },
       overlayFrom: { source: tpl.overlay ? 'template' : 'stream', name: tpl.overlay || null, missing: !!tpl.overlay && !this.overlays[tpl.overlay] },
+      // every slot in use, as OverlayStudioModule.streamStatus reports them (plan 3.9)
+      overlays: (tpl.overlays || []).map((x) => ({ slot: x.slot, index: 15 + x.slot, name: x.name, source: 'template', encodes: x.encodes, configured: !!this.overlays[x.name],
+        missing: !this.overlays[x.name], draw: this.overlays[x.name] ? { slowCount: 0 } : null, imageProblems: [] })),
       draw: []
     };
   }
