@@ -147,6 +147,38 @@ public final class ImageLibrary
 		}
 	}
 
+	/**
+	 * One image as a data URL with its size, for the editor's canvas: {file, width, height, data}. 404 when it is not
+	 * there; refused past the size an image layer draws (ImageFiles), so a page never pulls a huge file.
+	 */
+	public static Map<String, Object> data(Path vhostDir, String file) throws TemplateFiles.Refused, IOException
+	{
+		String f = safeFile(file);
+		Path p = contentDir(vhostDir).resolve(f);
+		if(!Files.isRegularFile(p))
+		{
+			throw new TemplateFiles.Refused(404, "No image '" + f + "' in the content folder");
+		}
+		if(Files.size(p) > com.wowza.wms.plugin.overlaystudio.ImageFiles.MAX_FILE_BYTES)
+		{
+			throw new TemplateFiles.Refused(413, f + " is over " + (com.wowza.wms.plugin.overlaystudio.ImageFiles.MAX_FILE_BYTES >> 20) + " MB");
+		}
+		byte[] bytes = Files.readAllBytes(p);
+		int[] size = dimensions(bytes);
+		if(size == null)
+		{
+			throw new TemplateFiles.Refused(415, f + " is not a PNG, JPEG, GIF or BMP image");
+		}
+		String lower = f.toLowerCase(java.util.Locale.ROOT);
+		String type = lower.endsWith(".png") ? "png" : lower.endsWith(".gif") ? "gif" : lower.endsWith(".bmp") ? "bmp" : "jpeg";
+		Map<String, Object> m = new java.util.LinkedHashMap<>();
+		m.put("file", f);
+		m.put("width", size[0]);
+		m.put("height", size[1]);
+		m.put("data", "data:image/" + type + ";base64," + java.util.Base64.getEncoder().encodeToString(bytes));
+		return m;
+	}
+
 	/** Checks a file name relative to content/: a plain name in content/ or in content/overlaystudio/. */
 	public static String safeFile(String file) throws TemplateFiles.Refused
 	{

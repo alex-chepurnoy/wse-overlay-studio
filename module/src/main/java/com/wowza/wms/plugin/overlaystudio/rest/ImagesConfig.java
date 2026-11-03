@@ -23,6 +23,12 @@ public class ImagesConfig extends VHostResourceBase
 	protected Object doGet(Map<String, String> path, Map<String, String> query) throws Exception
 	{
 		Map<String, Object> m = new LinkedHashMap<>();
+		if(query.get("file") != null)
+		{
+			// one image whole, for the editor's canvas to draw an image layer with (plan 4.4)
+			m.putAll(ImageLibrary.data(vhostDir(path.get("vhostName")), query.get("file")));
+			return m;
+		}
 		m.put("images", ImageLibrary.list(vhostDir(path.get("vhostName"))));
 		return m;
 	}

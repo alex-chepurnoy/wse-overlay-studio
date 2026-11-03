@@ -48,5 +48,104 @@
         "paintBackground": true
       }
     ]
+  },
+  "Mixed": {
+    "refreshRate": 0.5,
+    "threadDrawing": true,
+    "maxDrawingTime": 100,
+    "objects": [
+      {
+        "id": "score",
+        "type": "string",
+        "x": 100,
+        "y": 200,
+        "zOrder": 6,
+        "text": "HOME 2 - 1",
+        "font": "Fira Sans",
+        "fontStyle": "bold",
+        "fontSize": 48,
+        "color": "white",
+        "background": "rgb(0,0,0,170)",
+        "padding": 10,
+        "opacity": 100
+      },
+      {
+        "id": "clock",
+        "type": "string",
+        "x": 100,
+        "y": 320,
+        "zOrder": 5,
+        "text": "{time:HH:mm:ss}",
+        "font": "Fira Mono",
+        "fontSize": 40,
+        "color": "rgb(255,220,0)",
+        "opacity": 100
+      },
+      {
+        "id": "bar",
+        "type": "rectangle",
+        "x": 600,
+        "y": 160,
+        "w": 300,
+        "h": 80,
+        "zOrder": 4,
+        "arcWidth": 24,
+        "arcHeight": 24,
+        "fillColor": "rgb(30,90,200)",
+        "color": "white",
+        "stroke": 2,
+        "opacity": 100
+      },
+      {
+        "id": "ring",
+        "type": "ellipse",
+        "x": 600,
+        "y": 300,
+        "w": 200,
+        "h": 120,
+        "zOrder": 3,
+        "dash": "dotted",
+        "color": "rgb(255,220,0)",
+        "stroke": 5,
+        "opacity": 100
+      },
+      {
+        "id": "arrow",
+        "type": "line",
+        "x": 1000,
+        "y": 500,
+        "x2": 1300,
+        "y2": 420,
+        "zOrder": 2,
+        "arrowHead": "both",
+        "color": "rgb(0,220,100)",
+        "stroke": 4,
+        "opacity": 100
+      },
+      {
+        "id": "tri",
+        "type": "triangle",
+        "x": 1000,
+        "y": 700,
+        "x2": 1100,
+        "y2": 560,
+        "x3": 1200,
+        "y3": 700,
+        "zOrder": 1,
+        "fillColor": "rgb(200,0,0)",
+        "color": "black",
+        "stroke": 2,
+        "opacity": 100
+      },
+      {
+        "id": "logo",
+        "type": "image",
+        "x": 100,
+        "y": 700,
+        "zOrder": 7,
+        "imageFile": "overlaystudio/logo.png",
+        "opacity": 100
+      }
+    ]
   }
 }

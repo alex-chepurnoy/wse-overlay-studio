@@ -33,6 +33,7 @@ tasks.register('payload') {
     inputs.files(captureProject.tasks.named('jar'))
     inputs.files(captureProject.tasks.named('capturePayload'))
     inputs.dir(rootProject.file('ui'))
+    inputs.dir(rootProject.file('module/src/main/resources/fonts'))
     inputs.dir(rootProject.file('module/src/main/resources/starters'))
     outputs.dir payloadDir
     doLast {
@@ -40,6 +41,8 @@ tasks.register('payload') {
         project.delete(root)
         project.copy { from moduleJar; into new File(root, 'lib') }
         project.copy { from rootProject.file('ui'); into new File(root, 'ui') }
+        // the module's bundled fonts and their licenses, so the editor's canvas draws text in the faces the video uses
+        project.copy { from rootProject.file('module/src/main/resources/fonts'); into new File(root, 'ui/fonts') }
         // the page loads its own css and js with ?v=<version>, so a browser never runs a cached script from an older install
         def index = new File(root, 'ui/index.html')
         index.text = index.text.replaceAll(/(wse-plugins\/server\/overlay-studio\/(?:css|js)\/[^"?]+)\?v=[^"]*/, '$1?v=' + project.version)
