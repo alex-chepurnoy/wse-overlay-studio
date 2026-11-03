@@ -1,6 +1,14 @@
+# Every text file checks out with LF on every system: tests compare files byte for byte, and a Windows checkout
+# with core.autocrlf=true turned them into CRLF and failed (NamedOverlayTest, LiveValuesTest). Binaries are left
+# alone by text=auto.
+* text=auto eol=lf
 gradlew text eol=lf
 *.sh text eol=lf
 packaging/linux/** text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.jar binary
+*.png binary
+*.ttf binary
+# copies of a real WSE install's files, carriage returns and all: kept exactly as they are
+tests/fixtures/installer/** -text
