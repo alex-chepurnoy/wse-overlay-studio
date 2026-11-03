@@ -464,10 +464,16 @@
 
   // the layers the canvas shows, front first: every one but those hidden on it
   function visible() { return sorted().filter(function (o) { return !hidden(o.id); }); }
+  // A free text is stored by its first line's baseline (ObjectConfig, TextDraw); the page shows and takes its Y as the
+  // top of that line, like every other layer's top edge, and turns it back into the baseline the module draws from
+  function freeText(o) { return o && o.type === 'string' && !(o.box === true && o.w > 0 && o.h > 0); }
+  function ascentOf(o) { var e = U.draw.effective(o, S.draft); return U.draw.text(e, U.draw.shown(e)).ascent; }
+  function shownY(o) { return freeText(o) ? Math.round((o.y || 0) - ascentOf(o)) : o.y || 0; }
+  function storedY(o, top) { return freeText(o) ? even(top + ascentOf(o)) : top; }
   // what the canvas's active descendant says: the layer, its id and where it is
   function boxLabel(o) {
     var r = rotationOf(o);
-    return (o.type === 'webPage' ? 'Web page: ' + host(o.url) : U.draw.label(o)) + '. Id ' + o.id + ', X ' + (o.x || 0) + ', Y ' + (o.y || 0) +
+    return (o.type === 'webPage' ? 'Web page: ' + host(o.url) : U.draw.label(o)) + '. Id ' + o.id + ', X ' + (o.x || 0) + ', Y ' + shownY(o) +
       (r ? ', turned ' + r + ' degrees' : '') + (!ro() && edited(o.id) ? ', unsaved' : '');
   }
   // the selected layer's grips: corners on a box, a point on each end of a line and each corner of a triangle, and
@@ -546,7 +552,7 @@
     var s = src(), o = S.layer && byId(S.layer), z = o ? size(o) : null;
     // a text's size is measured in its font, so it is shown in whole pixels
     el.coords.innerHTML = '<span class="bdg" title="Source picture">' + s.w + ' x ' + s.h + (s.known ? '' : ', assumed') + '</span>' +
-      (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + (o.y || 0) + ' &middot; ' + Math.round(z.w) + ' x ' + Math.round(z.h) + '</span>' : '');
+      (o ? '<span class="bdg" title="' + U.esc(o.id) + ': position and size on the source">' + U.esc(o.id) + ' at ' + (o.x || 0) + ', ' + shownY(o) + ' &middot; ' + Math.round(z.w) + ' x ' + Math.round(z.h) + '</span>' : '');
     var outside = o && s.known && frameFit(o, s) === 'outside';
     el.outside.hidden = !outside;
     if (outside) el.outside.textContent = (o.type === 'webPage' ? 'Page ' : 'Layer ') + o.id + ' is outside ' + S.preview + ' (' + s.w + ' x ' + s.h + '): nothing of it shows. Move it under Place.';
@@ -1028,7 +1034,7 @@
       else if (S.inspTab === 'fx') body = '<div class="grid2">' + of(o, sv, 'shadowColor') + of(o, sv, 'shadowOffset') + '</div>' + opacityHtml(o, sv);
       else if (S.inspTab === 'image') body = imageTabHtml(o);
       else if (S.inspTab === 'place') body = '<div class="grid2">' +
-        fieldHtml('x', o.x || 0, { noHelp: true, saved: sv.id ? sv.x || 0 : undefined }) + fieldHtml('y', o.y || 0, { noHelp: true, saved: sv.id ? sv.y || 0 : undefined }) +
+        fieldHtml('x', o.x || 0, { noHelp: true, saved: sv.id ? sv.x || 0 : undefined }) + fieldHtml('y', shownY(o), { noHelp: true, saved: sv.id ? shownY(sv) : undefined }) +
         // a line, a triangle and a free text are sized by their points and their font, not a box
         (resizable(o) ? fieldHtml('w', z.w, { noHelp: true, saved: sv.id ? size(sv).w : undefined }) + fieldHtml('h', z.h, { noHelp: true, saved: sv.id ? size(sv).h : undefined }) : '') + '</div>' +
         (web ? '' : of(o, sv, 'rotation')) + (o.type === 'image' ? fieldHtml('lockAspect', o.lockAspect !== false, { saved: sv.id ? sv.lockAspect !== false : undefined }) : '') +
@@ -1292,7 +1298,11 @@
     if (f.scope === 'overlay') { S.draft[f.key] = v; if (name === 'evenCoords') renderCoords(); if (name === 'refreshRate') U.syncSpeed(el.insp, 'data-ospeed', v); }
     else if (name === 'box') { setBox(o, v); return; }
     else {
+      // a free text keeps its top when its font changes, so it grows down like a box
+      var top = freeText(o) && TOP_KEYS.indexOf(name) >= 0 ? shownY(o) : null;
+      if (name === 'y' && v !== null) v = storedY(o, v);
       if (v === null) delete o[f.key]; else o[f.key] = v;
+      if (top !== null) o.y = storedY(o, top);
       // the curve of a corner is as tall as it is wide
       if (name === 'arcWidth') { if (v === null) delete o.arcHeight; else o.arcHeight = v; }
       // text, shapes and images draw from every field; a page from its place
@@ -1313,6 +1323,8 @@
     if (f.scope === 'object') { updateFit(); renderCoords(); }
     markEdited(); renderBar(); renderCaption(); U.changed();
   }
+  // the text fields that change a free text's ascent
+  var TOP_KEYS = ['font', 'fontSize', 'fontStyle'];
   // a time a layer shows or hides at, as the module takes it (ObjectConfig.timingProblem)
   var WHEN = /^(stream\+\d{1,9}(\.\d{1,3})?|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))$/;
   // a text's box on or off, keeping the text where it is: a box starts at the text's extent, a free text at its first line
@@ -1326,7 +1338,7 @@
   function syncPlacement() {
     var o = byId(S.layer);
     updateFit();
-    ['x', 'y', 'w', 'h'].forEach(function (k) { var i = el.insp.querySelector('[data-f=' + k + ']'); if (i) { i.value = o[k]; i.classList.add('is-draft'); } });
+    ['x', 'y', 'w', 'h'].forEach(function (k) { var i = el.insp.querySelector('[data-f=' + k + ']'); if (i) { i.value = k === 'y' ? shownY(o) : o[k]; i.classList.add('is-draft'); } });
   }
   // the raw capture is a data URL, so the canvas is not tainted
   function pickColor(e) {
@@ -1465,9 +1477,9 @@
     if (kind === 'text' || kind === 'datetime') {
       o.id = freeId(kind === 'text' ? 'text' : 'clock'); o.type = 'string';
       o.text = kind === 'text' ? 'Text' : '{time:HH:mm:ss}'; o.font = kind === 'text' ? 'Fira Sans' : 'Fira Mono'; o.fontSize = sz(48); o.color = 'white';
-      // a drawn text is a box it wraps in; a placed one starts where it was clicked, its first line's baseline a size below
+      // a drawn text is a box it wraps in; a placed one has its top left where it was clicked
       if (drag) { o.box = true; o.x = even(x); o.y = even(y); o.w = even(Math.max(w, 40)); o.h = even(Math.max(h, 40)); }
-      else { o.x = even(x); o.y = even(y + o.fontSize); }
+      else { o.x = even(x); o.y = storedY(o, y); }
       return o;
     }
     if (kind === 'image') { o.id = freeId('image'); o.type = 'image'; o.x = even(x); o.y = even(y); o.w = even(Math.max(w, 8)); o.h = even(Math.max(h, 8)); return o; }

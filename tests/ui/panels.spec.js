@@ -205,10 +205,31 @@ test('the frame checks use the layer\'s drawn area, not its first point', async 
   await expect(page.locator('[data-fit]')).toHaveText('Past title safe');
   await row(page, 'HOME 2 - 1').click();
   await expect(page.locator('[data-fit]')).toHaveText('Inside title safe');
-  await expect(page.locator('[data-coords]'), 'a text\'s size in whole pixels').toHaveText(/score at 100, 200 · \d+ x \d+$/);
+  await expect(page.locator('[data-coords]'), 'a text\'s size in whole pixels').toHaveText(/score at 100, \d+ · \d+ x \d+$/);
   await field(page, 'x').fill('1250');
   await expect(page.locator('[data-fit]')).toHaveText('Outside the frame');
   await expect(page.locator('[data-outside]')).toContainText('score is outside cam1 (1200 x 700): nothing of it shows');
+});
+
+test('a free text\'s Y is the top of its first line, and it keeps its top when its font grows', async ({ page, studio, wse }) => {
+  // score is saved with its first baseline at y 200; the module still takes the baseline, the page shows the top
+  await openOverlay(page, studio, 'Mixed');
+  await row(page, 'HOME 2 - 1').click();
+  await page.getByRole('tab', { name: 'Place' }).click();
+  const y = field(page, 'y'), top = Number(await y.inputValue());
+  expect(top, 'the top, an ascent above the baseline').toBeLessThan(200);
+  expect(top).toBeGreaterThan(200 - 64);
+  const asc = 200 - top;
+  await expect(page.locator('.pg[data-id="score"]'), 'the canvas label says the same').toHaveAttribute('aria-label', new RegExp('Y ' + top + '(,|$)'));
+  await y.fill('100');
+  let o = obj(await saved(page, wse, 'Mixed'), 'score');
+  expect(Math.abs(o.y - (100 + asc)), 'saved as its baseline').toBeLessThanOrEqual(2);
+  await page.getByRole('tab', { name: 'Text' }).click();
+  await field(page, 'fontSize').fill(String(2 * o.fontSize));
+  await page.getByRole('tab', { name: 'Place' }).click();
+  await expect(field(page, 'y')).toHaveValue(/^(9[89]|10[0-2])$/);
+  o = obj(await saved(page, wse, 'Mixed'), 'score');
+  expect(o.y - 100, 'the baseline moved down by the bigger ascent').toBeGreaterThan(1.5 * asc);
 });
 
 test('a layer never saved shows no saved values; the empty panel offers to add one', async ({ page, studio }) => {

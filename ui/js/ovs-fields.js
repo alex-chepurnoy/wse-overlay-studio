@@ -70,7 +70,7 @@
     align:          { scope: 'object', key: 'align', label: 'Align', type: 'enum', values: ['left', 'center', 'right'], names: ['Left', 'Center', 'Right'], def: 'left',
                       help: 'Where each line sits in the box. A text with no box grows from its start.' },
     box:            { scope: 'object', key: 'box', label: 'Wrap in a box', type: 'bool', def: false,
-                      help: 'On: X, Y, width and height are a box the text wraps in and is cut at. Off: X, Y is where the first line starts, on its baseline.' },
+                      help: 'On: X, Y, width and height are a box the text wraps in and is cut at. Off: X, Y is the top left of the first line, and the text grows right and down from it.' },
     background:     { scope: 'object', key: 'background', label: 'Background', type: 'color',
                       help: 'Fills the box behind the text, or the text\'s own extent plus the padding. Blank for none.' },
     padding:        { scope: 'object', key: 'padding', label: 'Padding', type: 'num', min: 0, max: 500, unit: 'px', def: 0, help: 'Space between the background\'s edge and the text.' },
