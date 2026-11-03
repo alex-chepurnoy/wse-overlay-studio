@@ -432,7 +432,7 @@
 .ovs-plugin .frame .guide { position: absolute; background: #ff2bd6; pointer-events: none; z-index: 4; }
 .ovs-plugin .frame .guide.v { top: 0; bottom: 0; width: 1px; }
 .ovs-plugin .frame .guide.h { left: 0; right: 0; height: 1px; }
-.ovs-plugin .frame .tedit { position: absolute; z-index: 5; min-width: 10em; min-height: 1.6em; margin: 0; padding: 2px 4px; box-sizing: border-box; border: 2px solid var(--focus); border-radius: var(--r-sm);
+.ovs-plugin .frame .tedit { font-kerning: none; position: absolute; z-index: 5; min-width: 10em; min-height: 1.6em; margin: 0; padding: 2px 4px; box-sizing: border-box; border: 2px solid var(--focus); border-radius: var(--r-sm);
   background: rgba(0, 0, 0, .72); color: #fff; line-height: 1.2; resize: none; overflow: hidden; white-space: pre; }
 .ovs-plugin .pnl-h .lid { font: inherit; font-size: 15px; font-weight: 600; width: 100%; max-width: 22ch; padding: 2px 6px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: inherit; }
 .ovs-plugin .pnl-h .lid:hover, .ovs-plugin .pnl-h .lid:focus { border-color: var(--border); background: var(--surface); }

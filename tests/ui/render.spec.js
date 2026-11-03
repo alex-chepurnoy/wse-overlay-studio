@@ -84,3 +84,19 @@ test.describe('read-only', () => {
     expect(wse.renders).toHaveLength(0);
   });
 });
+
+test('text is measured and drawn without kerning, as the server draws it', async ({ page, studio }) => {
+  await openOverlay(page, studio, 'Mixed');
+  const w = await page.evaluate(async () => {
+    await document.fonts.load('48px "Fira Sans"');
+    const U = window.OverlayStudio, c = document.createElement('canvas').getContext('2d');
+    c.font = '48px "Fira Sans"';
+    c.fontKerning = 'normal'; const kerned = c.measureText('AVATAR Today').width;
+    c.fontKerning = 'none'; const plain = c.measureText('AVATAR Today').width;
+    const l = U.draw.text({ type: 'string', x: 0, y: 100, font: 'Fira Sans', fontStyle: 'plain', fontSize: 48 }, 'AVATAR Today');
+    return { kerned, plain, page: l.maxWidth };
+  });
+  expect(w.plain - w.kerned, 'this text has kerning pairs').toBeGreaterThan(3);
+  expect(w.page).toBeCloseTo(w.plain, 1);
+  await expect(page.locator('.pg[data-id="score"] text').first()).toHaveAttribute('style', /font-kerning:\s*none/);
+});

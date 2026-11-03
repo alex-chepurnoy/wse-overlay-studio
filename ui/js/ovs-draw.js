@@ -71,10 +71,13 @@
     asked[font] = true;
     document.fonts.load(font).then(function (faces) { if (faces && faces.length) changed(); }, function () { /* the fallback font stays */ });
   }
+  // Java's TextLayout draws without kerning, so the canvas measures and draws without it too: with it, "Text" in Fira
+  // Sans at 48 px is 88.5 px wide here and 91.6 px in the video (found by the server check, PR 9)
   function measurer(font) {
     if (!ctx) ctx = document.createElement('canvas').getContext('2d');
     want(font);
     ctx.font = font;
+    if ('fontKerning' in ctx) ctx.fontKerning = 'none';
     return ctx;
   }
   function width(c, s) { return s ? c.measureText(s).width : 0; }
@@ -274,7 +277,7 @@
       var outline = num(e.outlineWidth, 0);
       l.rows.forEach(function (row, i) {
         if (!row.text) return;
-        var t = function (x, y, attrs) { return '<text x="' + n(x) + '" y="' + n(y) + '"' + font + attrs + ' xml:space="preserve" style="white-space:pre">' + esc(row.text) + '</text>'; };
+        var t = function (x, y, attrs) { return '<text x="' + n(x) + '" y="' + n(y) + '"' + font + attrs + ' xml:space="preserve" style="white-space:pre;font-kerning:none">' + esc(row.text) + '</text>'; };
         if (e.shadowColor) out += t(row.x + so, row.base + so, ' fill="' + D.css(e.shadowColor) + '"');
         if (outline > 0 && e.outlineColor) out += t(row.x, row.base, ' fill="none" stroke="' + D.css(e.outlineColor) + '" stroke-width="' + 2 * outline + '" stroke-linejoin="round" stroke-linecap="round"');
         var fill = e.gradientColor ? gx('t' + i, e.color, Math.round(row.x), Math.round(row.base - l.ascent), Math.round(row.x + row.w), Math.round(row.base + l.descent)) : D.css(e.color);
