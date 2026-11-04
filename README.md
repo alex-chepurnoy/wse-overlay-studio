@@ -166,7 +166,8 @@ Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). 
 - **Who can change things.** Every write needs a WSE REST user in the `admin` group of `conf/admin.password`. Other
   signed-in users get a read-only page. With WSE REST authentication off, nothing can be changed.
 - **What is exposed.** Nothing new. A remote browser needs only the Manager port (8088, over HTTPS or an SSH tunnel)
-  and the streaming port (1935) for previews. WSE REST stays on 127.0.0.1; the installer never edits `RESTInterface`.
+  and the streaming port (1935) for previews. WSE REST stays limited to 127.0.0.1 by WSE's default `IPWhiteList`; the installer never edits
+  `RESTInterface`.
   The page never sees the REST password: the bridge forwards its calls server side with the signed-in user's
   credentials, only for Overlay Studio's own REST paths, template deletes and application restarts.
 - **Where Chrome runs.** Never inside WSE. The capture service runs Chrome under its own account (Linux system user
@@ -191,12 +192,18 @@ Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). 
   `autoUpdate=false` in `capture.properties`.
 - **No Windows Job Object limits yet.** Linux caps the service with systemd (`MemoryMax`, `CPUQuota`, `TasksMax`);
   Windows has only the service's own per-browser memory restart.
-- New outputs, sizes or bitrates apply when a stream restarts. **Restart now** handles pulled streams and RTMP or RTP
-  publishers; any other pushed stream must be restarted at its encoder.
+- New outputs, sizes or bitrates apply when a stream restarts. **Restart <stream>** resets a pulled stream, disconnects
+  an RTMP or RTP publisher so its encoder reconnects, or restarts the whole application for a stream published inside
+  WSE; any other pushed stream must be restarted at its encoder.
 - A stream runs either a Video Intelligence (VIF) template or an Overlay Studio template, never both.
-- A template carries at most four overlays, and an overlay at most 64 layers.
+- A template carries at most four overlays, and an overlay at most 64 layers. A text layer holds at most 2,000
+  characters, an overlay file at most 1 MB, and an overlay's own width and height at most 8192. An overlay's image
+  layers add up to at most 32 million pixels once decoded; an image file over 8 MB is not drawn, and an upload is at
+  most 2 MB and 4096 pixels a side.
 - Text draws only in the bundled fonts (Fira Sans, Fira Sans Condensed, Fira Mono, PT Serif); italic is in the Fira Sans
-  families only. WSE draws no overlay on NETINT zero-copy frames (from source, untested).
+  families only.
+- WSE draws no overlay on NETINT zero-copy frames (read in WSE's code, not tested on NETINT hardware).
+- The server check in the Overlays tab needs write access (a WSE administrator).
 - A page can still signal through the DNS names it looks up, even when the connection is refused.
 - Pages at once (`maxCaptures`) are sized from the server's cores and memory on a new install, 2 to 32; an upgrade
   keeps the number set ([Upgrade](#upgrade)). Streams showing the same page share one capture.

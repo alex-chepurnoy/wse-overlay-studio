@@ -407,12 +407,9 @@ class InstallerTest
 		assertTrue(captureConfig().contains("chrome=" + Paths.get("C:/somewhere/chrome.exe").toString().replace("\\", "\\\\")), captureConfig());
 		assertEquals(0, run("Uninstall", "--yes"));
 
-		// what scripts for earlier versions pass: accepted, said to be ignored, and Chrome is downloaded as without it
-		assertEquals(0, run("Install", "--appName", "live", "--yes", "--chromedriver", "C:/somewhere/chromedriver.exe"));
-		assertTrue(output.contains("--chromedriver is ignored"), output);
-		assertEquals(List.of(expectedZip()), zipsFetched);
-		assertFalse(captureConfig().contains("chromedriver"), captureConfig());
-		assertEquals(0, run("Uninstall", "--yes"));
+		// --chromedriver is no option of this installer
+		assertEquals(1, run("Install", "--appName", "live", "--yes", "--chromedriver", "C:/somewhere/chromedriver.exe"));
+		assertTrue(output.contains("Unknown option --chromedriver"), output);
 		zipRequests.set(0);
 
 		cft.stop(0);

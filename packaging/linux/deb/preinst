@@ -13,7 +13,7 @@ case "${1:-}" in
 esac
 
 refuse() {
-	echo "URL Overlay 1.x is installed (found: $1). Uninstall it first (README, Before you install)." >&2
+	echo "URL Overlay 1.x is installed (found: $1). Uninstall it first." >&2
 	echo "Overlay Studio does not read its overlays or templates." >&2
 	exit 1
 }

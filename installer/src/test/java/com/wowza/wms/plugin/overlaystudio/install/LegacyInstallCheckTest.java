@@ -5,6 +5,7 @@
 package com.wowza.wms.plugin.overlaystudio.install;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -144,6 +145,7 @@ class LegacyInstallCheckTest
 		Files.createFile(home.resolve("lib/wse-plugin-url-overlay-1.15.1.jar"));
 		String m = LegacyInstallCheck.problem(home, manager);
 		assertTrue(m.startsWith("URL Overlay 1.x is installed (found: "), m);
-		assertTrue(m.contains("wse-plugin-url-overlay-1.15.1.jar). Uninstall it first (README, Before you install)."), m);
+		assertTrue(m.contains("wse-plugin-url-overlay-1.15.1.jar). Uninstall it first."), m);
+		assertFalse(m.contains("README"), "no pointer to a section the README does not have");
 	}
 }
