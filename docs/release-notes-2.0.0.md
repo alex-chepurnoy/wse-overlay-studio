@@ -40,7 +40,8 @@ Uninstall URL Overlay 1.x first, with WSE stopped, the way it was installed:
 
 Every 2.0 installer refuses to run while 1.x is on the machine: the zip and tarball stop with exit code 9, and the setup
 program and the `.deb` stop with the same message, naming what they found. If that is a folder 1.x's uninstall could
-not delete, delete it by hand. What 1.x leaves (`conf.modules/urloverlay`, `content/urloverlay`, templates with
+not delete, delete it by hand; if it is an entry 1.x left in `Server.xml` or an `Application.xml`, remove it as README's
+Before you install says. What 1.x leaves (`conf.modules/urloverlay`, `content/urloverlay`, templates with
 `urlOverlay` properties) is ignored; those templates draw no overlay until they are rebuilt in Overlay Studio. Full
 steps: README, Before you install.
 <!-- 1x-compat:end -->
