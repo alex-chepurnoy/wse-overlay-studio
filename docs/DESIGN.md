@@ -184,7 +184,7 @@ Chrome that cannot start sandboxed fails its captures with the reason. The syste
 would break Chrome's sandbox (`RestrictNamespaces`, `PrivateUsers`, `MemoryDenyWriteExecute`, `SystemCallFilter`).
 Where AppArmor 4 restricts unprivileged user namespaces (Ubuntu 23.10 and later), the installer adds
 `/etc/apparmor.d/wse-overlay-studio-chrome`, granting `userns` to `chrome-for-testing/*/chrome-headless-shell-linux64/chrome-headless-shell`
-and, for installs from before the headless shell, `chrome-for-testing/*/chrome-linux64/chrome`, and nothing else.
+and `chrome-for-testing/*/chrome-linux64/chrome`, and nothing else.
 
 **Access.** WSE's user reaches the socket by file permissions alone. On Linux the socket's folder is group
 `wse-overlay-studio`, mode 0770; WSE running as root connects already, and a WSE running as another user (the owner of

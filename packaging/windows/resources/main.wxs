@@ -81,7 +81,7 @@
     <Property Id="LEGACY1X_PROGRAM">
       <DirectorySearch Id="Legacy1xProgram" Path="[ProgramFiles64Folder]Wowza URL Overlay Service" Depth="0" />
     </Property>
-    <Condition Message="URL Overlay 1.x is installed. Uninstall it first (README, Before you install). Overlay Studio does not read its overlays or templates.">
+    <Condition Message="URL Overlay 1.x is installed. Uninstall it first. Overlay Studio does not read its overlays or templates.">
       Installed OR NOT (LEGACY1X_PRODUCT OR LEGACY1X_SERVICE OR LEGACY1X_DATA OR LEGACY1X_PROGRAM)
     </Condition>
     <!-- 1x-compat:end -->

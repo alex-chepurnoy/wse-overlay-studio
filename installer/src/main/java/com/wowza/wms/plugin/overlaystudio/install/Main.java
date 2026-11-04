@@ -45,7 +45,6 @@ public final class Main
 			"  --chrome <path>        Chrome or Chromium for the capture service. Without it, Install downloads Chrome from Google's",
 			"                         Chrome for Testing service into the capture service's Chrome folder (chrome-headless-shell on",
 			"                         Linux, Chrome for Testing on Windows), unless its settings already name a Chrome chosen by hand",
-			"  --chromedriver <path>  Accepted for scripts written for earlier versions, and ignored: the service needs no chromedriver",
 			"  --no-download          Do not download Chrome; set the paths yourself",
 			"  --pages <n|auto>       Pages the capture service captures at once, 1 to 32. auto sizes it from this server's cores",
 			"                         and memory, which is also what a new install does; without it a reinstall keeps the number",
@@ -58,13 +57,13 @@ public final class Main
 			"",
 			"Exit codes: 0 done or nothing to do, 1 bad arguments, 2 WSE not found or ambiguous, 3 preflight failed (cannot write,",
 			"or WSE is running), 4 WSE older than 4.11.1, 5 failed and rolled back, 6 failed and rollback incomplete,",
-			"7 failed before anything was changed, 9 an earlier, incompatible version is installed (README, Before you install).");
+			"7 failed before anything was changed.");
 
 	/** Parsed command line. */
 	static final class Options
 	{
 		String command;
-		String home, wsemHome, chrome, chromedriver, pages;
+		String home, wsemHome, chrome, pages;
 		List<String> apps, removeApps;
 		boolean listApps, allLive, dryRun, yes, keepTemplates, help, noDownload, elevated, purge, gui, setupUninstall;
 	}
@@ -89,7 +88,7 @@ public final class Main
 				// the window-based setup, and the setup program's removal step (main.wxs); neither is for people to type
 				case "--gui" -> o.gui = true;
 				case "--setup-uninstall" -> o.setupUninstall = true;
-				case "--home", "--wsem-home", "--appName", "--remove-app", "--chrome", "--chromedriver", "--pages" -> {
+				case "--home", "--wsem-home", "--appName", "--remove-app", "--chrome", "--pages" -> {
 					if(k + 1 >= args.length)
 					{
 						throw new IllegalArgumentException(a + " needs a value");
@@ -102,9 +101,7 @@ public final class Main
 						case "--appName" -> o.apps = Arrays.asList(v.split("\\s*,\\s*"));
 						case "--remove-app" -> o.removeApps = Arrays.asList(v.split("\\s*,\\s*"));
 						case "--chrome" -> o.chrome = v;
-						case "--pages" -> o.pages = pages(v);
-						// earlier versions needed it; read so their scripts still run, and not used
-						default -> o.chromedriver = v;
+						default -> o.pages = pages(v);
 					}
 				}
 				default -> {
@@ -432,10 +429,6 @@ public final class Main
 		InstallSession.ServerChrome sc = s.serverChrome();
 		boolean adminSet = sc.set();
 		boolean download = o.chrome == null && !o.noDownload && !adminSet;
-		if(o.chromedriver != null)
-		{
-			out.println("Note: --chromedriver is ignored; the capture service drives Chrome itself and needs no chromedriver. Without --chrome, Chrome is downloaded.");
-		}
 		String platform = download ? ChromeDownload.platform() : null;
 		if(download && platform == null)
 		{

@@ -51,7 +51,7 @@ final class LegacyInstallCheck
 
 	static String message(String found)
 	{
-		return "URL Overlay 1.x is installed (found: " + found + "). Uninstall it first (README, Before you install). "
+		return "URL Overlay 1.x is installed (found: " + found + "). Uninstall it first. "
 				+ "Overlay Studio does not read its overlays or templates.";
 	}
 
