@@ -87,7 +87,9 @@ Manager is needed; the bundled fonts are served from `module/src/main/resources/
 template or the template validator, regenerate the fake's templates with
 `OVS_WRITE_UI_FIXTURES=1 ./gradlew :module:test --tests '*UiFakeContractTest'`.
 
-`./gradlew :installer:setupScreenshots` paints the setup window's screens with sample data into `docs/images/`.
+`./gradlew :installer:setupScreenshots` paints the setup window's screens with sample data into `docs/images/`, and
+`OVS_SCREENSHOTS=1 npx playwright test screenshots.spec.js` in `tests/ui` takes the page's screenshots in USAGE
+(`usage-*.png`) against the fake. A normal test run skips them.
 
 ### Troubleshooting
 

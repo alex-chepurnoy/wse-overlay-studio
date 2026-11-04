@@ -333,7 +333,7 @@ class FakeWse {
       service: { running: this.opts.serviceRunning, message: this.opts.serviceRunning ? null : 'The capture socket did not answer.', socket: '/run/wse-overlay-studio/capture.sock', version: PAGE_VERSION, user: 'wse-overlay-studio' },
       chrome: this.opts.serviceRunning ? { found: true, version: '156.0.8078.80', path: '/opt/wse-overlay-studio/chrome-for-testing/156.0.8078.80/chrome-headless-shell' } : { found: false },
       chromeUpdate: null,
-      captures: { active: 1, limit: this.captureLimit.limit, pagesPerBrowser: 4, browsers: 1, maxBrowserMemoryMB: 768, pagesCapturing: ['live/Scoreboard/score'], pagesFailing: [] },
+      captures: { active: 1, limit: this.captureLimit.limit, pagesPerBrowser: 4, browsers: 1, maxBrowserMemoryMB: 768, pagesCapturing: 1, pagesFailing: 0 },
       egress: { allowPrivate: false, allowHosts: [], blockHosts: [], blockChromeServices: true, ports: [80, 443], chromeServiceBlocks: 0, recentBlocks: [] },
       sandbox: 'on', sandboxProblem: null
     };
