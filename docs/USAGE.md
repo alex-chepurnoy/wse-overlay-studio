@@ -3,8 +3,10 @@
 Open WSE Manager, choose **Overlay Studio** in the top bar, and pick an application in the header. The page keeps itself
 current: a change made in another browser, through REST or by editing a file shows within a few seconds.
 
+<!-- 1x-compat:begin -->
 Wowza Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Uninstall URL Overlay first;
 overlays, templates and settings made with 1.x are not carried over.
+<!-- 1x-compat:end -->
 
 An overlay reaches viewers only through a transcoder template: a template names up to four overlays, a stream runs
 that template, and the outputs that template builds carry them.
@@ -313,4 +315,4 @@ and all contain `OverlayStudio`. The capture service logs to `/var/log/wse-overl
 
 Installer exit codes: 0 done, 1 bad arguments, 2 WSE not found or ambiguous (use `--home`), 3 preflight failed,
 4 WSE older than 4.11.1, 5 failed and rolled back, 6 failed and rollback incomplete (the report lists what to restore
-from the backups), 7 failed before anything was changed, 9 URL Overlay 1.x is installed (README, Before you install).
+from the backups), 7 failed before anything was changed, 9 an earlier, incompatible version is installed (README, Before you install).
