@@ -106,9 +106,6 @@ public final class TemplateValidator
 			m.put("managed", managed);
 			m.put("vif", vif);
 			m.put("overlays", toMaps(overlays));
-			// slot 1 as before, for the page until it reads overlays (plan section 8, PR 11)
-			m.put("overlay", overlay);
-			m.put("overlayEncodes", overlayEncodes);
 			m.put("description", description);
 			m.put("decoder", decoder);
 			m.put("scaler", scaler);

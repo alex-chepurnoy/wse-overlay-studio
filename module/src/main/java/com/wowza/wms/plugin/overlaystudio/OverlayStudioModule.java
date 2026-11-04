@@ -137,14 +137,6 @@ public class OverlayStudioModule extends ModuleBase
 			tpl.put("outputsChanged", outputsChanged(streamName));
 		}
 		m.put("template", tpl);
-		java.util.Map<String, Object> from = new java.util.LinkedHashMap<>();
-		TemplateValidator.Slot first = slot(streamName, 1);
-		String named = first == null ? null : first.name();
-		from.put("source", named != null ? "template" : (overlay != null ? "stream" : null));
-		from.put("name", named);
-		from.put("missing", named != null && missingOverlays.contains(streamName + "#1"));
-		m.put("overlayFrom", from);
-
 		// every slot in use, by the template or (slot 1) the per-stream overlay (plan 3.9)
 		List<java.util.Map<String, Object>> slots = new ArrayList<>();
 		for(int n = 1; n <= SLOTS; n++)
@@ -165,18 +157,20 @@ public class OverlayStudioModule extends ModuleBase
 			sm.put("missing", t != null && missingOverlays.contains(streamName + "#" + n));
 			sm.put("draw", img == null ? null : img.drawStats());
 			sm.put("imageProblems", img == null ? java.util.List.of() : img.imageProblems());
+			sm.put("objects", objectsOf(img));
 			slots.add(sm);
 		}
 		m.put("overlays", slots);
+		return m;
+	}
 
-		// slot 1, as before, until the page reads overlays (PR 11)
-		m.put("draw", overlay == null ? null : overlay.drawStats());
-		// image layers that draw nothing (a missing or unusable file), and why
-		m.put("imageProblems", overlay == null ? java.util.List.of() : overlay.imageProblems());
+	/** The layers an overlay in a slot draws, with each web page's capture state. */
+	private static List<java.util.Map<String, Object>> objectsOf(OverlayImage img)
+	{
 		List<java.util.Map<String, Object>> objects = new ArrayList<>();
-		if(overlay != null && overlay.getOverlayConfig() != null && overlay.getOverlayConfig().getObjects() != null)
+		if(img != null && img.getOverlayConfig() != null && img.getOverlayConfig().getObjects() != null)
 		{
-			for(com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig o: overlay.getOverlayConfig().getObjects())
+			for(com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig o: img.getOverlayConfig().getObjects())
 			{
 				java.util.Map<String, Object> om = new java.util.LinkedHashMap<>();
 				om.put("id", o.getId());
@@ -188,8 +182,7 @@ public class OverlayStudioModule extends ModuleBase
 				objects.add(om);
 			}
 		}
-		m.put("objects", objects);
-		return m;
+		return objects;
 	}
 
 	/** @return the overlay's object with this id, or null */
@@ -564,7 +557,6 @@ public class OverlayStudioModule extends ModuleBase
 				m.put("application", mod.appName);
 				m.put("stream", stream);
 				m.put("overlays", TemplateValidator.toMaps(r.overlays()));
-				m.put("overlay", r.overlay());
 				m.put("outputsChanged", mod.outputsChanged(stream));
 				out.add(m);
 			}

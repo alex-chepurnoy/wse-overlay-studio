@@ -38,11 +38,14 @@ class LiveTemplateTest
 			o.put("name", i == 0 ? "720p" : "360p");
 			o.put("height", i == 0 ? 720 : 360);
 			o.put("videoBitrate", i == 0 ? bitrate : 365000);
-			o.put("overlay", overlayOn.contains(i == 0 ? "720p" : "360p"));
 			outs.add(o);
 		}
 		Map<String, Object> b = new LinkedHashMap<>();
-		b.put("overlay", overlay);
+		// slot 1 on the outputs listed, none listed when it is on all of them (plan 3.9)
+		if(overlay != null)
+		{
+			b.put("overlays", List.of(Map.of("name", overlay, "encodes", overlayOn.size() == outputs ? List.of() : overlayOn)));
+		}
 		b.put("outputs", outs);
 		File f = dir.resolve("t.xml").toFile();
 		Files.writeString(f.toPath(), TemplateBuilder.xml(TemplateBuilder.parse("t", b)));

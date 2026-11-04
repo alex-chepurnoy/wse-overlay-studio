@@ -29,24 +29,10 @@ public class TemplateStarterConfig extends VHostResourceBase
 		boolean overwrite = Boolean.parseBoolean(str(body, "overwrite"));
 		Path dir = vhostDir(path.get("vhostName")).resolve("transcoder").resolve("templates");
 		Path written = TemplateFiles.writeStarter(dir, starter, name == null ? starter : name, overwrite);
-		String overlay = str(body, "overlay");
 		if(body.containsKey("overlays"))
 		{
 			String file = written.getFileName().toString();
 			TemplateFiles.setOverlays(dir, file.substring(0, file.length() - 4), TemplateFiles.slotsFrom(body.get("overlays")));
-		}
-		else if(overlay != null && !overlay.isBlank())
-		{
-			List<String> encodes = new ArrayList<>();
-			if(body.get("encodes") instanceof List)
-			{
-				for(Object o: (List<?>)body.get("encodes"))
-				{
-					encodes.add(String.valueOf(o));
-				}
-			}
-			String file = written.getFileName().toString();
-			TemplateFiles.setOverlay(dir, file.substring(0, file.length() - 4), overlay, encodes);
 		}
 		OverlayStudioLog.change(this, "wrote starter " + starter + " as " + written);
 		Map<String, Object> m = new LinkedHashMap<>();

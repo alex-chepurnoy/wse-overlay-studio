@@ -21,8 +21,7 @@ import com.wowza.wms.rest.WMSConfig;
 /**
  * POST {"overlays": [{"name": "Scoreboard", "encodes": ["720p"], "slot": 1}, ...]} sets the overlays a template the
  * module wrote carries, up to four (plan 3.9), each on its listed encodes (none: on the source, so every encode);
- * an empty list takes them all off. {"overlay": "Scoreboard", "encodes": [...]} sets slot 1 alone and keeps the others
- * ({"overlay": null} takes slot 1 off). Running streams whose transcoder loaded this file show the change at once
+ * an empty list takes them all off. Running streams whose transcoder loaded this file show the change at once
  * (OverlayStudioModule.reloadTemplateFile).
  */
 @WMSConfig(restLocation = "/v1/{server}/plugin/overlaystudio/vhosts/{vhostName}/templates/{templateName}/overlay", restVerbs = "POST", xmlFilename = "")
@@ -33,28 +32,15 @@ public class TemplateOverlayConfig extends VHostResourceBase
 	protected Object doPost(Map<String, String> path, Map<String, Object> body) throws Exception
 	{
 		Path dir = vhostDir(path.get("vhostName")).resolve("transcoder").resolve("templates");
-		String overlay = str(body, "overlay");
-		List<String> encodes = new ArrayList<>();
-		if(body.get("encodes") instanceof List)
+		TemplateFiles.refuseSingle(body);
+		if(!body.containsKey("overlays"))
 		{
-			for(Object o: (List<Object>)body.get("encodes"))
-			{
-				encodes.add(String.valueOf(o));
-			}
+			throw new TemplateFiles.Refused(400, "Send overlays: [{\"name\", \"encodes\", \"slot\"}], an empty list to take them all off", null, "overlays");
 		}
 		String t = TemplateFiles.safeName(path.get("templateName"));
-		if(body.containsKey("overlays"))
-		{
-			List<TemplateValidator.Slot> slots = TemplateFiles.slotsFrom(body.get("overlays"));
-			TemplateFiles.setOverlays(dir, t, slots);
-			OverlayStudioLog.change(this, slots.isEmpty() ? "took every overlay off template " + t : "template " + t + " carries overlays " + describe(slots));
-		}
-		else
-		{
-			TemplateFiles.setOverlay(dir, t, overlay == null || overlay.isBlank() ? null : overlay, encodes);
-			OverlayStudioLog.change(this, overlay == null || overlay.isBlank() ? "took the overlay in slot 1 off template " + t
-					: "template " + t + " carries overlay " + overlay + " in slot 1" + (encodes.isEmpty() ? " on every encode" : " on " + encodes));
-		}
+		List<TemplateValidator.Slot> slots = TemplateFiles.slotsFrom(body.get("overlays"));
+		TemplateFiles.setOverlays(dir, t, slots);
+		OverlayStudioLog.change(this, slots.isEmpty() ? "took every overlay off template " + t : "template " + t + " carries overlays " + describe(slots));
 		TemplateUseConfig.touch(dir.resolve(t + ".xml"));
 		Map<String, Object> m = new LinkedHashMap<>();
 		m.put("success", true);

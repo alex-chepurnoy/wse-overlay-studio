@@ -224,7 +224,7 @@
     var want = S.preview || U.store.get('preview.' + U.app);
     if (!streams.some(function (s) { return s.name === want; })) {
       // the streams that show this overlay come first
-      var mine = streams.filter(function (s) { return s.overlay === S.name; })[0];
+      var mine = streams.filter(function (s) { return U.overlayNames(s).indexOf(S.name) >= 0; })[0];
       want = mine ? mine.name : streams.length ? streams[0].name : '';
     }
     var sig = streams.map(function (s) { return s.name; }).join('|');

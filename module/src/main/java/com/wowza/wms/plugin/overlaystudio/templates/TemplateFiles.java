@@ -288,6 +288,21 @@ public final class TemplateFiles
 	 * Refused (400) for more than SLOTS, a slot outside 1 to SLOTS or used twice, or an overlay named twice.
 	 */
 	@SuppressWarnings("unchecked")
+	/**
+	 * Refuses the single "overlay" and "encodes" that 1.x and the 2.0 page before PR 11 sent: a template's overlays are
+	 * the "overlays" list only (plan 3.9).
+	 */
+	public static void refuseSingle(Map<String, Object> body) throws Refused
+	{
+		for(String k: new String[] { "overlay", "encodes" })
+		{
+			if(body.containsKey(k))
+			{
+				throw new Refused(400, k + " is not accepted; send overlays: [{\"name\", \"encodes\", \"slot\"}]", null, k);
+			}
+		}
+	}
+
 	public static List<TemplateValidator.Slot> slotsFrom(Object raw) throws Refused
 	{
 		if(!(raw instanceof List<?> list))

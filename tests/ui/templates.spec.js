@@ -61,9 +61,9 @@ test('a second overlay on chosen outputs is saved in slot 2 with its outputs', a
   await expect.poll(() => wse.templateWrites.length).toBe(1);
   const w = wse.templateWrites[0];
   expect(w.path).toBe('/vhosts/_defaultVHost_/templates/scoreboard-cpu/spec');
-  expect(w.body.overlay).toBe('Scoreboard');
-  expect(w.body.outputs.filter((o) => o.overlay).map((o) => o.name)).toEqual(['720p', '360p']);
-  expect(w.body.overlays).toEqual([{ name: 'LowerThird', encodes: ['720p'], slot: 2 }]);
+  expect(w.body).not.toHaveProperty('overlay');
+  expect(w.body.outputs.some((o) => 'overlay' in o), 'outputs name no overlay; the list does').toBe(false);
+  expect(w.body.overlays).toEqual([{ name: 'Scoreboard', encodes: [], slot: 1 }, { name: 'LowerThird', encodes: ['720p'], slot: 2 }]);
 });
 
 test('an overlay on every output is saved on the input, and the stacking order is the slot order', async ({ page, studio, wse }) => {
@@ -77,8 +77,7 @@ test('an overlay on every output is saved on the input, and the stacking order i
   await save(page).click();
   await expect.poll(() => wse.templateWrites.length).toBe(1);
   const b = wse.templateWrites[0].body;
-  expect(b.overlay).toBe('LowerThird');
-  expect(b.overlays).toEqual([{ name: 'Scoreboard', encodes: [], slot: 2 }]);
+  expect(b.overlays).toEqual([{ name: 'LowerThird', encodes: [], slot: 1 }, { name: 'Scoreboard', encodes: [], slot: 2 }]);
 });
 
 test('a template carries at most four overlays', async ({ page, studio, wse }) => {
@@ -127,13 +126,12 @@ test('a new template starts with no overlay, and the overlay copy preset asks fo
   await save(page).click();
   await expect.poll(() => wse.templateWrites.length).toBe(1);
   expect(wse.templateWrites[0].path).toBe('/vhosts/_defaultVHost_/templates');
-  expect(wse.templateWrites[0].body.overlay).toBe('LowerThird');
-  expect(wse.templateWrites[0].body.overlays).toEqual([]);
+  expect(wse.templateWrites[0].body.overlays).toEqual([{ name: 'LowerThird', encodes: [], slot: 1 }]);
 });
 
 test('a template switched on in place saves its overlay list', async ({ page, studio, wse }) => {
   wse.templates.ladder = Object.assign({}, wse.templates['overlaystudio-cpu'], { managed: false,
-    description: 'Ours, with overlays switched on in place.', overlay: 'Scoreboard', overlays: [{ name: 'Scoreboard', encodes: ['360p'], slot: 1 }] });
+    description: 'Ours, with overlays switched on in place.', overlays: [{ name: 'Scoreboard', encodes: ['360p'], slot: 1 }] });
   await openTemplate(page, studio, 'ladder');
   const rows = screen(page).locator('[data-io]');
   await expect(rows).toHaveCount(1);

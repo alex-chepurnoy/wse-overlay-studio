@@ -54,12 +54,29 @@ class TemplateBuilderTest
 		return m;
 	}
 
+	// overlay in slot 1 on the outputs marked overlay, as the page sends it (plan 3.9): no encodes when every video output
+	// carries it, and an output that does not exist when none does
 	private static Map<String, Object> body(String hardware, String overlay, List<Map<String, Object>> outputs)
 	{
 		Map<String, Object> b = new LinkedHashMap<>();
 		b.put("hardware", hardware);
-		b.put("overlay", overlay);
 		b.put("outputs", new ArrayList<>(outputs));
+		if(overlay != null)
+		{
+			List<String> vids = new ArrayList<>(), on = new ArrayList<>();
+			for(Map<String, Object> o: outputs)
+			{
+				if("video".equals(o.get("kind")))
+				{
+					vids.add((String)o.get("name"));
+					if(Boolean.TRUE.equals(o.get("overlay")))
+					{
+						on.add((String)o.get("name"));
+					}
+				}
+			}
+			b.put("overlays", List.of(Map.of("name", overlay, "encodes", on.size() == vids.size() ? List.of() : on.isEmpty() ? List.of("none") : on)));
+		}
 		return b;
 	}
 
@@ -85,6 +102,17 @@ class TemplateBuilderTest
 		assertEquals("high", r.encodes().get(0).get("profile"));
 		assertTrue(xml.contains("<Name>abr</Name>") && xml.contains("${SourceStreamName}_abr"), "the adaptive group");
 		assertTrue(xml.indexOf("<Encodes>") < xml.indexOf("<StreamNameGroups>") && xml.indexOf("<StreamNameGroups>") < xml.indexOf("<Properties>"), "WSE's order");
+	}
+
+	@Test
+	void theSingleOverlayFieldsAreRefused()
+	{
+		Map<String, Object> b = body("cpu", null, List.of(out("720p", "video", 720, 3000000, true)));
+		b.put("overlay", "Scoreboard");
+		assertThrows(TemplateFiles.Refused.class, () -> TemplateBuilder.parse("x", b), "overlay is refused (plan 3.9, PR 11)");
+		b.remove("overlay");
+		b.put("encodes", List.of("720p"));
+		assertThrows(TemplateFiles.Refused.class, () -> TemplateBuilder.parse("x", b), "and so is encodes");
 	}
 
 	@Test

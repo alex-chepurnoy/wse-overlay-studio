@@ -32,10 +32,7 @@
   // the overlays a template carries, as the validator reads them, in slot order: {name, encodes, slot}, encodes empty
   // for every output (drawn on the input)
   var MAX_OVERLAYS = 4;
-  function tplSlots(t) {
-    var s = t.overlays && t.overlays.length ? t.overlays : t.overlay ? [{ name: t.overlay, encodes: t.overlayEncodes || [], slot: 1 }] : [];
-    return s.slice().sort(function (a, b) { return a.slot - b.slot; });
-  }
+  function tplSlots(t) { return U.slotsOf(t); }
   // the overlays an output of t carries, by name
   function carriedOn(t, e) {
     if (!e.canCarryOverlay) return [];
@@ -146,18 +143,19 @@
   // whether an overlay entry draws on output o (a video output)
   function carries(x, o) { return x.stage !== 'outputs' || x.outputs.indexOf(o.name) >= 0; }
   // the output names an entry is saved with: none for the input, and none when it is on every video output, which
-  // the module saves on the input too
+  // the module saves on the input too. With none picked it is null, which problem() refuses: an empty list would mean
+  // every output
   function encodesOf(x, vids) {
     if (x.stage !== 'outputs') return [];
     var on = x.outputs.filter(function (n) { return vids.indexOf(n) >= 0; });
-    return on.length === vids.length ? [] : on;
+    return !on.length ? null : on.length === vids.length ? [] : on;
   }
   function spec(d) {
     var vids = d.outputs.filter(function (o) { return o.kind === 'video' && o.enabled; }).map(function (o) { return o.name; });
-    // slot 1 is carried by the outputs marked overlay, as the module reads it; slots 2 to 4 name their outputs
-    var ovs = (d.overlays || []).filter(function (x) { return x.name; }), first = ovs[0];
-    return { name: d.name, hardware: d.hardware, overlay: first ? first.name : null,
-      overlays: ovs.slice(1).map(function (x, i) { return { name: x.name, encodes: encodesOf(x, vids), slot: i + 2 }; }), deinterlace: d.deinterlace, gpuId: d.gpuId, minFrameRate: d.minFrameRate || 0,
+    // each overlay in its slot with the outputs it names, none for every output (plan 3.9)
+    var ovs = (d.overlays || []).filter(function (x) { return x.name; });
+    return { name: d.name, hardware: d.hardware,
+      overlays: ovs.map(function (x, i) { return { name: x.name, encodes: encodesOf(x, vids), slot: i + 1 }; }), deinterlace: d.deinterlace, gpuId: d.gpuId, minFrameRate: d.minFrameRate || 0,
       images: (d.images || []).map(function (l) {
         return { file: l.file, where: l.where, outputs: l.where === 'outputs' ? l.outputs.filter(function (n) { return vids.indexOf(n) >= 0; }) : [], x: l.x, y: l.y,
           width: l.width, height: l.height, align: l.align, opacity: l.opacity, refresh: l.refresh };
@@ -166,7 +164,7 @@
         .filter(function (g) { return g.members.length; }),
       outputs: d.outputs.map(function (o) {
         var v = o.kind === 'video';
-        return { name: o.name, kind: o.kind, enabled: o.enabled, overlay: !!first && v && carries(first, o), height: o.height, width: o.width, fit: o.fit, region: v ? o.region : null,
+        return { name: o.name, kind: o.kind, enabled: o.enabled, height: o.height, width: o.width, fit: o.fit, region: v ? o.region : null,
           skip: v ? o.skip : 0, codec: o.codec, profile: o.profile, videoBitrate: o.videoBitrate, rateControl: v && o.codec === 'H.264' ? o.rateControl : 'default',
           peakBitrate: o.rateControl === 'vbr' ? (o.peakBitrate || Math.round(o.videoBitrate * 1.5)) : 0, speed: v && o.codec === 'H.264' ? o.speed : 'default',
           keyFollow: o.keyFollow, keyInterval: o.keyInterval, hdrToSdr: v && o.hdrToSdr, audio: o.audio, audioBitrate: o.audioBitrate, channels: o.channels,
@@ -1144,7 +1142,7 @@
         u.how === 'copy' && (U.templates || []).some(function (x) { return x.name === u.name; }) ? 'A template named ' + u.name + ' exists.' : null;
       if (u.error) { renderOther(t); return; }
       go.disabled = true;
-      var body = { how: u.how, name: u.name, overlay: u.overlay, encodes: u.encodes.length === c.length ? [] : u.encodes };
+      var body = { how: u.how, name: u.name, overlays: [{ name: u.overlay, encodes: u.encodes.length === c.length ? [] : u.encodes }] };
       U.api.post(vh() + '/templates/' + U.enc(t.name) + '/use', body).then(function (r) {
         var made = String(r.template || '').replace(/\.xml$/, '');
         U.toast(u.how === 'copy' ? 'Made ' + made + ', a copy of ' + t.name + ' carrying ' + u.overlay + '. Use it on a stream from the stream view.'
@@ -1239,11 +1237,8 @@
     if (S.kind === 'new') return ['new template ' + (S.draft.name || '(no name yet)')];
     var a = S.base ? JSON.parse(S.base) : {}, b = JSON.parse(currentJson() || '{}'), out = [];
     if (S.form) return overlayWords(a.overlays, b.overlays);
-    // each overlay with the outputs it is on, none for every output, whichever slot it is saved in
-    var place = function (sp) {
-      var vids = (sp.outputs || []).filter(function (o) { return o.kind === 'video' && o.enabled; }), on = vids.filter(function (o) { return o.overlay; }).map(function (o) { return o.name; });
-      return [{ name: sp.overlay, on: on.length === vids.length ? [] : on }].concat((sp.overlays || []).map(function (x) { return { name: x.name, on: x.encodes }; })).filter(function (x) { return x.name; });
-    };
+    // each overlay with the outputs it is on, none for every output
+    var place = function (sp) { return (sp.overlays || []).map(function (x) { return { name: x.name, on: x.encodes }; }); };
     out = overlayWords(place(a), place(b));
     if (a.hardware !== b.hardware) out.push('hardware ' + b.hardware);
     var ao = a.outputs || [], bo = b.outputs || [];

@@ -154,7 +154,6 @@ public class AppStreamsConfig extends VHostResourceBase
 					TemplateValidator.Result v = TemplateValidator.validate(in);
 					r.put("vif", v.vif());
 					r.put("overlays", TemplateValidator.toMaps(v.overlays()));
-					r.put("overlay", v.overlay());
 					r.put("usable", v.usable());
 					r.put("description", v.description());
 				}
