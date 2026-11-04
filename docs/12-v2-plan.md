@@ -426,8 +426,10 @@ Kept: rectangle (rounded with `arcWidth`/`arcHeight`), ellipse, line, triangle. 
 - **REST shapes for the page.** Every response that names a template's overlay today (`/state`, `/streams`,
   `/status`, `/templates/{t}/validate`, `/templates/{t}/copies`) carries `overlays: [{name, encodes, slot}]`, and
   `POST /templates/{t}/overlay` (used for in-place templates, `ui/js/uo-template.js:1040`) takes `overlays: [...]`.
-  While the page still uses the single `overlay`/`encodes` (until PR 11, section 8), responses also carry them as slot
-  1, and `/overlay`, `/spec`, `POST /templates` and `/use` also accept them as slot 1.
+  `/spec`, `POST /templates` and `/use` take the same list (`/use` with one entry); slot 1 draws on the outputs it
+  names, every encoding output when it names none. No response carries the single `overlay`/`overlayEncodes`, and a
+  request with `overlay` or `encodes` is refused with 400 (PR 11). In `/status` each slot carries its own `draw`,
+  `imageProblems` and `objects`; the slot-1 `overlayFrom`, `draw`, `imageProblems` and `objects` are gone.
 
 ### 3.10 Validation
 

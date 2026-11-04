@@ -150,6 +150,13 @@ public final class TemplateBuilder
 	{
 	}
 
+	static Output withOverlay(Output o, boolean on)
+	{
+		return new Output(o.name(), o.kind(), o.enabled(), on, o.height(), o.width(), o.fit(), o.region(), o.skip(), o.codec(), o.profile(), o.videoBitrate(),
+				o.rateControl(), o.peakBitrate(), o.speed(), o.keyFollow(), o.keyInterval(), o.hdrToSdr(), o.audio(), o.audioBitrate(), o.channels(), o.sampleRate(),
+				o.captions(), o.params());
+	}
+
 	/** The spec in a request body; Refused (400) with a message the page shows when something is not usable. */
 	@SuppressWarnings("unchecked")
 	public static Spec parse(String name, Map<String, Object> body) throws TemplateFiles.Refused
@@ -164,40 +171,27 @@ public final class TemplateBuilder
 		{
 			throw bad("Hardware must be cpu, nvidia, intel or netint.");
 		}
-		String overlay = str(body.get("overlay"), null);
-		if(overlay != null && overlay.isBlank())
-		{
-			overlay = null;
-		}
-		if(overlay != null)
-		{
-			TemplateFiles.safeName(overlay);
-		}
-		// {"overlays": [{name, encodes, slot}]}: slot 1 takes its encodes from the outputs, as overlay does
+		// {"overlays": [{name, encodes, slot}]} (plan 3.9): slot 1 draws on the outputs it names, every encoding output
+		// when it names none; slots 2 to 4 keep the encodes they name
+		TemplateFiles.refuseSingle(body);
+		String overlay = null;
+		List<String> firstOn = List.of();
 		List<TemplateValidator.Slot> more = new ArrayList<>();
-		if(body.get("overlays") != null)
+		Set<String> named = new HashSet<>();
+		for(TemplateValidator.Slot x: body.get("overlays") == null ? List.<TemplateValidator.Slot>of() : TemplateFiles.slotsFrom(body.get("overlays")))
 		{
-			for(TemplateValidator.Slot x: TemplateFiles.slotsFrom(body.get("overlays")))
+			if(!named.add(x.name()))
 			{
-				if(x.slot() != 1)
-				{
-					more.add(x);
-				}
-				else if(overlay != null && !overlay.equals(x.name()))
-				{
-					throw bad("overlay and the overlays list name different overlays for slot 1.");
-				}
-				else
-				{
-					overlay = x.name();
-				}
+				throw bad("Overlay " + x.name() + " is named twice; a template carries each overlay once.");
 			}
-			for(TemplateValidator.Slot x: more)
+			if(x.slot() == 1)
 			{
-				if(x.name().equals(overlay))
-				{
-					throw bad("Overlay " + overlay + " is named twice; a template carries each overlay once.");
-				}
+				overlay = x.name();
+				firstOn = x.encodes();
+			}
+			else
+			{
+				more.add(x);
 			}
 		}
 		if(!(body.get("outputs") instanceof List<?> raw) || raw.isEmpty())
@@ -225,6 +219,11 @@ public final class TemplateBuilder
 				throw bad("Two outputs are named " + out.name() + ".");
 			}
 			outs.add(out);
+		}
+		for(int i = 0; i < outs.size(); i++)
+		{
+			Output o = outs.get(i);
+			outs.set(i, withOverlay(o, overlay != null && o.encodes() && (firstOn.isEmpty() || firstOn.contains(o.name()))));
 		}
 		if(outs.stream().noneMatch(Output::enabled))
 		{
@@ -497,7 +496,8 @@ public final class TemplateBuilder
 				params.add(new Param(pn, pv));
 			}
 		}
-		return new Output(name, kind, enabled, Boolean.TRUE.equals(m.get("overlay")), height, width, height == 0 ? "match-source" : fit, region, skip,
+		// whether it shows slot 1 comes from the overlays list (parse)
+		return new Output(name, kind, enabled, false, height, width, height == 0 ? "match-source" : fit, region, skip,
 				codec, profile, vb, rc, peak, speed, keyFollow, keyInterval, hdr, audio, ab, channels, rate, captions, params);
 	}
 

@@ -177,8 +177,8 @@ class TemplateSlotsTest
 
 		b.put("overlays", List.of(Map.of("name", "Score"), Map.of("name", "Score", "slot", 2)));
 		assertThrows(TemplateFiles.Refused.class, () -> TemplateBuilder.parse("built", b));
-		b.put("overlay", "Other");
-		b.put("overlays", List.of(Map.of("name", "Score")));
-		assertThrows(TemplateFiles.Refused.class, () -> TemplateBuilder.parse("built", b), "overlay and overlays disagree on slot 1");
+		// slot 1 on the outputs it names, and an output it names that is not there shows it nowhere
+		b.put("overlays", List.of(Map.of("name", "Score", "encodes", List.of("1080p"))));
+		assertThrows(TemplateFiles.Refused.class, () -> TemplateBuilder.parse("built", b), "no output shows Score");
 	}
 }

@@ -58,7 +58,6 @@ public final class TemplateOps
 			// switching the transcoder on for the application makes every stream in it start transcoding
 			m.put("transcoderTurnsOn", liveStreamTranscoderBefore.isEmpty() && !liveStreamTranscoderAfter.isEmpty());
 			m.put("overlays", TemplateValidator.toMaps(validation.overlays()));
-			m.put("overlay", validation.overlay());
 			return m;
 		}
 	}

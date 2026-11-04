@@ -98,15 +98,15 @@
     var t = st.transcoder || {}, slots = (st.overlays || []).filter(function (x) { return x.name || x.configured; });
     var named = slots.map(function (x) { return x.name || 'the stream\'s own overlay'; }), all = U.esc(named.join(', '));
     var missing = slots.filter(function (x) { return x.missing; }).map(function (x) { return x.name; });
-    var caps = (st.objects || []).filter(function (x) { return x.capture; });
+    // the web pages of every overlay drawn, each with its capture state
+    var caps = [].concat.apply([], slots.map(function (x) { return (x.objects || []).map(function (o) { return { id: o.id, capture: o.capture, of: x.name }; }); })).filter(function (x) { return x.capture; });
     var down = caps.filter(function (x) { return !(x.capture.state === 'running' && x.capture.lastCaptureAt); });
     var slow = slots.reduce(function (n, x) { return n + ((x.draw && x.draw.slowCount) || 0); }, 0);
     if (t.state === 'vif-template') return ['', 'Runs a VIF template, so no overlay is drawn.'];
     if (t.state !== 'running') return ['bad', U.esc(r.name) + ' is not transcoded, so no overlay is drawn.'];
     if (missing.length) return ['bad', U.esc(missing.join(', ')) + (missing.length > 1 ? ' do' : ' does') + ' not exist in ' + U.esc(U.app) + ', so ' + (missing.length > 1 ? 'they are' : 'it is') + ' not drawn.'];
     if (!slots.length) return ['', 'The template names no overlay.'];
-    // pages capture for the first slot's overlay (the module reports its layers)
-    if (down.length) return ['bad', U.esc(named[0]) + ': ' + down.map(function (x) { return U.esc(x.id); }).join(', ') + ' not capturing, so viewers see the last picture.'];
+    if (down.length) return ['bad', down.map(function (x) { return U.esc((x.of ? x.of + ' ' : '') + x.id); }).join(', ') + ' not capturing, so viewers see the last picture.'];
     if (slow) return ['warn', all + (named.length > 1 ? ' are' : ' is') + ' drawn, but ' + slow + (slow === 1 ? ' burn-in update was' : ' burn-in updates were') + ' slow since ' + U.esc(r.name) + ' started.'];
     if (o && !o.carries) return ['', U.esc(o.name) + ' carries no overlay. ' + all + (named.length > 1 ? ' are' : ' is') + ' on the outputs that do.'];
     var mine = o && (o.overlays || []).length ? U.esc(o.overlays.join(', ')) : all;

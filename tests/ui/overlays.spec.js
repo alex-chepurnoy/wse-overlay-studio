@@ -78,3 +78,28 @@ test('the editor says On air for an overlay in a stream\'s second slot', async (
   await page.locator('#ovs-pv').selectOption('cam1');
   await expect(page.locator('[data-caption]')).toContainText('On air on cam1');
 });
+
+test('the editor\'s background is a stream showing the overlay, in any slot', async ({ page, studio, wse }) => {
+  twoOverlays(wse);
+  // cam2, which shows nothing, comes first in the list; cam1 shows LowerThird in slot 2
+  wse.streams.reverse();
+  await studio.open();
+  await page.evaluate(() => { try { window.localStorage.clear(); } catch (e) { /* none */ } });
+  await leftTab(page, 'overlays').click();
+  await page.locator('[data-list]').getByText('LowerThird', { exact: true }).first().click();
+  await expect(page.locator('#ovs-pv')).toHaveValue('cam1');
+});
+
+test('a stream\'s capture problem names the overlay and the page, in any slot', async ({ page, studio, wse }) => {
+  twoOverlays(wse);
+  const real = wse.streamStatus.bind(wse);
+  wse.streamStatus = (s) => {
+    const st = real(s);
+    (st.overlays || []).forEach((x) => (x.objects || []).forEach((o) => { if (x.name === 'LowerThird' && o.capture) o.capture = { state: 'error', lastError: 'refused' }; }));
+    return st;
+  };
+  await studio.open();
+  await leftTab(page, 'streams').click();
+  await page.locator('[data-list]').getByText('cam1', { exact: true }).click();
+  await expect(page.locator('[data-screen=stream]')).toContainText('LowerThird name not capturing, so viewers see the last picture.');
+});

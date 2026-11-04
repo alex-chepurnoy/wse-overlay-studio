@@ -25,8 +25,8 @@ import com.wowza.wms.plugin.overlaystudio.templates.TemplateValidator;
 import com.wowza.wms.rest.WMSConfig;
 
 /**
- * POST {"how": "copy", "name": "transrate-overlay", "overlay": "...", "encodes": [...]} copies a template with
- * dynamic overlays on and the overlay set; {"how": "inplace", ...} changes a customer's own template itself, after a
+ * POST {"how": "copy", "name": "transrate-overlay", "overlays": [{"name": "...", "encodes": [...]}]} copies a
+ * template with dynamic overlays on and that one overlay set; {"how": "inplace", ...} changes a customer's own template itself, after a
  * backup, and records the edit in the install manifest so uninstall puts the original back.
  */
 @WMSConfig(restLocation = "/v1/{server}/plugin/overlaystudio/vhosts/{vhostName}/templates/{templateName}/use", restVerbs = "POST", xmlFilename = "")
@@ -40,30 +40,15 @@ public class TemplateUseConfig extends VHostResourceBase
 	{
 		Path dir = vhostDir(path.get("vhostName")).resolve("transcoder").resolve("templates");
 		String t = TemplateFiles.safeName(path.get("templateName"));
-		// {"overlays": [...]} with one entry, or {"overlay", "encodes"}: either way one overlay, added in the next free slot
-		String overlay = str(body, "overlay");
-		List<String> encodes = new ArrayList<>();
-		if(body.containsKey("overlays"))
+		// {"overlays": [...]} with one entry, added in the next free slot
+		TemplateFiles.refuseSingle(body);
+		List<TemplateValidator.Slot> given = body.containsKey("overlays") ? TemplateFiles.slotsFrom(body.get("overlays")) : List.of();
+		if(given.size() != 1)
 		{
-			List<TemplateValidator.Slot> given = TemplateFiles.slotsFrom(body.get("overlays"));
-			if(given.size() != 1)
-			{
-				throw new TemplateFiles.Refused(400, "Name one overlay to add; a template gets the others one at a time.", null, "overlays");
-			}
-			overlay = given.get(0).name();
-			encodes.addAll(given.get(0).encodes());
+			throw new TemplateFiles.Refused(400, "Name one overlay to add; a template gets the others one at a time.", null, "overlays");
 		}
-		else if(body.get("encodes") instanceof List)
-		{
-			for(Object o: (List<Object>)body.get("encodes"))
-			{
-				encodes.add(String.valueOf(o));
-			}
-		}
-		if(overlay == null || overlay.isBlank())
-		{
-			throw new TemplateFiles.Refused(400, "Pick the overlay the template carries.");
-		}
+		String overlay = given.get(0).name();
+		List<String> encodes = new ArrayList<>(given.get(0).encodes());
 		Map<String, Object> m;
 		if("inplace".equals(str(body, "how")))
 		{

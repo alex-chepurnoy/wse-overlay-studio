@@ -82,7 +82,7 @@ class FakeWse {
     Object.keys(starters).forEach((n) => { this.templates[n] = Object.assign({}, starters[n]); });
     // a master built from the CPU starter that carries the scoreboard, as the page's template editor makes one
     this.templates['scoreboard-cpu'] = Object.assign({}, starters['overlaystudio-cpu'], {
-      overlay: 'Scoreboard', overlays: [{ name: 'Scoreboard', encodes: [], slot: 1 }],
+      overlays: [{ name: 'Scoreboard', encodes: [], slot: 1 }],
       description: 'Managed by Overlay Studio: CPU decode and encode, 720p and 360p, with overlays.'
     });
     this.apps = [
@@ -275,19 +275,14 @@ class FakeWse {
         overlays: [], overlay: (this.templates[tpl] || {}).overlay || null, dryRun: true, publishing: this.streams.filter((x) => x.publishing).map((x) => x.name) };
     }
     // template writes (TemplatesBuildConfig, TemplateSpecConfig, TemplateOverlayConfig): recorded, and the overlays
-    // they name read back as the validator would, slot 1 from the outputs marked overlay
+    // they name read back as the validator would. The single overlay and encodes are refused (TemplateFiles.refuseSingle)
     if (method === 'POST' && (m = /^\/vhosts\/_defaultVHost_\/templates(?:\/([^/]+)\/(spec|overlay))?$/.exec(r))) {
       this.templateWrites.push({ path: r, body });
+      if ('overlay' in body || 'encodes' in body) return { status: 400, json: { success: false, message: 'overlay is not accepted; send overlays' } };
       const name = m[1] ? decodeURIComponent(m[1]) : body.name;
-      let slots;
-      if (m[2] === 'overlay') slots = (body.overlays || []).map((x, i) => ({ name: x.name, encodes: x.encodes || [], slot: x.slot || i + 1 }));
-      else {
-        const vids = (body.outputs || []).filter((o) => o.kind === 'video' && o.enabled), on = vids.filter((o) => o.overlay).map((o) => o.name);
-        slots = (body.overlay ? [{ name: body.overlay, encodes: on.length === vids.length ? [] : on, slot: 1 }] : []).concat(body.overlays || []);
-        if (!m[1]) this.templates[name] = Object.assign({}, this.templates['overlaystudio-cpu'], { managed: true, description: 'Managed by Overlay Studio: built here.' });
-      }
-      Object.assign(this.templates[name], { overlays: slots, overlay: slots.length && slots[0].slot === 1 ? slots[0].name : null,
-        overlayEncodes: slots.length && slots[0].slot === 1 ? slots[0].encodes : [] });
+      const slots = (body.overlays || []).map((x, i) => ({ name: x.name, encodes: x.encodes || [], slot: x.slot || i + 1 }));
+      if (!m[1]) this.templates[name] = Object.assign({}, this.templates['overlaystudio-cpu'], { managed: true, description: 'Managed by Overlay Studio: built here.' });
+      Object.assign(this.templates[name], { overlays: slots });
       this.revision++;
       return { success: true, template: name + '.xml', live: [] };
     }
@@ -355,7 +350,7 @@ class FakeWse {
     const streams = this.streams.map((s) => {
       const row = Object.assign({}, s, { viewers: s.publishing ? (s.name === 'cam1' ? 3 : 0) : 0 });
       const t = s.template && this.templates[s.template.replace(/\.xml$/, '')];
-      if (t) Object.assign(row, { vif: t.vif, overlays: t.overlays || [], overlay: t.overlay, usable: t.usable, description: t.description });
+      if (t) Object.assign(row, { vif: t.vif, overlays: t.overlays || [], usable: t.usable, description: t.description });
       return row;
     });
     const overlays = Object.keys(this.overlays).sort().map((n) => ({
@@ -371,7 +366,7 @@ class FakeWse {
     if (!s || !s.publishing) return { stream: s ? s.name : null, configured: false, state: 'stopped' };
     const tpl = s.template && this.templates[s.template.replace(/\.xml$/, '')];
     // the shape of OverlayStudioModule.streamStatus
-    if (!tpl) return { stream: s.name, configured: false, overlayIndex: null, transcoder: { state: 'not-started', decoderWidth: null, decoderHeight: null, encodes: [] }, template: null, overlayFrom: { source: null, name: null, missing: false }, draw: null };
+    if (!tpl) return { stream: s.name, configured: false, overlayIndex: null, transcoder: { state: 'not-started', decoderWidth: null, decoderHeight: null, encodes: [] }, template: null, overlays: [] };
     const pass = (e) => e.codec === 'PassThru';
     const slotsOn = (e) => (tpl.overlays || []).filter((x) => !(x.encodes || []).length || x.encodes.includes(e.name)).map((x) => x.slot);
     return {
@@ -379,11 +374,10 @@ class FakeWse {
       transcoder: { state: 'running', decoderWidth: 1920, decoderHeight: 1080,
         encodes: (tpl.encodes || []).map((e) => ({ name: e.name, outputStream: e.streamName.replace('${SourceStreamName}', s.name), width: 1280, height: 720, passThrough: pass(e), overlay: !pass(e) && slotsOn(e).length > 0, slots: pass(e) ? [] : slotsOn(e) })) },
       template: { loaded: s.template, own: s.template === s.name + '.xml', list: '${SourceStreamName}.xml,transrate.xml', outputsChanged: false },
-      overlayFrom: { source: tpl.overlay ? 'template' : 'stream', name: tpl.overlay || null, missing: !!tpl.overlay && !this.overlays[tpl.overlay] },
       // every slot in use, as OverlayStudioModule.streamStatus reports them (plan 3.9)
       overlays: (tpl.overlays || []).map((x) => ({ slot: x.slot, index: 15 + x.slot, name: x.name, source: 'template', encodes: x.encodes, configured: !!this.overlays[x.name],
-        missing: !this.overlays[x.name], draw: this.overlays[x.name] ? { slowCount: 0 } : null, imageProblems: [] })),
-      draw: []
+        missing: !this.overlays[x.name], draw: this.overlays[x.name] ? { slowCount: 0 } : null, imageProblems: [],
+        objects: ((this.overlays[x.name] || {}).objects || []).map((o) => Object.assign({ id: o.id, type: o.type }, o.type === 'webPage' ? { capture: { state: 'running', lastCaptureAt: 1767225600000 } } : {})) }))
     };
   }
 
