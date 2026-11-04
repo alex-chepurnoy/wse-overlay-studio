@@ -1,7 +1,9 @@
 # Overlay Studio for Wowza Streaming Engine
 
+<!-- 1x-compat:begin -->
 Wowza Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Uninstall URL Overlay first
 ([Before you install](#before-you-install)); overlays, templates and settings made with 1.x are not carried over.
+<!-- 1x-compat:end -->
 
 Overlay Studio draws overlays into the transcoded outputs of a Wowza Streaming Engine (WSE) live stream. An overlay
 holds up to 64 layers: live web pages (a scoreboard, a lower third), text, dates, clocks and countdowns, shapes and

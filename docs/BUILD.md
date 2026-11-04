@@ -82,8 +82,8 @@ npx playwright test
 python -I labels_test.py <wse source root>
 ```
 
-`npx playwright test` runs the smoke flows in headless Chromium against a fake bridge (`fake-wse.js`), so no WSE or
-Manager is needed. `labels_test.py` reads WSE's own REST classes from a WSE source checkout. After changing a starter
+`npx playwright test` runs every spec in headless Chromium against a fake bridge (`fake-wse.js`), so no WSE or
+Manager is needed; the bundled fonts are served from `module/src/main/resources/fonts/`. `labels_test.py` reads WSE's own REST classes from a WSE source checkout. After changing a starter
 template or the template validator, regenerate the fake's templates with
 `OVS_WRITE_UI_FIXTURES=1 ./gradlew :module:test --tests '*UiFakeContractTest'`.
 
@@ -103,14 +103,14 @@ template or the template validator, regenerate the fake's templates with
 
 | Folder | Holds |
 |---|---|
-| `module/` | The WSE module: server listener, application module, REST resources, template builder, starter templates |
+| `module/` | The WSE module: server listener, application module, REST resources, layer drawing and the redraw scheduler, template builder, starter templates, and the bundled fonts with their licenses |
 | `bridge/` | The Manager bridge: one Spring controller, compiled against the Manager's Spring 6 and Jakarta Servlet 6 |
 | `capture/` | The capture service: Chrome over DevTools, shared between pages, the egress proxy, the socket server |
 | `shared/` | Source compiled into more than one jar: the capture protocol, egress rules, browser pool, byte-preserving config edits |
 | `installer/` | The installer jar and the Windows setup window; install, uninstall, verify and Chrome update |
 | `ui/` | The plugin page served by WSE Manager: HTML, CSS, JavaScript, and its own copy of hls.js |
 | `packaging/` | `build_dist.py`, the Windows and Linux wrapper scripts, `.deb` scripts, the WiX source |
-| `tests/` | Fixtures the installer tests use (copies of stock WSE configuration) |
+| `tests/` | Fixtures the installer tests use (copies of stock WSE configuration), and the page's tests in `tests/ui` |
 | `docs/` | Usage, design, this file, and the images they use |
 | `gradle/` | The Gradle wrapper |
 

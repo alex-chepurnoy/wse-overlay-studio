@@ -1,14 +1,17 @@
 # Overlay Studio design
 
-How Overlay Studio is built: its parts, how a frame travels, the REST surface, the Manager bridge, the capture service,
-the network rules for captured pages, how templates are written, and what the installer and updater do.
+How Overlay Studio is built: its parts, how a frame travels and how layers are drawn, the REST surface, the Manager
+bridge, the capture service, the network rules for captured pages, how templates are written, and what the installer
+and updater do.
 
 ## Components
 
 | Component | Runs in | Does |
 |---|---|---|
 | `OverlayStudioServer` | WSE, server listener | Registers the REST resources per `OverlayStudioServer`; reads the egress rules and the capture socket from `Server.xml` |
-| `OverlayStudioModule` | WSE, application module | Transcoder listeners, per-stream state, draws overlay frames into each transcoder session, records outputs and status |
+| `OverlayStudioModule` | WSE, application module | Transcoder listeners, per-stream state for up to four overlay slots, hands each slot's frame to each transcoder session, records outputs and status |
+| `OverlayImage`, `ObjectConfig`, `TextDraw` (module) | WSE | One overlay in one slot: its layers, the redraw scheduler, and the draws at each output scale; text, shapes, images and timing |
+| `OverlayRender` (module) | WSE | Draws a saved or unsaved overlay off any stream, for thumbnails and the page's server check |
 | `CaptureClient`, `WebPageCapture` (module side) | WSE | A handle on one capture in the service: fetches frames, keeps the last good one, reopens after a service restart |
 | Capture service | Own JVM (Java 21), own account | Chrome over DevTools (chrome-headless-shell on Linux), shared by up to `pagesPerBrowser` pages, sandbox always on, launch limits, memory cap, profiles, the egress proxy; frames by screencast or screenshots over a Unix socket |
 | `EgressGuard` | Capture service, one per capture | Local HTTP and CONNECT proxy Chrome must use; allows or blocks each connection by the resolved address |
@@ -22,20 +25,43 @@ installer and the page's "add to application" use.
 
 ## One frame
 
+1. A stream's template names up to four overlays, each in its own transcoder slot (16 to 19 by default). For each slot
+   the module keeps one `OverlayImage`: the overlay's layers, a scheduler and a drawing surface per output scale.
+2. The module draws the layers itself: text in Java2D with the bundled fonts (`TextDraw`, no kerning, so the editor's
+   canvas matches), shapes, image files from the virtual host's `content/` folder, and web pages as frames from the
+   capture service (below). Live values set over REST (`.../live`) are drawn over the saved layer without rewriting the
+   overlay file.
+3. The scheduler wakes each overlay at the earliest change any layer reports: a date or time token ticking over (each
+   second, or each minute for a pattern without seconds), a show or hide time, a fade or blink step, a web page's new
+   frame, an image file replaced (checked every 10 s). At most one redraw every 100 ms. A wake-up only marks the
+   overlay; the draw runs off the transcoder's thread, on a small shared pool, and a slow draw at one output scale never
+   holds up another.
+4. A draw publishes the buffer with its size, place and content revision as one record, so the transcoder never pairs a
+   buffer with another draw's size.
+5. On the next decoded video frame the module hands each slot's latest record to WSE: an overlay in Decode on the source
+   before scaling (every output), one on outputs on each chosen output, scaled to that output's real frame size.
+6. WSE composites natively in slot order: a higher slot on top, every Encode overlay over every Decode one, and the
+   template's own image overlays (slots 1 to 8) under the module's. Dynamic overlays turn off GPU zero-copy; WSE draws
+   no overlay on NETINT zero-copy frames.
+7. The outputs are packetized as usual; the page plays the source and an output over HLS from the streaming port.
+
+A web page layer:
+
 1. The capture service captures each page at the interval the overlay asks for (`refreshRate`, default 0.5 s), by
    screencast or by screenshots, whichever costs less for that page (**Browsers**, below), numbers each frame and keeps
    Chrome's PNG as it came.
 2. In WSE, one fetcher thread per capture asks for a frame newer than the last it has (waiting up to a second), decodes
    it, and publishes it.
-3. A draw takes the latest decoded frame without waiting. Each page is keyed (pixels within `keyTolerance` of
-   `keyColor` become transparent), cropped and scaled once per frame and size, then composed in z-order with its
-   opacity onto the overlay canvas, off the transcoder's thread.
-4. On the next decoded video frame the module hands the canvas to WSE: on the source before scaling (every output),
-   or on each chosen output scaled to that output's real frame size.
-5. WSE composites natively, scales and encodes. Dynamic overlays turn off GPU zero-copy.
-6. The outputs are packetized as usual; the page plays the source and an output over HLS from the streaming port.
+3. A draw takes the latest decoded frame without waiting. The page is keyed (pixels within `keyTolerance` of
+   `keyColor` become transparent), cropped and scaled once per frame and size, then composed in z-order with the other
+   layers.
 
 If the service is down, streams keep their last good frame and the module retries after 1 s, doubling to 30 s.
+
+**The editor and the video.** The page draws the same layers on its canvas from the same rules, and checks itself
+against the server: `.../render` draws an unsaved overlay at one frozen moment and returns where each layer lands, which
+the page compares with its canvas (the server check). Token samples come from `/format`, so the canvas shows the
+server's zone and language.
 
 ## REST surface
 
@@ -47,13 +73,19 @@ the way, a template in use), `422` template not usable.
 | Path (under base) | Verbs | Purpose |
 |---|---|---|
 | `/info` | GET | Versions, OS, CPU count, capture service and Chrome state, egress rules and recent blocks, Chrome update state, write access |
+| `/fonts` | GET | The fonts the module draws with, as the editor offers them |
+| `/fonts/check` | GET | Whether the server's fonts can draw given characters |
+| `/format` | GET | Samples of date and time tokens at given moments, in the server's zone and language, for the editor's canvas |
 | `/capture/limit` | GET, POST | Pages captured at once: what the service runs at, its ceiling, and a new number with no restart (**Settings** in the page); kept in `conf.modules/overlaystudio/capture-limit.json` and used over `maxCaptures` |
 | `/vhosts/{vh}/applications` | GET | Applications with the module, read from disk |
 | `/vhosts/{vh}/applications/{app}/state` | GET | Everything one application's page shows, with a revision; `?rev=` answers `unchanged` |
 | `/vhosts/{vh}/applications/{app}/streams` | GET | Streams, the template each loads, restart needed |
 | `/vhosts/{vh}/applications/{app}/module` | GET, POST | Whether the module is in `Application.xml`; add it, optionally restarting the application |
-| `/vhosts/{vh}/applications/{app}/overlays` | GET | Named overlays |
-| `.../overlays/{name}` | GET, POST, DELETE | One named overlay |
+| `/vhosts/{vh}/applications/{app}/overlays` | GET | Named overlays, each with its layer count, `kinds`, `imageFiles`, a content `hash` (for Copy to other applications), the templates naming it and the streams showing it |
+| `.../overlays/{name}` | GET, POST, DELETE | One named overlay; a save applies it at once to every running stream naming it in any slot, with warnings (a font the server lacks) |
+| `.../overlays/{name}/render` | POST | Draw an unsaved overlay at one frozen moment: a PNG and where each layer lands, for the server check; at most a few a second |
+| `.../overlays/{name}/thumbnail` | GET | A small PNG of a saved overlay, cached; a web page layer shows its current frame only when a capture is open |
+| `.../overlays/{name}/live`, `.../live/{layer}` | GET, POST, DELETE | Live values on its layers (text, colors, opacity, hidden), drawn over the saved overlay and kept across a restart |
 | `.../overlays/{name}/preview` | POST | Capture an unsaved page once and return keyed and raw PNGs; writes nothing |
 | `.../overlays/{name}/objects/{id}/capture` | GET, POST | Last capture of a named overlay's page; POST `{"reload": true}` reloads the page |
 | `/vhosts/{vh}/applications/{app}/templates/assign` | GET, POST | Dry run (GET) or apply (POST) a template to a stream or the application |
@@ -62,18 +94,21 @@ the way, a template in use), `422` template not usable.
 | `.../streams/{stream}/overlay/objects` | GET, POST | Its pages |
 | `.../streams/{stream}/overlay/objects/{id}` | GET, POST, PUT, DELETE | One page |
 | `.../streams/{stream}/overlay/objects/{id}/capture` | GET | Last keyed capture as base64 PNG; `?raw=true` unkeyed |
-| `.../streams/{stream}/status` | GET | Transcoder state and outputs, draw timing, each capture's state |
+| `.../streams/{stream}/status` | GET | Transcoder state and outputs (each with the slots it draws), and every slot in use: its overlay, whether it is missing, draw timing, image problems and each page's capture state |
 | `.../streams/{stream}/preview` | GET | HLS URLs for the source and each output |
 | `.../streams/{stream}/outputs/{encode}/snapshot` | GET | A JPEG of an output's last key frame, decoded by WSE's thumbnailer, with what it cost; `?since=` answers unchanged. Experimental: the page does not depend on it |
 | `.../streams/{stream}/restart` | POST | Reset a pulled stream or disconnect an RTMP or RTP publisher |
 | `/vhosts/{vh}/templates` | POST | Write a new template from the builder's spec |
 | `/vhosts/{vh}/templates/{t}/spec` | POST | Rewrite a template the module wrote |
-| `/vhosts/{vh}/templates/{t}/use` | POST | Give an existing template an overlay, as a copy or in place |
-| `/vhosts/{vh}/templates/{t}/overlay` | POST | Change which overlay a template carries and on which outputs |
+| `/vhosts/{vh}/templates/{t}/use` | POST | Give an existing template an overlay (`overlays` with one entry), as a copy or in place |
+| `/vhosts/{vh}/templates/{t}/overlay` | POST | Set the overlays a template carries, `overlays: [{name, encodes, slot}]`; an empty list takes them all off |
 | `/vhosts/{vh}/templates/{t}/copies` | GET, POST | Per-stream copies of a template; update them |
 | `/vhosts/{vh}/templates/{t}/validate` | GET | Whether a template can carry an overlay, and why not |
 | `/vhosts/{vh}/template-starters`, `.../{starter}` | GET, POST | The three starter templates; write one |
 | `/vhosts/{vh}/images` | GET, POST | Image files for image overlays; upload or delete an upload |
+
+A template's overlays travel as `overlays: [{name, encodes, slot}]` in every request and response; a request with the
+single `overlay` or `encodes` of 1.x is refused with `400`.
 
 Outside the module the page calls one WSE resource: `DELETE /v2/servers/_defaultServer_/vhosts/_defaultVHost_/transcoder/templates/{name}`.
 
@@ -216,10 +251,12 @@ still reaches the resolver, so a page can signal through the names it asks for.
 
 ## Transcoder templates
 
-Templates are ordinary WSE files in the virtual host's `transcoder/templates/`. A template carries an overlay
-through two template properties, `overlayStudio1` (the overlay's name) and `overlayStudioEncodes1` (the outputs that show it;
-empty means every output), and needs `Decode/Video/EnableDynamicOverlays` true. Encode names in `overlayStudioEncodes1` are
-matched as whole-string regular expressions against the encode name and its output stream name. Templates the module
+Templates are ordinary WSE files in the virtual host's `transcoder/templates/`. A template carries up to four overlays
+through template properties, `overlayStudio1` to `overlayStudio4` (each overlay's name) and `overlayStudioEncodes1` to
+`4` (the outputs that show it; empty means on the source, so every output), and needs
+`Decode/Video/EnableDynamicOverlays` true. Property `N` draws in slot `OverlayStudioIndex + N - 1` (16 to 19 by
+default), and a higher slot draws on top. One overlay named twice in a template is refused. Encode names are matched as
+whole-string regular expressions against the encode name and its output stream name. Templates the module
 writes carry `Managed by Overlay Studio` in their description; a file without it is never overwritten.
 
 **Builder.** `TemplateBuilder` writes a template from the page's spec: outputs (video, passthrough or audio), size and
@@ -231,8 +268,9 @@ keyframes, HDR to SDR (`Convert8bit`), audio codec with channels and sample rate
 overlays (`Decode/Video/Overlays` for every output, `Encode/Video/Overlays` per output, indexes 1 to 8), and adaptive
 groups (`StreamNameGroups`, with `WowzaAudioOnly` or `WowzaVideoOnly` renditions). Hardware sets decoder, scaler and
 encoder names together: CPU (`default`), NVIDIA (`NVCUVID_EVA`, `CUDA_EVA`, `NVENC_EVA`), Intel (`IQSV`) or NETINT.
-Default sizes and bitrates come from WSE's own `transcode.xml`; 1080p and 540p are Overlay Studio's choice. The URL
-overlay draws in slot 16 (`OverlayStudioIndex`), clear of image overlays and of the slot VIF uses.
+Default sizes and bitrates come from WSE's own `transcode.xml`; 1080p and 540p are Overlay Studio's choice. Overlay
+Studio's overlays draw in slots 16 to 19 (from `OverlayStudioIndex`), clear of image overlays and of the slot VIF uses;
+an `OverlayStudioIndex` whose slots would reach either is refused with a log line and a `/status` message.
 
 **Validator.** A template is usable when it parses, has `EnableDynamicOverlays` true, and has at least one enabled
 output whose video codec is not `PassThru` or `Disable`. Warnings: an enabled `PassThru` output, an implementation name
@@ -250,8 +288,8 @@ fallback, after the dry run shows what changes. `Application.xml` is written thr
 the class behind the Manager's Transcoder page. If `LiveStreamTranscoder` is empty it becomes `transcoder`; another
 value without `transcoder` is refused. The order endpoint takes at most 12 entries and backs up `Application.xml`.
 
-**Live changes.** Every template write makes running streams that loaded that file pick up the overlay it now names
-and its output list at once, through the dynamic overlays the module registered on every output at start. Output
+**Live changes.** Every template write makes running streams that loaded that file pick up the overlays it now names
+and their output lists at once (a slot taken out is cleared on the source and every encode), through the dynamic overlays the module registered on every output at start. Output
 changes (other outputs, sizes, bitrates, or another file chosen by the list) are detected by a fingerprint of the
 loaded file and reported as `restartNeeded`, because WSE builds a stream's transcoder only when the stream starts.
 
@@ -361,7 +399,7 @@ Unit tests run with JUnit 5 per subproject (`./gradlew :<subproject>:test`):
 
 | Subproject | Covers |
 |---|---|
-| `module` | Encode matching, crop and scaled draws, keying, the draw double buffer, live template change detection, stream file loading, path and name checks, write access refusals, template builder, validator and file operations, image library, named overlays, template order, the capture client; a coexistence test that no class, REST path or property collides with VIF's overlay plugin |
+| `module` | Golden images for every layer kind and option at full and half scale; text layout, tokens, durations and the redraw scheduler on a fake clock; timing, fades and blink; the four slots and their stacking; live values; the draft render and thumbnails; encode matching, crop and scaled draws, keying, the draw double buffer, live template change detection, stream file loading, path and name checks, write access refusals, template builder (the overlays list only), validator and file operations, image library, named overlays and their kinds, image files and hash, template order, the capture client; a coexistence test that no class, REST path or property collides with VIF's overlay plugin |
 | `capture` | Egress rules (every special range and its boundaries, allow and block lists, ports, Chrome service hosts) and the proxy over real sockets; browser pool sharing and grace; memory and session limits; Chrome arguments that keep the proxy and sandbox; the socket protocol and the service over a real socket, with a stand-in page in place of Chrome; refusal to run as root or LocalSystem |
 | `bridge` | Allowed paths and methods, path tricks, the method override, body cap, credentials forwarded server side and never returned, target taken from the session |
 | `installer` | Byte-exact edits and restore, edits by others kept on uninstall, rollback after a failure at each step, idempotent re-runs, application discovery, the capture service's unit, AppArmor profile, nssm and ACL commands (through a stand-in system), a running WSE stopping the run before anything is written, Chrome download host, redirect and zip checks, the Chrome updater's rollback |
@@ -370,7 +408,7 @@ The page has its own tests in `tests/ui`, outside Gradle:
 
 | Test | Covers |
 |---|---|
-| `smoke.spec.js` (Playwright) | The page in Chromium as the Manager shows it, with the bridge faked by `fake-wse.js`: opening on On air, no bridge, capture service stopped, an overlay saved with the session token and a renewed token, Discard, the first click on Save or Discard straight from a field, a template and a stream opening, read-only, Settings, Help, an application without the module, a phone-width window. Every flow fails on a script error, a request the fake does not know, or a request to anywhere else |
+| Playwright specs | The page in Chromium as the Manager shows it, with the bridge faked by `fake-wse.js`. `smoke`: opening, no bridge, capture service stopped, saving with the session token, Discard, read-only, Settings, Help, an application without the module, a phone-width window. `canvas`, `edit`, `place`, `panels`, `format`, `presets`, `problems`, `render`: the overlay editor (drawing every kind, editing, placing, the inspector tabs, dates and times, presets and text styles, problem marks and Fit to this stream, the server check). `templates`: up to four overlays, the picker, Copy to other applications, the image delete check, in-place templates. `overlays`: every screen naming every overlay. `workflow`: the ways into a stream's template and adding layers. Every flow fails on a script error, a request the fake does not know, or a request to anywhere else |
 | `labels_test.py` | Each field in `ovs-fields.js` against the module's REST classes and WSE's own template REST classes |
 
 The fake serves templates and overlays that `UiFakeContractTest` in `module` checks against the validator and the
