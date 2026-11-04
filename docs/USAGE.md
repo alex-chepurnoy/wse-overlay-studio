@@ -13,8 +13,8 @@ that template, and the outputs that template builds carry them.
 
 Changes need a WSE administrator (a REST user in the `admin` group). Anyone else sees the page read only.
 
-The screenshots use a test feed from *Big Buck Bunny* (c) Blender Foundation, www.bigbuckbunny.org, licensed under
-CC BY 3.0, with a public clock page as the overlay.
+The screenshots are taken from the page running against the test suite's stand-in for WSE, so no video plays in
+them and the overlay editor shows a blank frame where a publishing stream would be.
 
 ## The page
 
