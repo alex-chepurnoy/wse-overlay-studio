@@ -25,7 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.OverlayConfig;
 
-/** D1, D13 and D14 from docs/12-v2-plan.md: when an overlay redraws, per output, and at which scale. */
+/** D1, D13 and D14: when an overlay redraws, per output, and at which scale. */
 class SchedulerTest
 {
 	static final ObjectMapper JSON = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

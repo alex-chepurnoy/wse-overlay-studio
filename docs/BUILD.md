@@ -34,7 +34,7 @@ deleted and rebuilt on every run:
 | `Wowza-Overlay-Studio-<version>.exe` | Windows setup program: the installer with its own Java 21 runtime, Start menu entries **Wowza Overlay Studio** and **Uninstall Overlay Studio**, and the console launcher `overlaystudio-cli.exe`. No spaces in the name, so GitHub keeps it as it is |
 | `wse-overlay-studio-<version>-windows.zip` | Installer jar, `install.cmd`, `uninstall.cmd`, `update-chrome.cmd`, `find-java.cmd`, docs |
 | `wse-overlay-studio-<version>-linux.tar.gz` | Installer jar, `install.sh`, `uninstall.sh`, `update-chrome.sh`, `find-java.sh`, docs |
-| `wse-overlay-studio_<version>_all.deb` | Installs to `/opt/wse-overlay-studio/`; `preinst` refuses while 1.x is on the machine, `postinst` runs `install.sh --yes`, `prerm` runs `uninstall.sh --yes` on removal |
+| `wse-overlay-studio_<version>_all.deb` | Installs to `/opt/wse-overlay-studio/`; `postinst` runs `install.sh --yes`, `prerm` runs `uninstall.sh --yes` on removal |
 | `README.md`, `THIRD-PARTY-NOTICES.md` | Copies of the repository files |
 | `SHA256SUMS` | SHA-256 of the four packages above, the files a release carries |
 
@@ -57,15 +57,9 @@ build fails if one is missing.
 ./gradlew :capture:test
 ./gradlew :bridge:test
 ./gradlew :installer:test
-./gradlew renameCheck           # no 1.x name left in the shipped tree
+./gradlew renameCheck           # no retired name left in the shipped tree (gradle/rename-check.gradle)
 ./gradlew build                 # all of the above, plus the jars
 ```
-
-<!-- 1x-compat:begin -->
-`renameCheck` fails on any 1.x name (`url-overlay`, `urloverlay`, `uo-`, `UO_` and the like) in the files git lists
-under the shipped folders and docs, except in the 1.x check's own files and between marker comments
-(`1x-compat:begin`, `1x-compat:end`). It is skipped outside a git checkout. Source: `gradle/rename-check.gradle`.
-<!-- 1x-compat:end -->
 
 On Windows use `gradlew.bat`. `build_dist.py` runs all four unless `--skip-tests` is given. What the tests cover, and
 what they do not, is in [DESIGN.md](DESIGN.md#testing).
@@ -93,8 +87,6 @@ template or the template validator, regenerate the fake's templates with
 
 ### Troubleshooting
 
-- **`./gradlew: Permission denied`** on a checkout made before 1.15.1: `chmod +x gradlew`. The repository marks it
-  executable since then.
 - **`Unable to establish loopback connection`** from Gradle or the tests on Windows (the installer itself avoids it by
   using Windows' own temp folder, `Main.socketDir`). Java 21 makes its internal
   pipe a Unix socket in the temp folder, and some machines' security software blocks those under the user's

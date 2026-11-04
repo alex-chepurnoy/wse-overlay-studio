@@ -26,7 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wowza.wms.plugin.overlaystudio.rest.ObjectConfig;
 import com.wowza.wms.plugin.overlaystudio.rest.OverlayConfig;
 
-/** D11 and D12 from docs/12-v2-plan.md: shared caches across draw threads, and edits while a draw runs. */
+/** D11 and D12: shared caches across draw threads, and edits while a draw runs. */
 class ThreadSafetyTest
 {
 	static final ObjectMapper JSON = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

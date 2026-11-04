@@ -20,7 +20,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wowza.wms.rest.ConfigBase;
 
-/** Defects D5 to D8 from docs/12-v2-plan.md, section 1, each as it shows on the object REST and draw paths. */
+/** Defects D5 to D8, each as it shows on the object REST and draw paths. */
 class ObjectDefectsTest
 {
 	static final ObjectMapper JSON = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

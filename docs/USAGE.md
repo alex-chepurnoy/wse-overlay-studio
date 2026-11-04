@@ -3,11 +3,6 @@
 Open WSE Manager, choose **Overlay Studio** in the top bar, and pick an application in the header. The page keeps itself
 current: a change made in another browser, through REST or by editing a file shows within a few seconds.
 
-<!-- 1x-compat:begin -->
-Wowza Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Uninstall URL Overlay first;
-overlays, templates and settings made with 1.x are not carried over.
-<!-- 1x-compat:end -->
-
 An overlay reaches viewers only through a transcoder template: a template names up to four overlays, a stream runs
 that template, and the outputs that template builds carry them.
 
@@ -252,7 +247,7 @@ Written by the installer; restart `WowzaOverlayStudioCapture` after a change.
 | Key | Default | Meaning |
 |---|---|---|
 | `socket` | required | The Unix socket the service listens on; must match `OverlayStudioCaptureSocket` |
-| `chrome` | set by the installer | The Chrome the service runs: chrome-headless-shell on Linux, Chrome for Testing on Windows. A `chromedriver` line from an earlier version is ignored |
+| `chrome` | set by the installer | The Chrome the service runs: chrome-headless-shell on Linux, Chrome for Testing on Windows |
 | `workDir` | required | Chrome profiles and work files |
 | `maxCaptures` | sized from the server | Pages open at once when the service starts; one more is refused. A new install sets it from the server's cores and memory, and `--pages <n\|auto>` sets it on any install. **Settings** in the page changes it while the service runs |
 | `pagesPerBrowser` | `4` | Pages one Chrome holds. Fewer means fewer pages lost when one Chrome exits, more means less memory |
@@ -266,11 +261,11 @@ larger of `maxCaptures` and the number of pages the server is sized for; run the
 ### Pages at once, from the server's size
 
 A new install, and `--pages auto`, set `maxCaptures` from the server: a quarter of its cores at about 16% of a core per
-page (a page at the Fastest speed, 0.1 s, in the first 1.15.0 measurement), and a quarter of its memory at 128 MB per page, whichever is smaller, from 2 to 32. WSE's own transcoding is
+page (a page at the Fastest speed, 0.1 s, as measured below), and a quarter of its memory at 128 MB per page, whichever is smaller, from 2 to 32. WSE's own transcoding is
 given the rest. Examples: 2 cores, 3 pages; 4 cores, 6; 8 cores and 16 GB, 12; 16 cores and 64 GB, 25. A reinstall
 without `--pages` keeps the number set.
 
-What a page costs depends on how often it changes and its size far more than on the capture rate. Measured with 1.15.0
+What a page costs depends on how often it changes and its size far more than on the capture rate. Measured
 on an 8-core server, 1920 x 1080 pages, 12 at once:
 
 | Pages | CPU, all 12 | Per page | Memory per page |
@@ -315,4 +310,4 @@ and all contain `OverlayStudio`. The capture service logs to `/var/log/wse-overl
 
 Installer exit codes: 0 done, 1 bad arguments, 2 WSE not found or ambiguous (use `--home`), 3 preflight failed,
 4 WSE older than 4.11.1, 5 failed and rolled back, 6 failed and rollback incomplete (the report lists what to restore
-from the backups), 7 failed before anything was changed, 9 an earlier, incompatible version is installed (README, Before you install).
+from the backups), 7 failed before anything was changed.
