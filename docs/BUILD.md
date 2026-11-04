@@ -95,7 +95,8 @@ template or the template validator, regenerate the fake's templates with
 
 - **`./gradlew: Permission denied`** on a checkout made before 1.15.1: `chmod +x gradlew`. The repository marks it
   executable since then.
-- **`Unable to establish loopback connection`** from Gradle or the tests on Windows. Java 21 makes its internal
+- **`Unable to establish loopback connection`** from Gradle or the tests on Windows (the installer itself avoids it by
+  using Windows' own temp folder, `Main.socketDir`). Java 21 makes its internal
   pipe a Unix socket in the temp folder, and some machines' security software blocks those under the user's
   `AppData\Local\Temp`. Point Java at another folder for the run, for example in Git Bash
   `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/Temp ./gradlew build`, or in PowerShell

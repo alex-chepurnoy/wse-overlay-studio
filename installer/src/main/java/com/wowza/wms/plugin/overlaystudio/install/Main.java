@@ -162,8 +162,39 @@ public final class Main
 		throw new IllegalArgumentException("--pages takes auto or a whole number from 1 to " + CaptureSetup.MAX_PAGES + ", not " + v);
 	}
 
+	/**
+	 * Where Java makes the Unix socket behind its internal pipes on Windows (the HTTP client's selector, for the Chrome
+	 * download), when nothing set it: Windows' own temp folder. By default it is the user's temp folder, where some
+	 * security software refuses the socket, and the install then failed with "Unable to establish loopback connection"
+	 * (exit 7, found on a test laptop before 2.0.0). Null to leave Java's default: not Windows, already set, or no
+	 * file can be made there. Tried with a file, since Files.isWritable says no to it for a user who can create files.
+	 */
+	static String socketDir(String os, String set, Path windowsTemp)
+	{
+		if(set != null || os == null || !os.toLowerCase(java.util.Locale.ROOT).startsWith("windows") || windowsTemp == null)
+		{
+			return null;
+		}
+		try
+		{
+			Files.delete(Files.createTempFile(windowsTemp, "overlaystudio-", ".tmp"));
+			return windowsTemp.toString();
+		}
+		catch(IOException | RuntimeException e)
+		{
+			return null;
+		}
+	}
+
 	public static void main(String[] args)
 	{
+		// before anything opens a socket: Java reads it once
+		String root = System.getenv("SystemRoot");
+		String dir = socketDir(System.getProperty("os.name"), System.getProperty("jdk.net.unixdomain.tmpdir"), root == null ? null : Paths.get(root, "Temp"));
+		if(dir != null)
+		{
+			System.setProperty("jdk.net.unixdomain.tmpdir", dir);
+		}
 		if(Arrays.asList(args).contains("--gui") && !java.awt.GraphicsEnvironment.isHeadless())
 		{
 			SetupWindow.main(args);

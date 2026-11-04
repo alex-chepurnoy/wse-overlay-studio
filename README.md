@@ -81,6 +81,14 @@ uninstall 1.x first, with WSE stopped, the way it was installed:
 
 If the refusal names a folder that 1.x's uninstall could not delete (`C:\ProgramData\WowzaURLOverlay`,
 `C:\Program Files\Wowza URL Overlay Service`, `/opt/wse-url-overlay` or `/etc/wse-url-overlay`), delete it by hand.
+
+1.x's uninstall can also leave entries in WSE's configuration, and the refusal then names the file. Back it up, delete
+the entries, and install again:
+
+- `conf/Server.xml`: the `<ServerListener>` whose `<BaseClass>` is `com.wowza.wms.plugin.urloverlay.UrlOverlayServer`,
+  and each `<Property>` whose `<Name>` starts with `UrlOverlay` (`UrlOverlayServer`, `UrlOverlayAllowPrivateNetworks`,
+  `UrlOverlayBlockChromeServices`, `UrlOverlayCaptureSocket` and any others).
+- `conf/<application>/Application.xml`: the `<Module>` named `UrlOverlayModule`.
 Overlays, templates and settings made with 1.x are not carried over: what 1.x leaves (`conf.modules/urloverlay`,
 `content/urloverlay`, templates with `urlOverlay` properties) is ignored, and those templates draw no overlay until they
 are rebuilt in Overlay Studio.
