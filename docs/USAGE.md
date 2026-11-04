@@ -3,8 +3,11 @@
 Open WSE Manager, choose **Overlay Studio** in the top bar, and pick an application in the header. The page keeps itself
 current: a change made in another browser, through REST or by editing a file shows within a few seconds.
 
-An overlay reaches viewers only through a transcoder template: the overlay is named in a template, a stream runs that
-template, and the outputs that template builds carry the overlay.
+Wowza Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Uninstall URL Overlay first;
+overlays, templates and settings made with 1.x are not carried over.
+
+An overlay reaches viewers only through a transcoder template: a template names up to four overlays, a stream runs
+that template, and the outputs that template builds carry them.
 
 Changes need a WSE administrator (a REST user in the `admin` group). Anyone else sees the page read only.
 
@@ -29,8 +32,8 @@ while the page is open.
 
 ![On air](images/usage-1-on-air.png)
 
-The application's publishing streams: each one's overlay and the outputs its template is configured to build, and
-viewers on this server. The stream name, the overlay and the outputs each open their own screen. The list column
+The application's publishing streams: the overlays each one's template names, the outputs it is configured to build
+(each saying how many overlays it carries), and viewers on this server. The stream name, the overlay and the outputs each open their own screen. The list column
 filters the streams: all on air, needing attention (a restart pending, or a template naming an overlay that does not
 exist), healthy, and not publishing.
 
@@ -40,8 +43,8 @@ exist), healthy, and not publishing.
 
 **Create a new overlay** on On air puts a web page on a stream in four steps:
 
-1. **Overlay**: paste the page's address. The server captures it once before anything is saved, and places it inside
-   title safe on a publishing stream. Or pick an overlay you already made.
+1. **Overlay**: paste a web page's address. The server captures it once before anything is saved, and places it
+   inside title safe on a publishing stream. Or pick an overlay you already made.
 2. **Template**: pick the renditions that carry the overlay, as a ladder.
 3. **Stream**: pick a publishing stream, or name one that has not started yet. A dry run says what is written and
    whether a restart is needed before you apply it.
@@ -51,28 +54,57 @@ exist), healthy, and not publishing.
 
 ![Overlay editor](images/usage-3-overlay.png)
 
-An overlay is a named set of pages placed on the video, saved per application in
-`conf.modules/overlaystudio/<application>/<overlay>.json`.
+An overlay is a named set of up to 64 layers drawn on the video, saved per application in
+`conf.modules/overlaystudio/<application>/<overlay>.json`. Overlays are made and changed here; a template only picks
+them.
 
-- **Pages** are listed under the open overlay in the list column; the top one draws on top, and rows can be dragged
-  to reorder. **Add page** is last. Each page's menu moves it up or down, reloads it (**Reload page**), or removes it.
-- **The overlay's menu** adds a page, duplicates the overlay, or deletes it. An overlay a template carries cannot be
+- **Layers** are listed under the open overlay in the list column; the top one draws on top, and rows can be dragged
+  to reorder. **Add layer** under the list (and in the empty panel) adds one, each kind with its icon: **Web page**,
+  **Text**, **Date and time**, the shapes (**Rectangle**, **Rounded rectangle**, **Square**, **Ellipse**, **Circle**,
+  **Line**, **Arrow**, **Triangle**), **Image**, and **From a preset...**. A web page asks for its address; any other
+  kind is placed with a click on the canvas, or drawn by dragging, while a banner on the canvas says so, with Cancel.
+  A row's menu moves the layer up, down, to the front or to the back, duplicates it, reloads a web page, or removes it.
+- **The overlay's menu** adds a layer, duplicates the overlay, or deletes it. An overlay a template carries cannot be
   deleted until no template names it.
-- **The canvas** shows the pages on a publishing stream picked under **Background**. The background is only for placing
-  pages: when that stream does not show this overlay, the frame says *Background only*. Drag a page to move it, drag
-  its corners to resize it, or nudge it with the arrow keys. **Safe area** shows title safe.
-- **The inspector** has four tabs for the selected page:
+- **New overlay** starts from one web page (captured once before anything is saved), a preset, a copy of another
+  overlay, or empty.
+- **The canvas** shows the layers on a publishing stream picked under **Background**, at that stream's size. The
+  background is only for placing layers: when that stream does not show this overlay, the frame says *Background
+  only*. Drag a layer to move it, drag its handles to resize or turn it, or nudge it with the arrow keys. **Safe area**
+  shows title safe. A layer outside the frame, a missing image file or a character a font cannot draw is marked on its
+  row; an overlay made for a larger picture offers **Fit to this stream**.
+- **The server check** under the canvas: after each edit the server draws the draft at one moment and the page compares
+  where each layer lands with the canvas, and says *Matches the server's drawing.* or how a layer differs. **Show the
+  server's drawing** lays its picture over the canvas. It needs write access.
+- **The inspector** has tabs for the selected layer:
 
-| Tab | Settings |
+| Layer | Tabs |
 |---|---|
-| Page | Page URL (http or https, no `user:password`); browser width and height the page is rendered at; **Capture speed** for every page of the overlay (Standard 0.5 s, Fast 0.25 s, Fastest 0.1 s, or any value in seconds); **Advanced drawing**: snap to even pixels, compose in the background, slow compose warning |
-| Place | X, Y, width and height on the source picture; opacity |
-| Key, crop | The capture as taken and after keying side by side; click the left one to pick the key color. Tolerance (0 to 255); whether to paint the page's own background with the key color; drag across the page to show only part of it, such as just the clock |
-| Timing | Wait after load before the first capture; reload the page every N seconds (0 never) |
+| Web page | **Page** (address, browser width and height, **Capture speed** for every page of the overlay: Standard 0.5 s, Fast 0.25 s, Fastest 0.1 s, or any value in seconds), **Place**, **Key, crop** (key color picked from the capture, tolerance, painting the page's background with the key color, and showing only part of the page), **Timing** (wait after load, reload every N seconds) |
+| Text | **Text** (the text, font, size, style, color, alignment, a text style, and **Box and outline**: wrap in a box with a background, padding and corners, shrink to fit the box, line height, letter outline), **Place**, **Timing** |
+| Text with a date or time | **Format** first: what it shows (the date and time now, a countdown to a target, a count-up from a target, or the time since the stream started), a format from a list or a pattern of your own, the target and the text at zero for a countdown, time zone and language |
+| Shape | **Shape** (fill, or **No fill, the line only**; line color, width and style; arrow head on a line; gradient; corner rounding), **Effects** (shadow), **Place**, **Timing** |
+| Image | **Image** (a file from the virtual host's `content/` folder or one uploaded, up to 2 MB, at most 4096 pixels a side), **Place**, **Timing** |
 
-Edits show on the canvas within about a second, marked unsaved. Nobody watching sees them until **Save**, which says
-how many live streams it updates. **Discard** drops them; `Ctrl+Z` undoes. Saving updates every running stream showing
-the overlay at once, with no restart. Streams showing the same page share one capture.
+**Place** has X, Y, width and height on the source picture, turn, opacity, and for an image whether to keep its
+proportions. **Timing**, for every kind, shows the layer from a stream time or a date and hides it at another, fades it in
+and out, and blinks it.
+
+- **Text and fonts.** The fonts are bundled with Overlay Studio and installed into WSE, so the video draws the same
+  letters as the editor: Fira Sans (regular, bold, italic), Fira Sans Condensed (regular, bold, italic), Fira Mono
+  (regular, bold) and PT Serif (regular, bold). A font named in an overlay that the server does not have is saved with a
+  warning and drawn in Fira Sans.
+- **Dates and times** are tokens in the text: `{time:HH:mm:ss}`, `{countdown:H:mm:ss}`, `{countup:mm:ss}` and
+  `{streamtime:H:mm:ss}`; `{{` and `}}` draw a brace. The server redraws the text once a second, or once a minute when
+  the pattern shows no seconds.
+- **Presets** are ready layers: shapes; badges and bars (a live badge, blinking or not, a lower third, a title card, a
+  ticker strip); a corner bug (an image waiting for its file); and dates and times. **Text styles** (Title, Lower third
+  name, Lower third role, Caption, Ticker) set a text's font, size and colors. A preset placed in New overlay is laid out
+  for a 1920 x 1080 picture.
+
+Edits show on the canvas at once, marked unsaved. Nobody watching sees them until **Save**, which says how many live
+streams it updates. **Discard** drops them; `Ctrl+Z` undoes. Saving updates every running stream showing the overlay
+at once, with no restart. Streams showing the same page share one capture.
 
 ## Templates
 
@@ -97,23 +129,31 @@ A master is edited in three parts:
   and before scaling, so every video output shows it, in source pixels.
 - **Encode**: the outputs, with an estimate of the encoding load (it assumes a 1080p, 30 fps source), and **Overlays on
   outputs**: what is drawn after scaling on the outputs picked for it, in each output's pixels.
-- In either Overlays section, **+ Overlay** adds one of the application's overlays (or opens a new overlay when
-  there is none), and **+ Image** adds an image: a file from the virtual host's `content/` folder (up to 8 MB), or one
-  uploaded into `content/overlaystudio/` (up to 2 MB), at most 4096 pixels a side, at one of nine positions with an offset, size and
-  opacity. Up to eight images in a template, drawn under the overlay. A template carries one overlay, which can
-  hold several pages; **Move the overlay here** moves it between the input and the outputs. On outputs with every
-  output picked, it is saved on the input, which every output then shows. With one video output there is no
-  difference, so the overlay stays in Decode.
-- A new master starts from a ladder: **Original + overlay copy**, **1080p, 720p, 360p**, **720p, 360p**, **Single 720p** or
-  **Audio only**. Each output shows what scales and encodes it, and **Edit** opens Picture (size, fit, a region of the
-  source), Frame rate, Video (H.264, H.265, VP8, VP9, profile, bitrate, and for H.264 rate control and speed), Audio,
-  Captions and Expert (any encoder parameter by name). **Playback** sets adaptive groups: players open each output as
-  `<stream>_<output>` and each group as `ngrp:<stream>_<group>`.
+- In either Overlays section, **Add** offers **Overlay** and **Image (fixed)**:
+  - **Overlay** lists the application's overlays, each with a thumbnail and what it holds, and adds the one picked. An
+    overlay the template already carries cannot be picked again. A template carries up to four overlays; combine
+    several layers in one overlay for more. Each overlay card names where it draws: **To outputs** and **To Decode**
+    move it, the up arrow draws it under the one before it in the same section, and on outputs it shows the outputs
+    it is on. On outputs with every output picked, it is saved on the input, which every output then shows. With one
+    video output there is no difference, so overlays stay in Decode. **Copy** sends the overlay to other applications
+    that have Overlay Studio, marked *Has it*, *Differs* or *Missing*; replacing a different version asks first, and
+    says when it is on air there.
+  - **Image (fixed)** is an image WSE draws itself, with no timing: a file from the virtual host's `content/` folder (up
+    to 8 MB), or one uploaded into `content/overlaystudio/` (up to 2 MB), at most 4096 pixels a side, at one of nine
+    positions with an offset, size and opacity. Up to eight in a template, drawn under the overlays of the same
+    section. Anything on an output draws over everything on the input.
+- A new master starts with no overlay, from a ladder: **Original + overlay copy** (which asks for an overlay on its
+  overlay output), **1080p, 720p, 360p**, **720p, 360p**, **Single 720p** or **Audio only**. Each output shows what
+  scales and encodes it, and **Edit** opens Picture (size, fit, a region of the source), Frame rate, Video (H.264,
+  H.265, VP8, VP9, profile, bitrate, and for H.264 rate control and speed), Audio, Captions and Expert (any encoder
+  parameter by name). **Playback** sets adaptive groups: players open each output as `<stream>_<output>` and each group
+  as `ngrp:<stream>_<group>`.
 
 WSE's own templates have dynamic overlays off, so they cannot carry an overlay as they are. **Use it with an overlay**,
 under the template, offers **Make a copy with the overlay**, or, for a template of your own, **Change <name> itself**:
-changed in place after a backup, naming the applications that list it. Video Intelligence templates are not listed; a
-stream running one says so and cannot carry an overlay.
+changed in place after a backup, naming the applications that list it. A template changed in place shows its overlays
+as a list with the outputs each is on. Video Intelligence templates are not listed; a stream running one says so and
+cannot carry an overlay.
 
 ## Streams
 
@@ -135,7 +175,10 @@ output to watch it, about 10 seconds behind live, with one sentence on what its 
 address of every output and adaptive group for HLS and MPEG-DASH, when the application serves them, and RTMP, each with
 a copy button. The addresses use the host name the page was opened with.
 
-**What applies at once:** which overlay a template carries, and on which outputs. **What waits for a restart:** new
+The stream view names every overlay its template carries and, for each output, the overlays it draws. Changing the
+template says which overlays leave the stream, which arrive and which stay.
+
+**What applies at once:** which overlays a template carries, and on which outputs. **What waits for a restart:** new
 outputs, sizes or bitrates, images, the hardware, or a different template; such a stream is marked in the header. **Restart** resets a pulled
 stream, disconnects an RTMP or RTP (RTSP, WebRTC) publisher so its encoder reconnects with the new template, or restarts
 the application for a stream published inside WSE. Viewers see a short gap. Other pushed streams must be restarted at
@@ -194,7 +237,7 @@ A scoreboard served from a machine on your LAN (a private address) needs
 
 | Property | Default | Meaning |
 |---|---|---|
-| `OverlayStudioIndex` | `16` | The transcoder overlay slot Overlay Studio draws in. Image overlays use 1 to 8 |
+| `OverlayStudioIndex` | `16` | The first transcoder overlay slot Overlay Studio draws in; a template's four overlays use it and the next three (16 to 19 by default), a higher slot on top. Image overlays use 1 to 8; a value whose slots would reach them is refused |
 | `OverlayStudioDebugLogs` | `false` | Extra overlay logging |
 | `OverlayStudioMaxDebugOverlayLogs` | `100` | Cap on those lines |
 | `OverlayStudioInitTransparentOverlay` | `false` | On a stream's first frame, put a transparent overlay on every encoding output (a workaround for WSE builds that also drew output overlays on the source) |
@@ -262,11 +305,12 @@ and all contain `OverlayStudio`. The capture service logs to `/var/log/wse-overl
 | *Blocked host: <host> resolves to <address> (<rule>). Allow it with the OverlayStudioAllowHosts server property.* | The page's address is private, loopback, link-local, metadata or this server. See Settings. A block after loading (an image or script the page fetches) shows on the page row as *Blocked: <rule> <address>* |
 | *Blocked port: <port>. Pages are captured from ports ...; add others with the OverlayStudioAllowPorts server property.* | Add the port to `OverlayStudioAllowPorts` |
 | *Chrome did not start in its sandbox (...). Captures stay off until it does; the service never runs Chrome without its sandbox.* | On Ubuntu 23.10 and later the message continues *This system restricts unprivileged user namespaces ...*: the AppArmor profile `/etc/apparmor.d/wse-overlay-studio-chrome` is missing or not loaded. Run the installer again, or check `aa-status`. On Windows, check that the service runs as `NT SERVICE\WowzaOverlayStudioCapture` and can read the Chrome folder |
-| Overlay does not show on a stream | The stream view's sentence under the player says why. Usually the stream's template names no overlay, the transcoder is off, or the stream has not restarted since its outputs changed |
-| A stream runs a VIF template | The overlay is skipped on it. Apply a Overlay Studio template from the stream's menu |
+| Overlay does not show on a stream | The stream view's sentence under the player says why. Usually the stream's template names no overlay, names one this application does not have (overlays are saved per application; **Copy** on the template's overlay card sends it), the transcoder is off, or the stream has not restarted since its outputs changed |
+| A stream runs a VIF template | The overlay is skipped on it. Apply an Overlay Studio template from the stream's menu |
+| *Differs from the server's drawing* under the canvas | The server draws a layer somewhere else than the editor shows, usually text in a font the server lacks. The line names the layer and by how much; **Show the server's drawing** shows the video's version |
 | Linux: the page renders without text | Install `fontconfig` and a font package such as `fonts-liberation` |
 | The installer stops with exit 3 | It cannot write to the WSE folder (run as administrator or with `sudo`), or WSE is running: stop it first |
 
 Installer exit codes: 0 done, 1 bad arguments, 2 WSE not found or ambiguous (use `--home`), 3 preflight failed,
 4 WSE older than 4.11.1, 5 failed and rolled back, 6 failed and rollback incomplete (the report lists what to restore
-from the backups), 7 failed before anything was changed.
+from the backups), 7 failed before anything was changed, 9 URL Overlay 1.x is installed (README, Before you install).

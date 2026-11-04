@@ -1,9 +1,13 @@
 # Overlay Studio for Wowza Streaming Engine
 
-Overlay Studio burns a live web page, such as a scoreboard, a clock or a lower third, into the transcoded outputs of a
-Wowza Streaming Engine (WSE) live stream. Headless Chrome renders the page in a separate, sandboxed capture service,
-and a WSE module draws each frame into the transcoder before the outputs are encoded. A page inside WSE Manager builds
-the overlays and the transcoder templates that carry them, assigns templates to streams, and shows the result live.
+Wowza Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Uninstall URL Overlay first
+([Before you install](#before-you-install)); overlays, templates and settings made with 1.x are not carried over.
+
+Overlay Studio draws overlays into the transcoded outputs of a Wowza Streaming Engine (WSE) live stream. An overlay
+holds up to 64 layers: live web pages (a scoreboard, a lower third), text, dates, clocks and countdowns, shapes and
+images. A WSE module draws the layers into the transcoder before the outputs are encoded; headless Chrome renders web
+pages in a separate, sandboxed capture service. A page inside WSE Manager builds the overlays and the transcoder
+templates that carry them (up to four overlays each), assigns templates to streams, and shows the result live.
 
 ## How it fits together
 
@@ -171,12 +175,13 @@ with no Chrome for Testing build, pass your own: `--chrome <path>` with `--no-do
 Open WSE Manager, choose **Overlay Studio** in the top bar, pick an application, and press **Create a new overlay** on
 On air. Four steps follow:
 
-1. **Overlay.** Paste a page URL; it is captured once and placed on a live stream.
+1. **Overlay.** Paste a web page's URL; it is captured once and placed on a live stream.
 2. **Template.** Pick the renditions that carry the overlay.
 3. **Stream.** Pick a publishing stream, or name one that has not started; a dry run says what changes first.
 4. **Preview.** Watch each output with the overlay.
 
-The Overlays, Templates and Streams tabs edit each part on its own afterwards.
+The Overlays, Templates and Streams tabs edit each part on its own afterwards: the Overlays tab adds text, clocks,
+shapes and images to an overlay, and a template picks up to four overlays.
 
 Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). How it works:
 [docs/DESIGN.md](docs/DESIGN.md). Building from source: [docs/BUILD.md](docs/BUILD.md).
@@ -213,13 +218,16 @@ Full walkthrough, settings and troubleshooting: [docs/USAGE.md](docs/USAGE.md). 
   Windows has only the service's own per-browser memory restart.
 - New outputs, sizes or bitrates apply when a stream restarts. **Restart now** handles pulled streams and RTMP or RTP
   publishers; any other pushed stream must be restarted at its encoder.
-- A stream runs either a Video Intelligence (VIF) template or a Overlay Studio template, never both.
+- A stream runs either a Video Intelligence (VIF) template or an Overlay Studio template, never both.
+- A template carries at most four overlays, and an overlay at most 64 layers.
+- Text draws only in the bundled fonts (Fira Sans, Fira Sans Condensed, Fira Mono, PT Serif); italic is in the Fira Sans
+  families only. WSE draws no overlay on NETINT zero-copy frames (from source, untested).
 - A page can still signal through the DNS names it looks up, even when the connection is refused.
 - Pages at once (`maxCaptures`) are sized from the server's cores and memory on a new install, 2 to 32; an upgrade
   keeps the number set ([Upgrade](#upgrade)). Streams showing the same page share one capture.
 - The setup program is not code signed.
-- No automated test runs the module in a real WSE, the bridge in a real Manager, or the page in a browser
-  ([docs/DESIGN.md](docs/DESIGN.md#testing)).
+- No automated test runs the module in a real WSE or the bridge in a real Manager. The page's tests run it in a
+  browser against a fake WSE ([docs/DESIGN.md](docs/DESIGN.md#testing)).
 
 ## License
 
