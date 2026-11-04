@@ -1,10 +1,5 @@
 # Overlay Studio for Wowza Streaming Engine
 
-<!-- 1x-compat:begin -->
-Wowza Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Uninstall URL Overlay first
-([Before you install](#before-you-install)); overlays, templates and settings made with 1.x are not carried over.
-<!-- 1x-compat:end -->
-
 Overlay Studio draws overlays into the transcoded outputs of a Wowza Streaming Engine (WSE) live stream. An overlay
 holds up to 64 layers: live web pages (a scoreboard, a lower third), text, dates, clocks and countdowns, shapes and
 images. A WSE module draws the layers into the transcoder before the outputs are encoded; headless Chrome renders web
@@ -58,41 +53,13 @@ Source: `ui/` (the page), `bridge/`, `module/`, `capture/`, and `installer/` wit
 | Java | Nothing to install on Windows with the setup program, which carries its own Java 21 runtime. The zip, tarball and `.deb` run the installer and the capture service on WSE's bundled Java, which must be 21 or later for the capture service (WSE 4.12.0 ships 21.0.3; earlier versions not checked). Their scripts look for one (`WMSJAVA_HOME`, then WSE's own, then the `PATH`) and stop with exit 8 when none is 21 or later |
 | OS | Windows x64 (Windows 10 or Server 2019 and later, for Unix domain sockets) or Linux x86_64. Chrome for Testing is downloaded for `win64` and `linux64` only; the `.deb` installs on any architecture, but elsewhere Chrome must be given with `--chrome` ([Chrome](#chrome)) |
 | Rights | Administrator (Windows) or root (Linux): the install creates a service and its account |
-| Network at install | `googlechromelabs.github.io` and `storage.googleapis.com` for Chrome (chrome-headless-shell on Linux, Chrome for Testing on Windows), unless you pass your own Chrome with `--chrome`. A reinstall reuses a complete Chrome already on disk; on Linux, an install from before 1.15.0 downloads the headless shell once |
+| Network at install | `googlechromelabs.github.io` and `storage.googleapis.com` for Chrome (chrome-headless-shell on Linux, Chrome for Testing on Windows), unless you pass your own Chrome with `--chrome`. A reinstall reuses a complete Chrome already on disk |
 | Linux fonts | `fontconfig` and one font package (`fonts-dejavu-core` on Debian and Ubuntu). Without them no text can be drawn, on video or in captured pages. The `.deb` depends on both; the zip and tarball installers say how to install them when they are missing |
 
 ## Install
 
 Stop WSE first: the installer refuses to change a running WSE. Every file it edits is backed up first as
 `<file>.overlaystudio-<time>.bak`, and the run is logged to `logs/overlaystudio-install-<time>.log` in the WSE folder.
-
-### Before you install
-
-<!-- 1x-compat:begin -->
-Overlay Studio 2.0 replaces URL Overlay 1.x and is not compatible with it. Every installer refuses to run while 1.x is
-on the machine (the zip and tarball with exit code 9, the setup program and the `.deb` with the same message), so
-uninstall 1.x first, with WSE stopped, the way it was installed:
-
-- Setup program: Windows Settings, Apps, **Wowza URL Overlay**, Uninstall.
-- Zip: 1.x's `uninstall.cmd` (add `--purge` to delete its saved overlays too).
-- `.deb`: `sudo /opt/wse-url-overlay/uninstall.sh --purge` to delete its saved overlays, then
-  `sudo apt remove wse-url-overlay`.
-- Tarball: 1.x's `sudo ./uninstall.sh` (add `--purge` to delete its saved overlays too).
-
-If the refusal names a folder that 1.x's uninstall could not delete (`C:\ProgramData\WowzaURLOverlay`,
-`C:\Program Files\Wowza URL Overlay Service`, `/opt/wse-url-overlay` or `/etc/wse-url-overlay`), delete it by hand.
-
-1.x's uninstall can also leave entries in WSE's configuration, and the refusal then names the file. Back it up, delete
-the entries, and install again:
-
-- `conf/Server.xml`: the `<ServerListener>` whose `<BaseClass>` is `com.wowza.wms.plugin.urloverlay.UrlOverlayServer`,
-  and each `<Property>` whose `<Name>` starts with `UrlOverlay` (`UrlOverlayServer`, `UrlOverlayAllowPrivateNetworks`,
-  `UrlOverlayBlockChromeServices`, `UrlOverlayCaptureSocket` and any others).
-- `conf/<application>/Application.xml`: the `<Module>` named `UrlOverlayModule`.
-Overlays, templates and settings made with 1.x are not carried over: what 1.x leaves (`conf.modules/urloverlay`,
-`content/urloverlay`, templates with `urlOverlay` properties) is ignored, and those templates draw no overlay until they
-are rebuilt in Overlay Studio.
-<!-- 1x-compat:end -->
 
 **Windows, setup program**
 1. Stop the Wowza Streaming Engine service, then run `Wowza-Overlay-Studio-<version>.exe`; it asks for administrator rights.
@@ -133,11 +100,10 @@ Install the new version the same way as the first time, with WSE stopped, then s
 taking it out first. What carries over, and what to know:
 
 - **Pages captured at once.** A new install sizes it from the server's cores and memory. An upgrade keeps the number
-  already set, which is 4 for anything installed before 1.15.0. To size it from the server, run the zip's, the
+  already set. To size it from the server, run the zip's, the
   tarball's or the `.deb`'s installer with `--pages auto` (for example `sudo /opt/wse-overlay-studio/install.sh
   --pages auto`), or raise it in **Settings** in the page. The setup program has no `--pages`; use Settings. A number
   set in Settings is used over the installer's until `--pages` is given, and the installer says which is in force.
-- **Linux Chrome.** An install from before 1.15.0 downloads chrome-headless-shell once.
 - Saved overlays and templates stay.
 
 ### Uninstall
@@ -178,7 +144,6 @@ with no Chrome for Testing build, pass your own: `--chrome <path>` with `--no-do
 | 6 | Failed and the rollback is incomplete; the log names what is left |
 | 7 | Failed before anything was changed |
 | 8 | The zip's or tarball's script found no Java 21 or later, or no installer jar beside it |
-| 9 | An earlier, incompatible version is installed ([Before you install](#before-you-install)) |
 
 ## Quick start
 

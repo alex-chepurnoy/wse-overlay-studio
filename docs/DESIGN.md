@@ -90,7 +90,7 @@ the way, a template in use), `422` template not usable.
 | `.../overlays/{name}/objects/{id}/capture` | GET, POST | Last capture of a named overlay's page; POST `{"reload": true}` reloads the page |
 | `/vhosts/{vh}/applications/{app}/templates/assign` | GET, POST | Dry run (GET) or apply (POST) a template to a stream or the application |
 | `/vhosts/{vh}/applications/{app}/templates/order` | GET, POST | The application's `Transcoder/Templates` list |
-| `.../instances/{inst}/streams/{stream}/overlay` | GET, POST, PUT, DELETE | Per-stream overlay (older setups; the page uses templates) |
+| `.../instances/{inst}/streams/{stream}/overlay` | GET, POST, PUT, DELETE | Per-stream overlay, for scripts (the page uses templates) |
 | `.../streams/{stream}/overlay/objects` | GET, POST | Its pages |
 | `.../streams/{stream}/overlay/objects/{id}` | GET, POST, PUT, DELETE | One page |
 | `.../streams/{stream}/overlay/objects/{id}/capture` | GET | Last keyed capture as base64 PNG; `?raw=true` unkeyed |
@@ -108,7 +108,7 @@ the way, a template in use), `422` template not usable.
 | `/vhosts/{vh}/images` | GET, POST | Image files for image overlays; upload or delete an upload |
 
 A template's overlays travel as `overlays: [{name, encodes, slot}]` in every request and response; a request with the
-single `overlay` or `encodes` of 1.x is refused with `400`.
+single `overlay` or `encodes` is refused with `400`.
 
 Outside the module the page calls one WSE resource: `DELETE /v2/servers/_defaultServer_/vhosts/_defaultVHost_/transcoder/templates/{name}`.
 
@@ -302,17 +302,7 @@ setup program, `install.cmd` and `install.sh` all run this jar.
 
 1. Find WSE (`--home`, `-Dcom.wowza.wms.ConfigHome`, `WMSAPP_HOME`, then the single install found) and read its version
    from `lib/wms-server.jar`; refuse below 4.11.1.
-2. Preflight: no 1.x on the machine (exit 9, below), write access to every folder the plan touches, WSE not running,
-   on Windows no jar in use.
-   <!-- 1x-compat:begin -->
-   The 1.x check (`LegacyInstallCheck`) looks for `lib/wse-plugin-url-overlay-*.jar`, the `UrlOverlayServer` listener
-   in `Server.xml`, a `UrlOverlayModule` entry in any `Application.xml`, 1.x's Manager plugin folder in either place and
-   its bridge under `manager/temp`, the `WowzaURLOverlayCapture` service and its folders, and on Linux the
-   `wse-url-overlay` package in dpkg's installed state. 1.x's install manifest is not a signal: its uninstall can leave
-   it behind. The `.deb` checks the same before unpacking (`Conflicts: wse-url-overlay`, then `preinst`, in every WSE
-   home it can find), and the setup program in a launch condition (1.x's upgrade code, the service key, its
-   ProgramData and program folders). Only installing runs it, so 2.0 can always be removed.
-   <!-- 1x-compat:end -->
+2. Preflight: write access to every folder the plan touches, WSE not running, on Windows no jar in use.
 3. Discover applications from disk (every virtual host's `conf/<app>/Application.xml`). Live applications are
    selectable; VOD applications are not; applications that have the module are not offered again. An unattended run
    (`--yes`) changes no application unless `--appName` or `--all-live-apps` names them.
@@ -371,12 +361,9 @@ for its Chrome processes to end, before it changes any Chrome folder.
 4-hour random delay on Windows. Each run:
 
 1. Stops if `capture.properties` says `autoUpdate=false` or names a Chrome outside the Chrome folder.
-2. Stops if the Chrome in use is the newest Stable, except on Linux when it is still Chrome for Testing from before
-   1.15.0: that install moves to the headless shell of the same version, once; a move that failed is tried again only
-   for the next Stable version.
+2. Stops if the Chrome in use is the newest Stable.
 3. Downloads the new Chrome next to the current one; a failure here changes nothing.
-4. Sets ownership, rewrites only the `chrome` line of `capture.properties` (dropping a `chromedriver` line left by an
-   earlier version), restarts the service,
+4. Sets ownership, rewrites only the `chrome` line of `capture.properties`, restarts the service,
    and waits up to 90 s for it to report, through its socket, Chrome at the new path.
 5. On failure puts `capture.properties` back byte for byte and restarts on the previous Chrome.
 6. On success keeps the new and the previous version and deletes older ones.
